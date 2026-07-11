@@ -205,20 +205,27 @@ pub fn time_stretch(src: &Path, dst: &Path, factor: f64) -> Result<(), String> {
 }
 
 /// Свести дубль-вокал поверх инструментала (музыка приглушена music_gain=0.45). Порт media.mix.
+/// Нормализуем оба входа к stereo (aformat) ДО amix: наш mono-дубляж (hound) несёт нестандартный
+/// channel layout "1 channels (FL)", который AAC-энкодер отвергает (-22). aformat=cl=stereo снимает это.
 pub fn mix(voice: &Path, music: &Path, out: &Path) -> Result<(), String> {
-    let fc = "[1:a]volume=0.45[m];[0:a][m]amix=inputs=2:duration=longest:dropout_transition=0";
+    let fc = "[0:a]aformat=channel_layouts=stereo[v];\
+              [1:a]aformat=channel_layouts=stereo,volume=0.45[m];\
+              [v][m]amix=inputs=2:duration=longest:dropout_transition=0[a]";
     run_ff(&[
         OsStr::new("-y"), OsStr::new("-i"), voice.as_os_str(), OsStr::new("-i"), music.as_os_str(),
-        OsStr::new("-filter_complex"), OsStr::new(fc),
+        OsStr::new("-filter_complex"), OsStr::new(fc), OsStr::new("-map"), OsStr::new("[a]"),
         OsStr::new("-c:a"), OsStr::new("aac"), OsStr::new("-b:a"), OsStr::new("192k"), out.as_os_str(),
     ])
 }
 
 /// Смуксить видео (copy) + аудио (aac). БЕЗ -shortest (выход по длиннейшему потоку). Порт media.mux.
+/// -af aformat=cl=stereo нормализует channel layout (mono-дубляж от hound = "1 channels (FL)", AAC
+/// его отвергает -22); на уже-стерео входе это no-op.
 pub fn mux(video: &Path, audio: &Path, out: &Path) -> Result<(), String> {
     run_ff(&[
         OsStr::new("-y"), OsStr::new("-i"), video.as_os_str(), OsStr::new("-i"), audio.as_os_str(),
         OsStr::new("-map"), OsStr::new("0:v:0"), OsStr::new("-map"), OsStr::new("1:a:0"),
+        OsStr::new("-af"), OsStr::new("aformat=channel_layouts=stereo"),
         OsStr::new("-c:v"), OsStr::new("copy"), OsStr::new("-c:a"), OsStr::new("aac"), out.as_os_str(),
     ])
 }
