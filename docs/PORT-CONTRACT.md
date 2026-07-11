@@ -30,14 +30,15 @@ data: {"type":"error", "error": "..."}
 |-------|------|--------|-----------|
 | GET | `/engine/capabilities` | **done** | JSON: device, tts_quant, asr_model, models{asr,llm,vision,tts}, ffmpeg(bool), languages[], voice_modes[] |
 | PATCH | `/engine/opts` | todo | Свап слота модели (asr/tts/llm/vision) в рантайме; валидирует непустые строки; вернуть {models:{...}} |
+| — | | | **Раунд 2:** analyze покрывает ТОЛЬКО транскрипт-стадию (ASR+диаризация); перевод/vision/OCR/captions — раунд 3 |
 | GET | `/fonts` | todo | Каталог шрифтов субтитров (family→описание) из captions.FONTS |
 | GET | `/voices` | todo | Голоса voice-пака для VoicePanel (пусто если пак не установлен) |
 | GET | `/presets` | todo | Пресеты вида субтитров (TEMPLATES) + список REVEALS |
 | POST | `/projects` | **done** | multipart-загрузка видео → `workspace/<pid>/source.<ext>` + `source.txt`; вернуть {project_id, filename} |
-| POST | `/projects/{pid}/analyze` | todo | Query: tgt_lang, mode, src_lang, subs, rewrite. Джоба: analyze()→project.json. Вернуть {job_id}. **Ядро ASR+диаризация+перевод** |
+| POST | `/projects/{pid}/analyze` | **part** | Query: tgt_lang, mode, src_lang, subs, rewrite. Джоба: analyze()→project.json. Вернуть {job_id}. **Раунд 2 покрывает ASR+диаризацию (транскрипт-стадию): ffmpeg extract 16k mono → Sortformer turns (при <2 спикеров штатная single-speaker ветка) → TDT int8 словные таймстемпы → Project (src_text, words в extra, speaker, mode/subs-дефолты; tgt_text пуст). Перевод/vision/OCR/captions/render — раунд 3.** SSE-фазы: probe/extract_audio/diarize/asr |
 | POST | `/projects/{pid}/remix` | todo | Query: instruction. Джоба: Gemma переписывает весь транскрипт, помечает все dirty. Вернуть {job_id} |
 | GET | `/projects/{pid}` | **done** | Тело Project (JSON) или 404/409 |
-| PATCH | `/projects/{pid}` | todo | Синхронная правка Project (без GPU), `{op: ...}` — см. таблицу PATCH-ops ниже |
+| PATCH | `/projects/{pid}` | **part** | Синхронная правка Project (без GPU), `{op: ...}` — см. таблицу ниже. **Раунд 2: segment/subpos/mode (атомарно tmp+rename); прочие op → 400.** |
 | PUT | `/projects/{pid}` | todo | Полная замена Project (undo/redo снапшот) |
 | GET | `/projects/{pid}/waveform?n=600` | todo | Даунсэмпл-пики аудио (ffmpeg → s16le 8kHz), кэш в waveform.json. CPU, вне GPU-воркера |
 | GET | `/projects/{pid}/preview?t=&rev=` | todo | Джоба preview_frame → PNG. Синхронное ожидание (timeout 300с), abandoned при таймауте |
@@ -55,7 +56,7 @@ data: {"type":"error", "error": "..."}
 | op | поля | действие |
 |----|------|---------|
 | `caption` | seg_id, + поля стиля | edit_caption; TypeError/ValueError/KeyError → 400 |
-| `segment` | id, tgt_text?, src_text?, voice? | edit_segment; неизвестный id → 404 |
+| `segment` ✅ | id, tgt_text?, src_text?, voice?, hidden?, keep_original? | edit_segment; неизвестный id → 404 (раунд 2) |
 | `del_segment` | id | удалить строку (уходит и субтитр, и дубляж) |
 | `hide_segment` | id, hidden? | тоггл/установка скрытия строки |
 | `del_segments` | ids[] | массовое удаление |
@@ -72,8 +73,8 @@ data: {"type":"error", "error": "..."}
 | `title` | idx, + поля | edit_title |
 | `title_del` | idx | del_title |
 | `title_add` | text,x,y,w,h,t0?,t1?,italic?,font?,color? | add_title |
-| `subpos` | sub_y | перетащить полосу субтитров; ставит sub_y_locked=true |
-| `mode` | value | set_mode (dub/nodub/transcribe); ValueError → 400 |
+| `subpos` ✅ | sub_y | перетащить полосу субтитров; ставит sub_y_locked=true (раунд 2) |
+| `mode` ✅ | value | set_mode (subtitles/dub/funny → nodub/dub/dub+rewrite); неизвестное → 400 (раунд 2) |
 | `translate` | lang?, mode? | translate (Gemma; плейн/творческий) |
 | `rewrite` | instruction | rewrite (творческий ремикс сегментов) |
 | `recast` | voice_mode?, voice_name? | recast (сменить режим/голос дубляжа) |
