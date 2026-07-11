@@ -432,6 +432,107 @@ pub fn looks_like_caption(txt: &str) -> bool {
     letters as f32 / nonspace as f32 >= 0.6
 }
 
+/// Одна сгруппированная надпись: текст + bbox + время + медианная высота строки. Порт выхода
+/// compose.group_captions ({text, bbox:(x,y,w,h), start, end, lh}).
+#[derive(Clone, Debug)]
+pub struct CaptionGroup {
+    pub text: String,
+    pub bbox: (f32, f32, f32, f32), // x, y, w, h
+    pub start: f32,
+    pub end: f32,
+    pub lh: f32, // медианная высота строки
+}
+
+/// Сгруппировать боксы вшитого текста, образующие ОДНУ надпись — то же экранное время (time-IoU),
+/// вертикально СТЫКУЮЩИЕСЯ и горизонтально ПЕРЕКРЫВАЮЩИЕСЯ (строки одной надписи в одной колонке) —
+/// чтобы перевести как одну фразу и перерисовать одним блоком. Дословный порт compose.group_captions.
+/// items: (text, x, y, w, h, t0, t1). gap_factor/min_tiou — как в питоне (дефолты 1.0/0.5).
+pub fn group_captions(
+    items: &[(String, f32, f32, f32, f32, f32, f32)],
+    gap_factor: f32,
+    min_tiou: f32,
+) -> Vec<CaptionGroup> {
+    fn tiou(a0: f32, a1: f32, b0: f32, b1: f32) -> f32 {
+        let inter = (a1.min(b1) - a0.max(b0)).max(0.0);
+        let union = a1.max(b1) - a0.min(b0);
+        if union > 0.0 {
+            inter / union
+        } else {
+            0.0
+        }
+    }
+    // рабочая группа: строки (y,txt), высоты, границы бокса, время.
+    struct G {
+        lines: Vec<(f32, String)>,
+        hs: Vec<f32>,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        t0: f32,
+        t1: f32,
+    }
+    // сортируем по (t0, y) как в питоне.
+    let mut sorted: Vec<&(String, f32, f32, f32, f32, f32, f32)> = items.iter().collect();
+    sorted.sort_by(|a, b| {
+        a.5.partial_cmp(&b.5)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    let mut groups: Vec<G> = Vec::new();
+    for (txt, x, y, w, h, t0, t1) in sorted.into_iter().cloned() {
+        let mut hit: Option<usize> = None;
+        for (i, g) in groups.iter().enumerate() {
+            let t_iou = tiou(t0, t1, g.t0, g.t1);
+            let v_adjacent = y <= g.y1 + gap_factor * h && y + h >= g.y0 - gap_factor * h;
+            let h_overlap = x < g.x1 && x + w > g.x0;
+            if t_iou >= min_tiou && v_adjacent && h_overlap {
+                hit = Some(i);
+                break;
+            }
+        }
+        match hit {
+            None => groups.push(G {
+                lines: vec![(y, txt)],
+                hs: vec![h],
+                x0: x,
+                y0: y,
+                x1: x + w,
+                y1: y + h,
+                t0,
+                t1,
+            }),
+            Some(i) => {
+                let g = &mut groups[i];
+                g.lines.push((y, txt));
+                g.hs.push(h);
+                g.x0 = g.x0.min(x);
+                g.y0 = g.y0.min(y);
+                g.x1 = g.x1.max(x + w);
+                g.y1 = g.y1.max(y + h);
+                g.t0 = g.t0.min(t0);
+                g.t1 = g.t1.max(t1);
+            }
+        }
+    }
+    groups
+        .into_iter()
+        .map(|mut g| {
+            g.lines.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            let text = g.lines.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join(" ");
+            g.hs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let lh = g.hs[g.hs.len() / 2];
+            CaptionGroup {
+                text,
+                bbox: (g.x0, g.y0, g.x1 - g.x0, g.y1 - g.y0),
+                start: g.t0,
+                end: g.t1,
+                lh,
+            }
+        })
+        .collect()
+}
+
 /// Бокс субтитр-полосы под блюр: (x,y,w,h,t0,t1).
 pub type CaptionBox = (i64, i64, i64, i64, f32, f32);
 
@@ -559,4 +660,52 @@ pub fn analyze_layout(
         .cloned()
         .collect();
     (localize, caption_boxes, Some(sub_y))
+}
+
+#[cfg(test)]
+mod group_tests {
+    use super::*;
+
+    fn it(t: &str, x: f32, y: f32, w: f32, h: f32, t0: f32, t1: f32) -> (String, f32, f32, f32, f32, f32, f32) {
+        (t.to_string(), x, y, w, h, t0, t1)
+    }
+
+    // Эталон — прогон питоновского compose.group_captions на тех же данных (см. отчёт):
+    //  min_tiou=0.5: 'Autistic Boyfriend' (100,50,140,62) 0..2 lh30; 'LEUCO' (600,55,80,28); 'flash' 3..4.
+    #[test]
+    fn group_captions_tiou_05() {
+        let items = vec![
+            it("Autistic", 100.0, 50.0, 120.0, 30.0, 0.0, 2.0),
+            it("Boyfriend", 100.0, 82.0, 140.0, 30.0, 0.0, 2.0),
+            it("LEUCO", 600.0, 55.0, 80.0, 28.0, 0.0, 2.0),
+            it("flash", 110.0, 50.0, 100.0, 30.0, 3.0, 4.0),
+        ];
+        let g = group_captions(&items, 1.0, 0.5);
+        assert_eq!(g.len(), 3);
+        assert_eq!(g[0].text, "Autistic Boyfriend");
+        assert_eq!(g[0].bbox, (100.0, 50.0, 140.0, 62.0));
+        assert_eq!(g[0].lh, 30.0);
+        assert_eq!(g[1].text, "LEUCO");
+        assert_eq!(g[1].bbox, (600.0, 55.0, 80.0, 28.0));
+        assert_eq!(g[2].text, "flash");
+    }
+
+    // min_tiou=0 (титр-группировка по позиции): 'flash' сливается в тот же вертикальный столбец, но LEUCO
+    // (сбоку, нет h_overlap) остаётся отдельным. Эталон питона: 'Autistic flash Boyfriend' (100,50,140,62).
+    #[test]
+    fn group_captions_tiou_0_position() {
+        let items = vec![
+            it("Autistic", 100.0, 50.0, 120.0, 30.0, 0.0, 2.0),
+            it("Boyfriend", 100.0, 82.0, 140.0, 30.0, 0.0, 2.0),
+            it("LEUCO", 600.0, 55.0, 80.0, 28.0, 0.0, 2.0),
+            it("flash", 110.0, 50.0, 100.0, 30.0, 3.0, 4.0),
+        ];
+        let g = group_captions(&items, 1.0, 0.0);
+        assert_eq!(g.len(), 2);
+        assert_eq!(g[0].text, "Autistic flash Boyfriend");
+        assert_eq!(g[0].bbox, (100.0, 50.0, 140.0, 62.0));
+        assert_eq!(g[0].start, 0.0);
+        assert_eq!(g[0].end, 4.0);
+        assert_eq!(g[1].text, "LEUCO");
+    }
 }
