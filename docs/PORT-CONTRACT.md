@@ -132,3 +132,32 @@ app.py контейнит отдачу web-root: `f.is_file() and (f == WEB_R or
 - Остаётся (раунд 5): preview?t&rev, waveform, undo/Cmd-K, remix, прочие PATCH (caption/blur*/title*/
   preset), портативная упаковка. (Rec-качество OCR доведено: edge-normal unclip + словарь-из-меты —
   вшитые сабы читаются чисто, score>0.8; поглощена ветка r4-ocr.)
+
+## Раунд 5 — caption-композит pipeline.run:388-643 (parity-аудит закрыт)
+
+Аудит (задача #26) нашёл, что гигантская «склейка» pipeline.run (388-643) в порту отсутствовала:
+титры не рисовались (bbox=None -> emit_title скипал), утекал EN-оригинал, не было cover-plate,
+band-коалесценции, per-segment y-райдинга, auto-nodub гейта. Порт живёт в
+`crates/dub-server/src/compose.rs` (модуль `compose`), вызывается из `ocr.rs::stage` ПОСЛЕ
+translate-стадии (raw_ctx готов) и OCR-детекции (localize/caption_boxes готовы) — точное место в питоне.
+
+| # | Расхождение | Статус | Где | Доказательство |
+|---|-------------|--------|-----|----------------|
+| 1 | bbox титров (y_frac -> OCR-box match) | **done** | compose.rs `run` (порт 497-543) | юнит `ctitle_bbox_matches_localize_boxes` + `_fallback_center_band` сверены со standalone-прогоном питон-блока; E2E: `verify_project.json` титр получил bbox (был None) |
+| 2 | блюр титров/таглайнов/leftover/group/cap + band-коалесценция | **done** | compose.rs `run` (443-452, 579-589) + ocr.rs `stage` (416-442: `blur::straddles_center`+`blur::band_blur`, раньше мёртвый код) | E2E: title-регион в blur_boxes (EN не ликует) |
+| 3 | sub_px (OCR-размер оригинала) | **done** | compose.rs (608-610) -> `raw_plan[sub_px]`; render build берёт | юнит `sub_px_median_on_band` (медиана высот на sub_y±7%vh) |
+| 4 | sub_style mirror-from-captions + cap_px | **done** | compose.rs `ensure_sub_style_mirror` (466-484) | код-путь; fires при пустом sub_style + captions из raw_ctx |
+| 5 | white-card fallback (scene_color/scene_flat) | **done** | compose.rs `white_card_fallback` (490-493) | юнит `white_card_activates_cover` |
+| 6 | auto->nodub гейт (_has_speech) | **done** | analyze.rs `has_speech` + флип mode (66-78,124-129) | uniq>=0.35, coverage>=0.10; пустой транскрипт -> nodub |
+| 7 | next.start слот по индексу i+1 полного списка | **done** | render.rs `build_dub` (питон 207) | seg-файл и слот по fi полного списка, не по времени |
+| — | per-segment y-райдинг субтитр-полосы | **done (сосед 61b6158)** | render.rs `seg_y` по band-боксам blur_boxes | эквивалентный источник (band = покадровые caption_boxes) |
+
+Таглайн-MT (перевод оставшихся надписей титр-карты, питон 564-578) в композите опционален и
+**fail-safe**: поднимает text-only Gemma лишь при непустых tcard_rows; без весов/сбоя — регион всё
+равно блюрится (EN не ликует), просто без перевода. Не-ctx ветка (ctx off / нет ctx_extra) не
+портирует plain-MT title-fallback (loc_blocks там пусты) — на живом стеке ctx_translate ВКЛ, это
+мёртвый путь; блюр (таглайны+group_blur+band) оригинал накрывает. Осознанное упрощение.
+
+E2E-харнесс: `verify_captions_e2e` (пример `cargo run -p dub-server --example verify_captions`) —
+берёт кэш project.json (transcript+raw_ctx), заново гонит OCR+compose+build_ass+burn БЕЗ ASR/Gemma/TTS,
+даёт captioned.mp4 для покадрового сравнения порт-vs-эталон (docs/example_dub.mp4).
