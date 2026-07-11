@@ -60,7 +60,8 @@ pub fn recognize(
     // resize к высоте 48, ширина пропорционально.
     let rw = ((img.width() as f32 * REC_H as f32 / img.height() as f32).round() as u32)
         .clamp(8, REC_MAX_W);
-    let resized = image::imageops::resize(img, rw, REC_H, image::imageops::FilterType::Triangle);
+    // Lanczos3 ближе к PIL bicubic, что использует питон-референс rec -> меньше шума в CTC.
+    let resized = image::imageops::resize(img, rw, REC_H, image::imageops::FilterType::Lanczos3);
 
     // NCHW, нормализация [-1,1]: (x/255 - 0.5)/0.5.
     let mut input = Array4::<f32>::zeros((1, 3, REC_H as usize, rw as usize));

@@ -12,6 +12,7 @@ dub-llm = { path = "../dub-llm" }
 dub-translate = { path = "../dub-translate" }
 dub-sep = { path = "../dub-sep" }
 dub-captions = { path = "../dub-captions" }
+dub-ocr = { path = "../dub-ocr" }
 audiocpp = { path = "../audiocpp" }
 hound = "3"
 axum = { version = "0.8", features = ["multipart"] }

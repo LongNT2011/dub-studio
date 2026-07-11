@@ -12,7 +12,9 @@
 | `dub-asr` | ASR со словными таймстемпами (Parakeet-TDT-v3) + диаризация (Sortformer v2) через parakeet-rs/ONNX. | `dubengine/asr.py`, `diarize.py` |
 | `dub-core` | Типы `Project` (serde, extra="allow" round-trip) и `EngineOpts`. | `dubengine/project.py`, `opts.py` |
 | `dub-sep` | Вокал/инструментал сепарация — Mel-Band Roformer voc_fv6-Q8_0 через BSRoformer.cpp (сайдкар). Инструментал = mix−vocals. | `dubengine/separate.py` (движок ЗАМЕНЁН приказом юзера) |
-| `dub-server` | axum: SPA-раздача (защита от traversal), `/engine/capabilities`, `/projects` (upload), SSE-джобы. | `backend/app.py` |
+| `dub-captions` | ASS-субтитры (build: титры+дублированные субтитры, 26 пресетов) + ffmpeg/libass burn (gblur+оверлей, NVENC). Метрики — ab_glyph. | `dubengine/captions.py` |
+| `dub-ocr` | Экранный OCR (PP-OCR DBNet det + CRNN rec ONNX) → блюр-боксы вшитого текста + субтитр-полоса. Свой ort-пайплайн (rc.12 load-dynamic). | `dubengine/text_detect.py`, `compose.py` |
+| `dub-server` | axum: SPA, capabilities, upload, SSE-джобы, **analyze** (ASR+диар+перевод+vision+OCR), **render** (сепарация→TTS→сведение→burn→mux), output/original/dub, PATCH. | `backend/app.py`, `dubengine/pipeline.py` |
 
 ## Сборка
 

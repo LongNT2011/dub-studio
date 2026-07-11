@@ -43,9 +43,10 @@ data: {"type":"error", "error": "..."}
 | GET | `/projects/{pid}/waveform?n=600` | todo | Даунсэмпл-пики аудио (ffmpeg → s16le 8kHz), кэш в waveform.json. CPU, вне GPU-воркера |
 | GET | `/projects/{pid}/preview?t=&rev=` | todo | Джоба preview_frame → PNG. Синхронное ожидание (timeout 300с), abandoned при таймауте |
 | GET | `/projects/{pid}/original?t=` | todo | Джоба source_frame → PNG. Синхронное ожидание (timeout 60с) |
-| POST | `/projects/{pid}/render` | todo | Джоба render()→output.mp4; regen_dub если есть dirty-сегменты; после — сбросить dirty. Вернуть {job_id} |
-| GET | `/projects/{pid}/output?dl=` | todo | Отдать output.mp4 (Range для <video>); dl=1 → Content-Disposition attachment |
-| GET | `/projects/{pid}/dub` | todo | Проигрываемое видео: output.mp4, иначе analyzed.mp4 (Range) |
+| POST | `/projects/{pid}/render` | **done** | Джоба render()→output.mp4 (раунд 4): probe→extract 44.1k→separate(dub-sep)→Higgs clone TTS per-seg (кэш seg_XXX.wav, ре-TTS ТОЛЬКО dirty)→fit_to_slot(atempo)→timeline→mix(instr+dub)→build ASS(dub-captions)→burn(blur из blur_boxes)→mux. regen_dub если dirty; после — сбросить dirty. SSE-фазы probe/extract_audio/separate/tts/mix/build/burn/mux. Вернуть {job_id} |
+| GET | `/projects/{pid}/output?dl=` | **done** | Отдать output.mp4 (Range через tower-http ServeFile → 206); dl=1 → Content-Disposition attachment |
+| GET | `/projects/{pid}/original?t=` | **done** | Исходное видео (Range). t игнорируется (клиент сикает) — как FileResponse в app.py |
+| GET | `/projects/{pid}/dub` | **done** | Проигрываемое видео: output.mp4, иначе analyzed.mp4 (Range) |
 | — (fallback) | `/{spa_path}` | **done** | SPA: реальный статик-файл (с защитой от path-traversal), иначе index.html |
 
 ## PATCH `/projects/{pid}` — операции `op` (все синхронные, без GPU) — **todo**
@@ -103,5 +104,17 @@ app.py контейнит отдачу web-root: `f.is_file() and (f == WEB_R or
   **ВРЕЗКА (раунд 4):** analyze audio-context (Gemma «слышит» вокал) сейчас получает vocals-стем
   сепарации, а не полный микс (в раунде 3 подавался `vocals16` из полного микса — теперь перед
   извлечением 16k mono микс прогоняется через dub-sep). Рендер использует instrumental как фон.
-- Будущие раунды: OCR (PP-OCR ONNX), captions/рендер (ffmpeg) — `text_detect.py`/`compose.py`,
-  `captions.py`, `pipeline.py`, `compose.py`, `assemble.py`.
+- `crates/dub-captions` — CapCut-субтитры через ffmpeg+libass (ASS). Порт `captions.py`: build() (титры
+  localized-in-place + дублированные субтитры, 26 пресетов/реверсов) + burn()/burn_frame() (gblur боксов
+  + оверлей ASS, NVENC). Метрики глифов — ab_glyph (замена PIL). Шрифты в `fonts/`.
+- `crates/dub-ocr` — экранный OCR (PP-OCR DBNet det + CRNN rec, `models/ocr/`) для блюр-боксов вшитого
+  текста. Порт `text_detect.py` (detect_regions: семплинг→det+rec→merge→IoU-трекинг) + `compose.py`
+  (analyze_layout: субтитр-полоса vs титры). Свой ort-пайплайн (rc.12 load-dynamic, как dub-asr — один
+  OrtApi). **ОТКЛОНЕНИЕ от питона (с причиной):** analyze_layout деградирует spoken-гейт к чисто
+  геометрическому сигналу, когда rec ненадёжен (наш CRNN шумит на мелких/motion-blur субтитрах, в отличие
+  от чистого PP-OCR питона) — иначе строгий spoken-match убивал реальную субтитр-полосу. Геометрия
+  (повторяющийся текст в нижней полосе) верна независимо от качества rec.
+- Рендер-ядро — `crates/dub-server/src/render.rs`: порт render-половины `pipeline.run` + `_build_dub`
+  TTS-ветки + `assemble.py` + `compose.py`(mix)/`media.mix`. OCR-стадия analyze — `ocr.rs`.
+- Остаётся (раунд 5): preview?t&rev, waveform, undo/Cmd-K, remix, прочие PATCH (caption/blur*/title*/
+  preset), портативная упаковка. Rec-качество OCR (шум на быстрых субтитрах — геометрия боксов верна).

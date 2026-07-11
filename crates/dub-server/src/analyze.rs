@@ -33,6 +33,8 @@ pub struct AnalyzePaths {
     pub llama_bin: std::path::PathBuf, // llama-server(.exe) — сайдкар перевода/vision
     pub mt_model: std::path::PathBuf, // Gemma GGUF
     pub mmproj: std::path::PathBuf,   // mmproj GGUF (vision-проектор)
+    pub models_root: std::path::PathBuf, // корень моделей (для OCR: <root>/ocr/…)
+    pub caption_fps: i32,             // частота семплинга кадров OCR
 }
 
 /// Колбэк прогресса джобы (msg + произвольные поля). stage — фаза как в питоне.
@@ -214,6 +216,11 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     //    Gemma получает всю VRAM. Fail-safe: сбой стадии оставляет tgt пустым (перевод — не блокер analyze).
     let vocals16 = paths.work_dir.join("vocals16.wav");
     crate::translate::stage(args, paths, &mut proj, &vocals16, meta.height, meta.duration, progress);
+
+    // 7) OCR-стадия (раунд 4): детекция вшитого текста -> блюр-боксы субтитр-полосы + уточнение sub_y.
+    //    Порт pipeline.run ocr_detect + compose.analyze_layout. Fail-safe: сбой OCR не валит analyze
+    //    (боксы блюра — не блокер; их можно добавить руками в редакторе).
+    crate::ocr::stage(paths, &mut proj, meta.height, progress);
 
     Ok(proj)
 }

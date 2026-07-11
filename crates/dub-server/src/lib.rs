@@ -9,6 +9,7 @@
 mod analyze;
 mod jobs;
 mod media;
+mod ocr;
 mod patch;
 mod render;
 mod spa;
@@ -54,6 +55,8 @@ pub struct AppState {
     pub higgs_model_root: PathBuf,
     /// Каталог bundled-шрифтов субтитров. Env DUB_STUDIO_FONTS_DIR, иначе <repo>/fonts.
     pub fonts_dir: PathBuf,
+    /// Корень моделей (для OCR: <root>/ocr/…). Env DUBENGINE_MODELS_ROOT, иначе <repo>/models.
+    pub models_root: PathBuf,
 }
 
 /// Корень моделей: env DUBENGINE_MODELS_ROOT, иначе <repo_root>/models.
@@ -110,6 +113,7 @@ impl AppState {
             higgs_dll,
             higgs_model_root,
             fonts_dir,
+            models_root: mroot,
         }
     }
 
@@ -298,6 +302,8 @@ async fn analyze_project(
         llama_bin: st.llama_bin.clone(),
         mt_model: st.opts.mt_model_path.clone(),
         mmproj: st.opts.mmproj_path.clone(),
+        models_root: st.models_root.clone(),
+        caption_fps: st.opts.caption_fps,
     };
 
     // Тело джобы: analyze -> project.json (атомарно). Прогресс -> SSE.

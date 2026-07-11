@@ -382,10 +382,24 @@ pub fn analyze_layout(
         }
         hit as f32 / distinct.len() as f32
     };
+    // OCR-достоверность: если НИ в одной нижней полосе spoken-match не срабатывает (наш rec шумит на
+    // мелких/motion-blur субтитрах, в отличие от чистого PP-OCR питона), spoken-гейт становится ложно
+    // строгим и убивает реальную субтитр-полосу. Тогда деградируем к ЧИСТО ГЕОМЕТРИЧЕСКОМУ сигналу
+    // (повторяющийся текст в нижней полосе) — принципиальный фолбэк, не подгонка под клип.
+    let ocr_text_reliable = !spoken.is_empty()
+        && bands
+            .iter()
+            .filter(|(&b, _)| band_cy(b) >= lower_from * frame_h as f32)
+            .any(|(_, rs)| distinct_texts(rs) >= 3 && spoken_frac(rs) >= 0.5);
     let is_sub_line = |b: i64| -> bool {
         let rs = &bands[&b];
         let nt = distinct_texts(rs);
-        nt >= 3 && nt as f32 >= 0.3 * rs.len() as f32 && spoken_frac(rs) >= 0.5
+        let geom = nt >= 3 && nt as f32 >= 0.3 * rs.len() as f32;
+        if ocr_text_reliable {
+            geom && spoken_frac(rs) >= 0.5
+        } else {
+            geom // rec ненадёжен -> геометрия: меняющийся текст в нижней полосе = субтитр-полоса
+        }
     };
 
     let lines: Vec<i64> = bands

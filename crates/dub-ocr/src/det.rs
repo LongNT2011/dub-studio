@@ -76,6 +76,8 @@ pub fn detect(model: &mut OnnxModel, img: &RgbImage) -> Result<Vec<DetBox>, Stri
     let sx = ow as f32 / mw as f32;
     let sy = oh as f32 / mh as f32;
     let min_area = (mw * mh) as f32 * 0.00003; // отсечь пиксельный шум
+    // unclip: DB-боксы тесно облегают ink; расширяем ~на 15% высоты по всем сторонам, чтобы кроп
+    // захватил полные глифы (иначе rec режет края букв -> шум). Аналог DB unclip_ratio (упрощённо).
     let mut boxes = Vec::new();
     for (_, (x0, y0, x1, y1)) in bounds {
         let bw = (x1 - x0 + 1) as f32;
@@ -83,12 +85,14 @@ pub fn detect(model: &mut OnnxModel, img: &RgbImage) -> Result<Vec<DetBox>, Stri
         if bw * bh < min_area {
             continue;
         }
-        boxes.push(DetBox {
-            x: x0 as f32 * sx,
-            y: y0 as f32 * sy,
-            w: bw * sx,
-            h: bh * sy,
-        });
+        let (fx, fy, fw, fh) = (x0 as f32 * sx, y0 as f32 * sy, bw * sx, bh * sy);
+        let ex = fh * 0.15; // разгон по горизонтали шире (буквы обрезаются по бокам сильнее)
+        let ey = fh * 0.12;
+        let nx = (fx - ex).max(0.0);
+        let ny = (fy - ey).max(0.0);
+        let nw = (fw + 2.0 * ex).min(ow as f32 - nx);
+        let nh = (fh + 2.0 * ey).min(oh as f32 - ny);
+        boxes.push(DetBox { x: nx, y: ny, w: nw, h: nh });
     }
     Ok(boxes)
 }
