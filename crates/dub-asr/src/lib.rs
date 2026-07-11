@@ -191,6 +191,98 @@ pub fn diarize(
     Ok(raw)
 }
 
+/// Окно референса спикера: [start, end] его самой длинной реплики (для клон-x-вектора).
+pub type RefWindow = (f64, f64);
+
+/// Результат turns(): (реплики, число спикеров, ref_windows: speaker -> самая длинная реплика).
+pub struct DiarTurns {
+    pub turns: Vec<Turn>,
+    pub n_speakers: usize,
+    pub ref_windows: std::collections::HashMap<i32, RefWindow>,
+}
+
+/// DIARIZE-FIRST: порт diarize.turns() — слить подряд идущие реплики одного спикера (merge_gap),
+/// и если «настоящих» спикеров (суммарно >= min_speaker_dur) меньше двух, схлопнуть в single-speaker
+/// (turns=[], n=1) — это ШТАТНАЯ graceful-деградация питона, не отсебятина. Иначе перенумеровать
+/// спикеров 0..k-1 и вернуть ref_windows (самая длинная реплика каждого).
+pub fn turns(
+    wav: impl AsRef<Path>,
+    sortformer_onnx: impl AsRef<Path>,
+    merge_gap: f64,
+    min_speaker_dur: f64,
+) -> Result<DiarTurns, AsrError> {
+    use std::collections::HashMap;
+    let single = |_| DiarTurns { turns: Vec::new(), n_speakers: 1, ref_windows: HashMap::new() };
+
+    let raw = diarize(wav, sortformer_onnx)?;
+    if raw.is_empty() {
+        return Ok(single(()));
+    }
+
+    // Слить подряд идущие реплики одного спикера с зазором <= merge_gap.
+    let mut merged: Vec<[f64; 3]> = vec![[raw[0].start, raw[0].end, raw[0].speaker as f64]];
+    for t in &raw[1..] {
+        let last = merged.last_mut().unwrap();
+        if t.speaker as f64 == last[2] && t.start - last[1] <= merge_gap {
+            last[1] = last[1].max(t.end);
+        } else {
+            merged.push([t.start, t.end, t.speaker as f64]);
+        }
+    }
+
+    // Суммарная длительность на спикера -> «настоящие» спикеры (>= min_speaker_dur).
+    let mut dur: HashMap<i32, f64> = HashMap::new();
+    for m in &merged {
+        *dur.entry(m[2] as i32).or_insert(0.0) += m[1] - m[0];
+    }
+    let real: Vec<i32> = dur.iter().filter(|(_, &d)| d >= min_speaker_dur).map(|(&s, _)| s).collect();
+    if real.len() < 2 {
+        return Ok(single(())); // реально один голос -> single-speaker путь
+    }
+    let realset: std::collections::HashSet<i32> = real.iter().copied().collect();
+
+    // Крошечную реплику не-настоящего спикера переназначить ближайшей настоящей (по середине).
+    let real_turns: Vec<[f64; 3]> = merged.iter().filter(|m| realset.contains(&(m[2] as i32))).copied().collect();
+    for m in &mut merged {
+        if !realset.contains(&(m[2] as i32)) {
+            let mid = (m[0] + m[1]) / 2.0;
+            let nearest = real_turns
+                .iter()
+                .min_by(|a, b| {
+                    let da = (mid - (a[0] + a[1]) / 2.0).abs();
+                    let db = (mid - (b[0] + b[1]) / 2.0).abs();
+                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|x| x[2])
+                .unwrap_or(m[2]);
+            m[2] = nearest;
+        }
+    }
+
+    // Самая длинная реплика каждого спикера (до перенумерации).
+    let mut longest: HashMap<i32, RefWindow> = HashMap::new();
+    for m in &merged {
+        let sp = m[2] as i32;
+        let cur = longest.get(&sp).copied().unwrap_or((0.0, 0.0));
+        if (m[1] - m[0]) > (cur.1 - cur.0) {
+            longest.insert(sp, (m[0], m[1]));
+        }
+    }
+
+    // Перенумеровать метки в 0..k-1 по возрастанию.
+    let mut labels: Vec<i32> = merged.iter().map(|m| m[2] as i32).collect();
+    labels.sort_unstable();
+    labels.dedup();
+    let remap: HashMap<i32, i32> = labels.iter().enumerate().map(|(i, &l)| (l, i as i32)).collect();
+
+    let out: Vec<Turn> = merged
+        .iter()
+        .map(|m| Turn { start: m[0], end: m[1], speaker: remap[&(m[2] as i32)] })
+        .collect();
+    let rw: HashMap<i32, RefWindow> = longest.into_iter().map(|(old, w)| (remap[&old], w)).collect();
+    Ok(DiarTurns { turns: out, n_speakers: labels.len(), ref_windows: rw })
+}
+
 // ─── загрузка/подготовка аудио ──────────────────────────────────────────────
 
 /// Прочитать WAV, свести в моно и ресемплировать в 16 кГц (parakeet-rs требует ровно 16k моно).

@@ -32,15 +32,19 @@ cargo build --workspace --examples
   (ort 2.0-rc.12 собран под 1.24.2). DLL версий 1.22/1.23 вызывают ДЕДЛОК в `commit_from_file`
   (рассинхрон OrtApi, поток блокируется наглухо, без ошибки). Официальный билд:
   github.com/microsoft/onnxruntime releases → `onnxruntime-win-x64-1.24.2.zip` → `lib/onnxruntime.dll`.
-- **Parakeet-TDT-0.6b-v3 (ONNX)** — HF `istupakov/parakeet-tdt-0.6b-v3-onnx`. Два варианта:
-  - fp32 (для CPU): `encoder-model.onnx` + `encoder-model.onnx.data` (2.4ГБ), `decoder_joint-model.onnx`, `vocab.txt`.
-  - int8 (для GPU): `encoder-model.int8.onnx`, `decoder_joint-model.int8.onnx`, `vocab.txt`.
-  parakeet-rs автоопределяет имена. **На CPU берите fp32:** int8 использует динамический квант
-  (DynamicQuantizeLinear/MatMulInteger) без быстрых CPU-ядер и работает минутами. int8 предназначен
-  под GPU-провайдер (`--features cuda`), как в Python-референсе.
+- **Parakeet-TDT-0.6b-v3 (ONNX), int8** — дефолт Higgs-Ultimate `tdt-0.6b-v3-int8` (★ recommended,
+  ~670МБ). HF `istupakov/parakeet-tdt-0.6b-v3-onnx`, файлы:
+  `encoder-model.int8.onnx`, `decoder_joint-model.int8.onnx`, `vocab.txt` (+`config.json`, `nemo128.onnx`).
+  Каталог `models/tdt/`. parakeet-rs автоопределяет имена; когда в папке ТОЛЬКО .int8.onnx — грузится int8
+  (тот же 8-битный дефолт, что в Python-референсе `asr.py` `quantization="int8"`). **int8 требует Level1**
+  (см. ниже): дефолтный parakeet-rs Level3 виснет при создании CPU-сессии на квант-узлах
+  (DynamicQuantizeLinear/MatMulInteger). GPU-провайдер (`--features cuda`) снимает ограничение.
 - **Sortformer v2** — HF `altunenes/parakeet-rs`, `diar_streaming_sortformer_4spk-v2.onnx` → `models/sortformer/`.
-- **Higgs Audio v3 веса** — каталог модели для `audiocpp` (`--model-root`); DLL из
-  `Higgs-Ultimate/.../resources/engine/audiocpp_engine.dll`.
+- **Higgs Audio v3 веса, Q8_0** — дефолт Higgs-Ultimate `higgs-q8_0` (★ recommended, gguf ~5.4ГБ). HF
+  `drbaph/Higgs-Audio-v3-Studio`, путь `models/higgs-q8_0/`: `q8_0.gguf` + `config.json`,
+  `chat_template.jinja`, `tokenizer.json`, `tokenizer_config.json`, `higgs_audio_v2_tokenizer_config.json`.
+  Локально `models/higgs-q8_0/` (`--model-root`). DLL движка — `models/higgs-engine/audiocpp_engine.dll`
+  (из `drbaph/.../engines/audiocpp_engine.dll` или релиза Higgs-Ultimate).
 
 ## Примеры
 
