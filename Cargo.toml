@@ -6,6 +6,9 @@ members = [
     "crates/dub-core",
     "crates/dub-server",
 ]
+# Оболочка Tauri — отдельная единица сборки (тяжёлое дерево tauri), собирается своим
+# `npx tauri build --no-bundle`, не тянется в `cargo build --workspace`.
+exclude = ["desktop/src-tauri"]
 
 [workspace.package]
 version = "0.1.0"
