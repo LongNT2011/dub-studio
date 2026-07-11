@@ -26,3 +26,6 @@ target/
 Cargo.lock
 *.dll
 
+
+# Tauri auto-generated schemas
+desktop/src-tauri/gen/
