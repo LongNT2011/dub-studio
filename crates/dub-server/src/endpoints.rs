@@ -24,7 +24,7 @@ pub async fn fonts() -> Json<Value> {
 // (Higgs клонирует из ref-аудио, не из именованного пака) -> отдаём пустой список, как питон при
 // отсутствии пака (try/except -> []). Контракт формы соблюдён (VoicePanel показывает пусто).
 pub async fn voices() -> Json<Value> {
-    Json(json!({ "voices": [] as [String; 0] }))
+    Json(json!({ "voices": Vec::<String>::new() }))
 }
 
 // ─── GET /presets ───────────────────────────────────────────────────────────

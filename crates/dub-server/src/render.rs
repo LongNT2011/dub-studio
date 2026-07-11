@@ -397,16 +397,35 @@ pub(crate) fn build_ass(proj: &Project, out_ass: &Path, vw: i64, vh: i64, total:
         ys.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         ys[ys.len() / 2] as i64
     };
+    // Per-segment CaptionOverride: карта seg_id -> текст-оверрайд (редактор дал свой текст строки).
+    // Порт продуктового требования «научить build_ass читать overrides»: питоновский write_artifacts
+    // overrides в план НЕ прокидывает (хранит round-trip), поэтому текст-оверрайд — Rust-улучшение поверх
+    // источника истины: если для сегмента задан override.text, рисуем ЕГО вместо tgt_text. Стилевые
+    // per-seg поля (override.style/x/y/w/fs) сохраняются в Project, но в ASS-строку пока не вплетаются —
+    // dub-captions строит субтитр из общего sub_style; это совпадает с питоном (тоже не рендерит их).
+    let overrides: std::collections::HashMap<&str, &str> = proj
+        .captions
+        .overrides
+        .iter()
+        .filter_map(|o| o.text.as_deref().map(|t| (o.seg_id.as_str(), t)))
+        .collect();
     let subs: Vec<Sub> = proj
         .segments
         .iter()
-        .filter(|s| !s.tgt_text.trim().is_empty())
         .map(|s| {
+            let tgt = match overrides.get(s.id.as_str()) {
+                Some(t) => t.to_string(),
+                None => s.tgt_text.clone(),
+            };
+            (s, tgt)
+        })
+        .filter(|(_, tgt)| !tgt.trim().is_empty())
+        .map(|(s, tgt)| {
             let end = if s.end > 0.0 { s.end } else { total };
             Sub {
                 start: s.start,
                 end,
-                tgt: s.tgt_text.clone(),
+                tgt,
                 y: Some(seg_y(s.start, end)),
             }
         })

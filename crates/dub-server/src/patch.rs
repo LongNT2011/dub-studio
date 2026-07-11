@@ -3,7 +3,7 @@
 //! (перетащить полосу субтитров), mode (dub/nodub/transcribe через set_mode). Прочие op -> 400
 //! (реализуются в следующих раундах). Ошибки: неизвестный op -> 400; неизвестный seg id -> 404.
 
-use dub_core::Project;
+use dub_core::{BlurBox, CaptionOverride, SubStyle, Title, Project};
 use serde_json::Value;
 
 /// Результат применения op: Ok — Project изменён; Err — (http-код, сообщение).
@@ -11,6 +11,36 @@ pub type PatchResult = Result<(), (u16, String)>;
 
 fn s(v: &Value, k: &str) -> Option<String> {
     v.get(k).and_then(|x| x.as_str()).map(|x| x.to_string())
+}
+
+fn i(v: &Value, k: &str) -> Option<i64> {
+    v.get(k).and_then(|x| x.as_i64())
+}
+
+fn f(v: &Value, k: &str) -> Option<f64> {
+    v.get(k).and_then(|x| x.as_f64())
+}
+
+fn b(v: &Value, k: &str) -> Option<bool> {
+    v.get(k).and_then(|x| x.as_bool())
+}
+
+/// Собрать список id из edit["ids"] (массив строк).
+fn ids(edit: &Value) -> Vec<String> {
+    edit.get("ids")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default()
+}
+
+/// Собрать множество индексов из edit["idxs"], отсортировать по УБЫВАНИЮ (удалять с хвоста).
+fn idxs_desc(edit: &Value) -> Vec<usize> {
+    let set: std::collections::BTreeSet<i64> = edit
+        .get("idxs")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_i64()).collect())
+        .unwrap_or_default();
+    set.iter().rev().filter_map(|&x| usize::try_from(x).ok()).collect::<Vec<_>>()
 }
 
 /// Пометить все сегменты dirty (после смены режима/перевода re-gen на render).
@@ -145,11 +175,357 @@ fn op_regen_all(p: &mut Project, _edit: &Value) -> PatchResult {
     Ok(())
 }
 
+/// Наложить caption-поля стиля на SubStyle (типизированные — в поля, прочие — в extra passthrough).
+/// Порт edit_caption._apply: неизвестных ключей нет (Pydantic валидирует), но extra="allow" сохраняет
+/// vision-поля (background/scene_*). Здесь принимаем любые ключи стиля; типизированные кладём в поля,
+/// остальные — в extra, чтобы map_sub_style (render.rs) их подхватил (в т.ч. plate/plate_color — тумблер
+/// подложки, продуктовое отклонение 2026-07-12).
+fn apply_substyle_fields(st: &mut SubStyle, fields: &serde_json::Map<String, Value>) {
+    for (k, v) in fields {
+        match k.as_str() {
+            "color" => {
+                if let Some(x) = v.as_str() { st.color = x.to_string(); }
+            }
+            "outline" => {
+                if let Some(x) = v.as_str() { st.outline = x.to_string(); }
+            }
+            "align" => {
+                if let Some(x) = v.as_str() { st.align = x.to_string(); }
+            }
+            "font" => st.font = v.as_str().map(|x| x.to_string()),
+            "scene_color" => st.scene_color = v.as_str().map(|x| x.to_string()),
+            "italic" => {
+                if let Some(x) = v.as_bool() { st.italic = x; }
+            }
+            "bold" => {
+                if let Some(x) = v.as_bool() { st.bold = x; }
+            }
+            "uppercase" => {
+                if let Some(x) = v.as_bool() { st.uppercase = x; }
+            }
+            "scene_flat" => {
+                if let Some(x) = v.as_bool() { st.scene_flat = x; }
+            }
+            "n_lines" => st.n_lines = v.as_i64(),
+            "size_px" => st.size_px = v.as_i64(),
+            "outline_w" => st.outline_w = v.as_i64(),
+            // Прочее (background, size_frac, solid, plate, plate_color, …) — в extra passthrough.
+            _ => {
+                st.extra.insert(k.clone(), v.clone());
+            }
+        }
+    }
+}
+
+/// caption — правка стиля субтитров. seg_id=None -> ГЛОБАЛЬНЫЙ sub_style; иначе per-segment override.
+/// Порт api.edit_caption + app.py op=="caption". Тумблер подложки: {op:caption, plate:false} снимает
+/// продуктовую плашку глобально (или per-seg с seg_id).
+fn op_caption(p: &mut Project, edit: &Value) -> PatchResult {
+    // поля стиля = всё, кроме op/seg_id.
+    let mut fields = serde_json::Map::new();
+    if let Some(obj) = edit.as_object() {
+        for (k, v) in obj {
+            if k != "op" && k != "seg_id" {
+                fields.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    let seg_id = s(edit, "seg_id");
+    match seg_id {
+        None => {
+            let mut st = p.captions.sub_style.take().unwrap_or_default();
+            apply_substyle_fields(&mut st, &fields);
+            p.captions.sub_style = Some(st);
+        }
+        Some(sid) => {
+            let idx = p.captions.overrides.iter().position(|o| o.seg_id == sid);
+            let ov = match idx {
+                Some(i) => &mut p.captions.overrides[i],
+                None => {
+                    p.captions.overrides.push(CaptionOverride {
+                        seg_id: sid.clone(),
+                        ..Default::default()
+                    });
+                    p.captions.overrides.last_mut().unwrap()
+                }
+            };
+            // Геометрия/текст override — типизированные поля; стиль — во вложенный SubStyle.
+            if let Some(t) = fields.get("text").and_then(|v| v.as_str()) {
+                ov.text = Some(t.to_string());
+            }
+            if let Some(x) = fields.get("x").and_then(|v| v.as_i64()) {
+                ov.x = Some(x);
+            }
+            if let Some(y) = fields.get("y").and_then(|v| v.as_i64()) {
+                ov.y = Some(y);
+            }
+            if let Some(w) = fields.get("w").and_then(|v| v.as_i64()) {
+                ov.w = Some(w);
+            }
+            if let Some(fs) = fields.get("fs").and_then(|v| v.as_i64()) {
+                ov.fs = Some(fs);
+            }
+            // Прочие поля -> вложенный style SubStyle (color/font/plate/…).
+            let style_fields: serde_json::Map<String, Value> = fields
+                .iter()
+                .filter(|(k, _)| !matches!(k.as_str(), "text" | "x" | "y" | "w" | "fs"))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            if !style_fields.is_empty() {
+                let mut st = ov.style.take().unwrap_or_default();
+                apply_substyle_fields(&mut st, &style_fields);
+                ov.style = Some(st);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// del_segment — удалить строку целиком (уходит субтитр И дубляж). Первый оставшийся -> dirty. Порт api.
+fn op_del_segment(p: &mut Project, edit: &Value) -> PatchResult {
+    let sid = s(edit, "id").ok_or((400, "missing segment id".into()))?;
+    del_segment(p, &sid)
+}
+
+fn del_segment(p: &mut Project, sid: &str) -> PatchResult {
+    let n = p.segments.len();
+    p.segments.retain(|s| s.id != sid);
+    if p.segments.len() == n {
+        return Err((404, format!("segment {sid:?} not found")));
+    }
+    if let Some(first) = p.segments.first_mut() {
+        first.dirty = true;
+    }
+    Ok(())
+}
+
+/// hide_segment — тоггл/установка hidden (в extra). Порт app.py op=="hide_segment".
+fn op_hide_segment(p: &mut Project, edit: &Value) -> PatchResult {
+    let sid = s(edit, "id").ok_or((400, "missing segment id".into()))?;
+    let seg = p
+        .segments
+        .iter_mut()
+        .find(|x| x.id == sid)
+        .ok_or((404, format!("segment {sid:?} not found")))?;
+    let cur = seg.extra.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+    let new = b(edit, "hidden").unwrap_or(!cur);
+    seg.extra.insert("hidden".into(), Value::Bool(new));
+    seg.dirty = true;
+    Ok(())
+}
+
+/// del_segments — массовое удаление (несуществующие пропускаются). Порт app.py op=="del_segments".
+fn op_del_segments(p: &mut Project, edit: &Value) -> PatchResult {
+    for sid in ids(edit) {
+        let _ = del_segment(p, &sid); // KeyError глотается, как в питоне
+    }
+    Ok(())
+}
+
+/// hide_segments — массовое скрытие (явный флаг). Порт app.py op=="hide_segments".
+fn op_hide_segments(p: &mut Project, edit: &Value) -> PatchResult {
+    let hid = b(edit, "hidden").unwrap_or(true);
+    for sid in ids(edit) {
+        if let Some(seg) = p.segments.iter_mut().find(|x| x.id == sid) {
+            seg.extra.insert("hidden".into(), Value::Bool(hid));
+            seg.dirty = true;
+        }
+    }
+    Ok(())
+}
+
+/// keep_segment — тоггл keep_original (в extra). Порт app.py op=="keep_segment".
+fn op_keep_segment(p: &mut Project, edit: &Value) -> PatchResult {
+    let sid = s(edit, "id").ok_or((400, "missing segment id".into()))?;
+    let seg = p
+        .segments
+        .iter_mut()
+        .find(|x| x.id == sid)
+        .ok_or((404, format!("segment {sid:?} not found")))?;
+    let cur = seg.extra.get("keep_original").and_then(|v| v.as_bool()).unwrap_or(false);
+    let new = b(edit, "keep").unwrap_or(!cur);
+    seg.extra.insert("keep_original".into(), Value::Bool(new));
+    seg.dirty = true;
+    Ok(())
+}
+
+/// keep_segments — массовый keep_original (явный флаг). Порт app.py op=="keep_segments".
+fn op_keep_segments(p: &mut Project, edit: &Value) -> PatchResult {
+    let kp = b(edit, "keep").unwrap_or(true);
+    for sid in ids(edit) {
+        if let Some(seg) = p.segments.iter_mut().find(|x| x.id == sid) {
+            seg.extra.insert("keep_original".into(), Value::Bool(kp));
+            seg.dirty = true;
+        }
+    }
+    Ok(())
+}
+
+/// del_titles — массовое удаление титров (high->low). Порт app.py op=="del_titles".
+fn op_del_titles(p: &mut Project, edit: &Value) -> PatchResult {
+    for idx in idxs_desc(edit) {
+        if idx < p.captions.titles.len() {
+            p.captions.titles.remove(idx);
+        }
+    }
+    Ok(())
+}
+
+/// del_blurs — массовое удаление blur-боксов (high->low). Порт app.py op=="del_blurs".
+fn op_del_blurs(p: &mut Project, edit: &Value) -> PatchResult {
+    for idx in idxs_desc(edit) {
+        if idx < p.captions.blur_boxes.len() {
+            p.captions.blur_boxes.remove(idx);
+        }
+    }
+    Ok(())
+}
+
+/// blur — правка геометрии/полей одного blur-бокса. Порт api.edit_blur (IndexError -> 404).
+fn op_blur(p: &mut Project, edit: &Value) -> PatchResult {
+    let idx = i(edit, "idx").ok_or((400, "missing blur idx".into()))?;
+    let idx = usize::try_from(idx).map_err(|_| (404, "bad blur idx".to_string()))?;
+    let bx = p
+        .captions
+        .blur_boxes
+        .get_mut(idx)
+        .ok_or((404, format!("bad blur idx: {idx} out of range")))?;
+    if let Some(x) = i(edit, "x") { bx.x = x; }
+    if let Some(y) = i(edit, "y") { bx.y = y; }
+    if let Some(w) = i(edit, "w") { bx.w = w; }
+    if let Some(h) = i(edit, "h") { bx.h = h; }
+    if let Some(t0) = f(edit, "t0") { bx.t0 = t0; }
+    if let Some(t1) = f(edit, "t1") { bx.t1 = t1; }
+    if let Some(hidden) = b(edit, "hidden") { bx.hidden = hidden; }
+    Ok(())
+}
+
+/// blur_add — новый blur-бокс (по умолчанию весь ролик). Порт api.add_blur. Отсутствие x/y/w/h -> 400.
+fn op_blur_add(p: &mut Project, edit: &Value) -> PatchResult {
+    let bad = |k: &str| (400, format!("bad blur_add: missing/invalid field {k:?}"));
+    let x = i(edit, "x").ok_or_else(|| bad("x"))?;
+    let y = i(edit, "y").ok_or_else(|| bad("y"))?;
+    let w = i(edit, "w").ok_or_else(|| bad("w"))?;
+    let h = i(edit, "h").ok_or_else(|| bad("h"))?;
+    let t0 = f(edit, "t0").unwrap_or(0.0);
+    let t1 = f(edit, "t1").unwrap_or(p.meta.duration);
+    p.captions.blur_boxes.push(BlurBox {
+        x, y, w, h, t0, t1, hidden: false, extra: Default::default(),
+    });
+    Ok(())
+}
+
+/// blur_del — удалить blur-бокс по индексу. Порт api.del_blur (IndexError -> 404).
+fn op_blur_del(p: &mut Project, edit: &Value) -> PatchResult {
+    let idx = i(edit, "idx").ok_or((400, "missing blur idx".into()))?;
+    let idx = usize::try_from(idx).map_err(|_| (404, "bad blur idx".to_string()))?;
+    if idx >= p.captions.blur_boxes.len() {
+        return Err((404, format!("blur idx {idx} out of range")));
+    }
+    p.captions.blur_boxes.remove(idx);
+    Ok(())
+}
+
+/// blur_enable — глобальный тоггл блюра (render.blur). Порт app.py op=="blur_enable".
+fn op_blur_enable(p: &mut Project, edit: &Value) -> PatchResult {
+    p.render.blur = b(edit, "on").unwrap_or(true);
+    Ok(())
+}
+
+/// preset — имя TEMPLATE-пресета (None/"match" = как оригинал); только re-burn. Порт app.py op=="preset".
+fn op_preset(p: &mut Project, edit: &Value) -> PatchResult {
+    // name отсутствует ИЛИ пустое -> None (match original).
+    p.captions.preset.name = s(edit, "name").filter(|x| !x.is_empty());
+    Ok(())
+}
+
+/// title — правка титра (текст/italic/font/color/bbox/тайминг). Порт api.edit_title (IndexError -> 404).
+fn op_title(p: &mut Project, edit: &Value) -> PatchResult {
+    let idx = i(edit, "idx").ok_or((400, "missing title idx".into()))?;
+    let idx = usize::try_from(idx).map_err(|_| (404, "bad title idx".to_string()))?;
+    let t = p
+        .captions
+        .titles
+        .get_mut(idx)
+        .ok_or((404, format!("bad title idx: {idx} out of range")))?;
+    if let Some(x) = edit.get("text").and_then(|v| v.as_str()) { t.text = x.to_string(); }
+    if let Some(x) = edit.get("tgt").and_then(|v| v.as_str()) { t.tgt = x.to_string(); }
+    if let Some(x) = b(edit, "italic") { t.italic = x; }
+    if let Some(x) = b(edit, "bold") { t.bold = x; }
+    if let Some(x) = b(edit, "uppercase") { t.uppercase = x; }
+    if let Some(x) = b(edit, "solid") { t.solid = x; }
+    if edit.get("font").is_some() { t.font = edit.get("font").and_then(|v| v.as_str()).map(|x| x.to_string()); }
+    if edit.get("color").is_some() { t.color = edit.get("color").and_then(|v| v.as_str()).map(|x| x.to_string()); }
+    if edit.get("bg").is_some() { t.bg = edit.get("bg").and_then(|v| v.as_str()).map(|x| x.to_string()); }
+    if let Some(a) = edit.get("align").and_then(|v| v.as_str()) { t.align = a.to_string(); }
+    if let Some(st) = f(edit, "start") { t.start = st; }
+    if let Some(en) = f(edit, "end") { t.end = en; }
+    if let Some(lh) = i(edit, "lh") { t.lh = Some(lh); }
+    if let Some(sp) = i(edit, "size_px") { t.size_px = Some(sp); }
+    if let Some(ow) = i(edit, "outline_w") { t.outline_w = Some(ow); }
+    if let Some(bbox) = edit.get("bbox").and_then(|v| v.as_array()) {
+        t.bbox = Some(bbox.iter().filter_map(|x| x.as_i64()).collect());
+    }
+    Ok(())
+}
+
+/// title_del — удалить титр по индексу. Порт api.del_title (IndexError -> 404).
+fn op_title_del(p: &mut Project, edit: &Value) -> PatchResult {
+    let idx = i(edit, "idx").ok_or((400, "missing title idx".into()))?;
+    let idx = usize::try_from(idx).map_err(|_| (404, "bad title idx".to_string()))?;
+    if idx >= p.captions.titles.len() {
+        return Err((404, format!("title idx {idx} out of range")));
+    }
+    p.captions.titles.remove(idx);
+    Ok(())
+}
+
+/// title_add — новый кастомный титр в боксе на [t0,t1]. Порт api.add_title. Нет x/y/w/h -> 400.
+fn op_title_add(p: &mut Project, edit: &Value) -> PatchResult {
+    let bad = |k: &str| (400, format!("bad title_add: missing/invalid field {k:?}"));
+    let text = s(edit, "text").unwrap_or_default();
+    let x = i(edit, "x").ok_or_else(|| bad("x"))?;
+    let y = i(edit, "y").ok_or_else(|| bad("y"))?;
+    let w = i(edit, "w").ok_or_else(|| bad("w"))?;
+    let h = i(edit, "h").ok_or_else(|| bad("h"))?;
+    let t0 = f(edit, "t0").unwrap_or(0.0);
+    let t1 = f(edit, "t1").unwrap_or(p.meta.duration);
+    p.captions.titles.push(Title {
+        text: text.clone(),
+        tgt: text,
+        bbox: Some(vec![x, y, w, h]),
+        start: t0,
+        end: t1,
+        italic: b(edit, "italic").unwrap_or(false),
+        font: s(edit, "font"),
+        color: Some(s(edit, "color").unwrap_or_else(|| "#FFFFFF".into())),
+        ..Default::default()
+    });
+    Ok(())
+}
+
 /// Применить одну PATCH-операцию к Project. op берётся из поля "op". Неизвестный op -> 400.
 pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
     let op = s(edit, "op").unwrap_or_default();
     match op.as_str() {
+        "caption" => op_caption(p, edit),
         "segment" => op_segment(p, edit),
+        "del_segment" => op_del_segment(p, edit),
+        "hide_segment" => op_hide_segment(p, edit),
+        "del_segments" => op_del_segments(p, edit),
+        "hide_segments" => op_hide_segments(p, edit),
+        "del_titles" => op_del_titles(p, edit),
+        "del_blurs" => op_del_blurs(p, edit),
+        "keep_segment" => op_keep_segment(p, edit),
+        "keep_segments" => op_keep_segments(p, edit),
+        "blur" => op_blur(p, edit),
+        "blur_add" => op_blur_add(p, edit),
+        "blur_del" => op_blur_del(p, edit),
+        "blur_enable" => op_blur_enable(p, edit),
+        "preset" => op_preset(p, edit),
+        "title" => op_title(p, edit),
+        "title_del" => op_title_del(p, edit),
+        "title_add" => op_title_add(p, edit),
         "subpos" => op_subpos(p, edit),
         "mode" => op_mode(p, edit),
         "translate" => op_translate(p, edit),
@@ -237,5 +613,109 @@ mod tests {
         assert!(p.segments[0].dirty);
         let e = apply(&mut p, &json!({"op":"rewrite","instruction":"  "})).unwrap_err();
         assert_eq!(e.0, 400);
+    }
+
+    // ── PATCH-хвост (раунд 5) ────────────────────────────────────────────────
+
+    #[test]
+    fn caption_global_sets_substyle_and_plate_toggle() {
+        let mut p = proj_with_seg();
+        // тумблер подложки: plate=false -> в extra sub_style (map_sub_style читает).
+        apply(&mut p, &json!({"op":"caption","color":"#FF0000","plate":false})).unwrap();
+        let ss = p.captions.sub_style.as_ref().unwrap();
+        assert_eq!(ss.color, "#FF0000");
+        assert_eq!(ss.extra.get("plate").and_then(|v| v.as_bool()), Some(false));
+    }
+
+    #[test]
+    fn caption_per_segment_override() {
+        let mut p = proj_with_seg();
+        apply(&mut p, &json!({"op":"caption","seg_id":"s0","text":"свой текст","color":"#00FF00"})).unwrap();
+        assert_eq!(p.captions.overrides.len(), 1);
+        let o = &p.captions.overrides[0];
+        assert_eq!(o.seg_id, "s0");
+        assert_eq!(o.text.as_deref(), Some("свой текст"));
+        assert_eq!(o.style.as_ref().unwrap().color, "#00FF00");
+        // повторный caption на тот же seg_id ОБНОВЛЯЕТ, не добавляет.
+        apply(&mut p, &json!({"op":"caption","seg_id":"s0","text":"новый"})).unwrap();
+        assert_eq!(p.captions.overrides.len(), 1);
+        assert_eq!(p.captions.overrides[0].text.as_deref(), Some("новый"));
+    }
+
+    #[test]
+    fn del_segment_marks_first_dirty_and_404() {
+        let mut p = proj_with_seg();
+        p.segments.push(dub_core::Segment { id: "s1".into(), ..Default::default() });
+        apply(&mut p, &json!({"op":"del_segment","id":"s1"})).unwrap();
+        assert_eq!(p.segments.len(), 1);
+        assert!(p.segments[0].dirty);
+        let e = apply(&mut p, &json!({"op":"del_segment","id":"nope"})).unwrap_err();
+        assert_eq!(e.0, 404);
+    }
+
+    #[test]
+    fn blur_add_edit_del_cycle() {
+        let mut p = proj_with_seg();
+        p.meta.duration = 12.0;
+        apply(&mut p, &json!({"op":"blur_add","x":10,"y":20,"w":100,"h":40})).unwrap();
+        assert_eq!(p.captions.blur_boxes.len(), 1);
+        assert_eq!(p.captions.blur_boxes[0].t1, 12.0); // дефолт весь ролик
+        apply(&mut p, &json!({"op":"blur","idx":0,"x":15,"hidden":true})).unwrap();
+        assert_eq!(p.captions.blur_boxes[0].x, 15);
+        assert!(p.captions.blur_boxes[0].hidden);
+        // out-of-range -> 404
+        let e = apply(&mut p, &json!({"op":"blur","idx":9,"x":1})).unwrap_err();
+        assert_eq!(e.0, 404);
+        apply(&mut p, &json!({"op":"blur_del","idx":0})).unwrap();
+        assert!(p.captions.blur_boxes.is_empty());
+        // отсутствие обязательного поля -> 400
+        let e = apply(&mut p, &json!({"op":"blur_add","x":1,"y":2})).unwrap_err();
+        assert_eq!(e.0, 400);
+    }
+
+    #[test]
+    fn title_add_edit_del_cycle() {
+        let mut p = proj_with_seg();
+        p.meta.duration = 8.0;
+        apply(&mut p, &json!({"op":"title_add","text":"HELLO","x":50,"y":60,"w":300,"h":80})).unwrap();
+        assert_eq!(p.captions.titles.len(), 1);
+        let t = &p.captions.titles[0];
+        assert_eq!(t.text, "HELLO");
+        assert_eq!(t.tgt, "HELLO");
+        assert_eq!(t.bbox.as_deref(), Some(&[50i64, 60, 300, 80][..]));
+        assert_eq!(t.end, 8.0);
+        apply(&mut p, &json!({"op":"title","idx":0,"tgt":"ПРИВЕТ","color":"#FF0000"})).unwrap();
+        assert_eq!(p.captions.titles[0].tgt, "ПРИВЕТ");
+        assert_eq!(p.captions.titles[0].color.as_deref(), Some("#FF0000"));
+        apply(&mut p, &json!({"op":"title_del","idx":0})).unwrap();
+        assert!(p.captions.titles.is_empty());
+        let e = apply(&mut p, &json!({"op":"title_del","idx":0})).unwrap_err();
+        assert_eq!(e.0, 404);
+    }
+
+    #[test]
+    fn preset_and_blur_enable() {
+        let mut p = proj_with_seg();
+        apply(&mut p, &json!({"op":"preset","name":"hormozi"})).unwrap();
+        assert_eq!(p.captions.preset.name.as_deref(), Some("hormozi"));
+        apply(&mut p, &json!({"op":"preset","name":"match"})).unwrap();
+        // "match"/пусто хранится как есть в питоне (None only когда name отсутствует/пусто); тут name="match".
+        apply(&mut p, &json!({"op":"preset"})).unwrap();
+        assert!(p.captions.preset.name.is_none());
+        apply(&mut p, &json!({"op":"blur_enable","on":false})).unwrap();
+        assert!(!p.render.blur);
+    }
+
+    #[test]
+    fn del_titles_and_del_blurs_high_to_low() {
+        let mut p = proj_with_seg();
+        for _ in 0..3 {
+            p.captions.titles.push(dub_core::Title { text: "t".into(), ..Default::default() });
+            p.captions.blur_boxes.push(dub_core::BlurBox::default());
+        }
+        apply(&mut p, &json!({"op":"del_titles","idxs":[0,2]})).unwrap();
+        assert_eq!(p.captions.titles.len(), 1);
+        apply(&mut p, &json!({"op":"del_blurs","idxs":[1]})).unwrap();
+        assert_eq!(p.captions.blur_boxes.len(), 2);
     }
 }

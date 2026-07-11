@@ -8,6 +8,8 @@
 
 mod analyze;
 mod compose;
+mod endpoints;
+mod frame;
 mod jobs;
 mod media;
 mod ocr;
@@ -229,12 +231,24 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/engine/capabilities", get(capabilities))
+        .route("/engine/opts", axum::routing::patch(endpoints::set_opts))
+        .route("/fonts", get(endpoints::fonts))
+        .route("/voices", get(endpoints::voices))
+        .route("/presets", get(endpoints::presets))
         .route("/projects", post(create_project))
-        .route("/projects/{pid}", get(get_project).patch(patch_project))
+        .route(
+            "/projects/{pid}",
+            get(get_project).patch(patch_project).put(endpoints::put_project),
+        )
         .route("/projects/{pid}/analyze", post(analyze_project))
+        .route("/projects/{pid}/remix", post(endpoints::remix_project))
         .route("/projects/{pid}/render", post(render_project))
+        .route("/projects/{pid}/waveform", get(endpoints::waveform))
+        .route("/projects/{pid}/preview", get(endpoints::preview))
         .route("/projects/{pid}/output", get(output))
-        .route("/projects/{pid}/original", get(original))
+        // /original?t= отдаёт ОДИН PNG-кадр оригинала (порт app.py.original -> source_frame),
+        // фронт (ComparePane) вставляет его как <img src>. Range-раздача сырого видео — /dub.
+        .route("/projects/{pid}/original", get(endpoints::original_frame))
         .route("/projects/{pid}/dub", get(dub_video))
         .route("/jobs/{job_id}/events", get(job_events))
         // SPA fallback — монтируется последним, чтобы не затенять API.
@@ -496,26 +510,6 @@ async fn output(
     let dl = q.get("dl").map(|v| v == "1").unwrap_or(false);
     let filename = if dl { Some(format!("{pid}_dub.mp4")) } else { None };
     serve_file_range(&f, req, filename).await
-}
-
-async fn original(
-    State(st): State<AppState>,
-    AxPath(pid): AxPath<String>,
-    req: axum::http::Request<axum::body::Body>,
-) -> Response {
-    let dir = match st.proj_dir(&pid) {
-        Ok(d) => d,
-        Err(resp) => return resp,
-    };
-    // Исходное видео (для before/after). Путь из source.txt.
-    let input = match std::fs::read_to_string(dir.join("source.txt")) {
-        Ok(s) => PathBuf::from(s.trim()),
-        Err(_) => return (StatusCode::NOT_FOUND, "no source").into_response(),
-    };
-    if !input.is_file() {
-        return (StatusCode::NOT_FOUND, "source missing").into_response();
-    }
-    serve_file_range(&input, req, None).await
 }
 
 async fn dub_video(
