@@ -128,6 +128,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/jobs/{job_id}/events", get(job_events))
         // SPA fallback — монтируется последним, чтобы не затенять API.
         .fallback(spa_fallback)
+        // Видео-аплоад — большие тела. axum по дефолту режет на 2МБ (multipart ломается на
+        // реальном ролике). Питон (Starlette) лимита не ставит -> снимаем и мы.
+        .layer(axum::extract::DefaultBodyLimit::disable())
         .layer(cors)
         .with_state(state)
 }
