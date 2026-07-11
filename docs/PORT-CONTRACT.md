@@ -161,3 +161,68 @@ translate-стадии (raw_ctx готов) и OCR-детекции (localize/ca
 E2E-харнесс: `verify_captions_e2e` (пример `cargo run -p dub-server --example verify_captions`) —
 берёт кэш project.json (transcript+raw_ctx), заново гонит OCR+compose+build_ass+burn БЕЗ ASR/Gemma/TTS,
 даёт captioned.mp4 для покадрового сравнения порт-vs-эталон (docs/example_dub.mp4).
+
+## Раунд 5 — паритет плашек: семплинг vision + заливка полос (задача #28)
+
+**Итог: расхождений НЕТ. Порт уже дословно совпадает с источником истины; «плашка эталона» —
+артефакт УСТАРЕВШЕГО пайплайна.** Доказано живым прогоном Gemma + честным прогоном `captions.py`.
+
+### 1. Семплинг LLM — сверен построчно, УЖЕ верный (не «temp 0.3 всюду» из отчёта р3)
+Каждый вызов `dub-llm` шлёт РОВНО питоновские per-call параметры (проброшены через `Sampling`):
+
+| Вызов | Питон (источник) | Порт | temp / top_p / top_k / rep_pen |
+|-------|------------------|------|--------------------------------|
+| ctx `ask`/`imsg` дефолт | ctx_translate.py:67-69 | vision.rs:125, ctx.rs:134 | 0.2 / 0.95 / 64 / — |
+| **sub-style SP (GREEDY)** | ctx_translate.py:163 | vision.rs:242 | **0.0** / 0.95 / 64 / — |
+| VP мега-промпт | ctx_translate.py:168 | vision.rs:253 | 0.2 / 0.95 / 64 / — |
+| scene-контекст | ctx_translate.py:256 | vision.rs:404 | 0.2 / 0.95 / 64 / — |
+| audio-контекст | ctx_translate.py:276 | ctx.rs:203 | 0.2 / 0.95 / 64 / — |
+| ctx TRANSLATE (TP) | ctx_translate.py:302 | ctx.rs:134 | 0.2 / 0.95 / 64 / — |
+| MT glossary `_chat` | translate.py:55-59 | translate.rs:109 | 0.2 / 0.9 / — / — |
+| MT `_translate_one` fallback | translate.py:92 | translate.rs:74 | 0.7 / 0.6 / 20 / 1.05 |
+| MT batch `_run_hunyuan` | translate.py:144 | translate.rs:176 | 0.3 / 0.9 / 20 / 1.05 |
+| MT `rewrite` | translate.py:193 | translate.rs:248 | 0.85 / 0.95 / 40 / 1.05 |
+
+### 2. Ветки плашек `captions.py` build() — дословный порт (`build_s_style`, lib.rs)
+Заливка полосы управляется ИСКЛЮЧИТЕЛЬНО тем, что vision вернул в `sub_style.background`:
+- `bg=solid hex`, контраст к тексту ≥0.20 → **BorderStyle=3, Outline=11**, плита цвета полосы
+  (captions.py 507-510). Это ветка ЭТАЛОННОЙ чёрной полосы.
+- `bg=none`, светлый текст (lum>0.45) → **BorderStyle=1, Outline≈2**, тонкий outline, БЕЗ плашки
+  (captions.py 511-515).
+- `bg=none`, тёмный текст → BorderStyle=3, Outline=10, почти-белая плита (516-518).
+- «boxed»-preset с плашкой (519-521) — **МЁРТВЫЙ путь**: фолбэк `if not sub_style` (462-469) ВСЕГДА
+  назначает `sub_style` (bg=none) до `if sub_style:` (488), поэтому preset-плита недостижима. Порт
+  повторяет это точно (default_style → light-ветка BorderStyle=1). Проверено `sub_style=None`-прогоном
+  питона: тоже BorderStyle=1,2.
+`_emit_title.has_plate` (ass.rs:382) = `bg && bg!="none" && |lum(bg)-lum(txt)|>=0.20` — идентично 421.
+
+### 3. Живой greedy-vision `example_original.mp4` (пример `vision_probe`, temp=0.0)
+Все 10 кейфреймов дают согласованно: `background=""`(→none), `background_color=null`,
+`scene_color=#E0E0E0/#D3D3D3`, `scene_flat=false`, титр `bg=null`. Т.е. Gemma ЧЕСТНО читает субтитр
+оригинала как БЕЛЫЙ-С-ЧЁРНЫМ-OUTLINE поверх сцены — сплошной полосы В ОРИГИНАЛЕ НЕТ. Агрегация bg в
+порту (vision.rs:284-286,351) дословно = питон (ctx_translate.py:197-199,228): majority-vote «none».
+
+### 4. Приёмка пикселями (кадры 464×824, PIL Counter, доминанта зоны, квант 16)
+- **Субтитр порт vs питон-источник-истины** (тот же greedy sub_style): S-строка **байт-в-байт**
+  `Style: S,Oswald,66,…,1,2,0,2,…` (порт ae61067 caps.ass == pygreedy/greedy.ass). Зона субтитра
+  x[120:350]y[615:665]: порт `#F0F0F0 31.1% / #000000 14.4%` ≈ питон `31.3% / 15.0%` — совпадает.
+- **Эталон `example_dub.mp4`**: полосы ЕСТЬ (текст-хаг тёмные плиты) — субтитр inter-line x[180:280]
+  доминанта `#000000` 23% (в оригинале там `#B06050` — сцена, плиты нет ⇒ эталон её РИСОВАЛ).
+  НО эти плиты `#000000`-класс воспроизводит ТОЛЬКО ветка `bg=solid` (candidate A: py_build.py →
+  A_solid_black), которая на текущем greedy-входе НЕ активируется ни в питоне, ни в порту.
+- **Вывод**: эталон `example_dub.mp4` отрисован УСТАРЕВШИМ пайплайном (старый «boxed везде» до
+  LLM-driven-плашек). Текущий источник истины (`ctx_translate.py`+`captions.py`), накормленный живым
+  greedy-чтением этого видео, даёт outline-субтитры БЕЗ плашки — ровно как порт. **Приводить порт к
+  «плашке эталона» = отклониться от источника истины** (запрещено контрактом). Порт оставлен как есть.
+
+### Регресс-якоря (dub-captions/src/lib.rs)
+- `greedy_example_original_substyle_is_border1_no_plate` — точный живой greedy sub_style → BorderStyle=1,
+  без KP-плашки (паритет с captions.py на том же входе).
+- `solid_band_reproduces_reference_black_plate` — `bg=#000000` → BorderStyle=3,11 чёрная плита
+  (ветка, которой отрисован эталон; активна ТОЛЬКО при solid-чтении vision).
+- Диагностика: `DUB_VISION_DEBUG=1` печатает per-keyframe raw sub-style read (vision.rs).
+
+### ОТКРЫТО (НЕ плашки, отдельный дефект compose — задача #27/#29)
+Порт-прогон ae61067 отрисовал **0 титр-Dialogue** (титр «ТОТ САМЫЙ…» пропал), тогда как питон-источник
+рисует его outline-текстом. Причина — матчинг `ctitles`→bbox по `localize_ocr` в compose.rs дал пусто на
+том прогоне; vision_probe титр ВОЗВРАЩАЕТ. Это не про заливку плашек — вынесено в остаток раунда 5.

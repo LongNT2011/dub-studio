@@ -283,6 +283,17 @@ If there are no subtitle words at all, return {{}}."
         }
         let smode = sub.get("background").and_then(|x| x.as_str()).unwrap_or("").to_lowercase();
         let scol = hex_opt(sub.get("background_color"));
+        if std::env::var("DUB_VISION_DEBUG").is_ok() {
+            eprintln!(
+                "  [kf {:.1}s] bg={smode:?} bgcol={scol:?} color={:?} scene_color={:?} scene_flat={:?} y_frac={:?} raw_sub={}",
+                t_kf,
+                hex_opt(sub.get("color")),
+                hex_opt(sub.get("scene_color")),
+                sub.get("scene_flat"),
+                sub.get("y_frac"),
+                serde_json::to_string(&sub).unwrap_or_default(),
+            );
+        }
         bgs.push(if smode == "solid" { scol.clone().unwrap_or_else(|| "none".into()) } else { "none".into() });
         if let Some(sc) = hex_opt(sub.get("scene_color")) {
             scenecols.push(sc);

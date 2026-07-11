@@ -472,4 +472,65 @@ mod tests {
             "на текстурной сцене cover-плашки быть не должно"
         );
     }
+
+    // ПАРИТЕТ ПЛАШЕК (task #28) — ЗОЛОТОЙ ЯКОРЬ живого greedy-чтения example_original.mp4.
+    // Живой прогон analyze_layout (greedy sub-style temp=0.0, top_k=64, top_p=0.95) на эталонном
+    // ОРИГИНАЛЕ вернул РОВНО этот sub_style: background="none", scene_flat=false, белый текст с
+    // чёрным outline (субтитр оригинала — outline-стиль, БЕЗ сплошной полосы). Источник истины
+    // captions.py, накормленный ТЕМ ЖЕ sub_style, даёт БАЙТ-в-байт ту же S-строку BorderStyle=1,
+    // Outline=2 (проверено py-прогоном py_greedy.py -> pygreedy/greedy.ass). Порт ОБЯЗАН совпадать:
+    // это фиксирует, что мы НЕ рисуем плашку там, где источник истины её не рисует (а «плашка
+    // эталона example_dub.mp4» — от УСТАРЕВШЕГО пайплайна, не от текущего greedy-vision).
+    #[test]
+    fn greedy_example_original_substyle_is_border1_no_plate() {
+        let ss = SubStyle {
+            color: "#FFFFFF".into(),
+            background: Some("none".into()),
+            outline: Some("none".into()),
+            bold: true,
+            italic: false,
+            uppercase: true,
+            align: "center".into(),
+            font: Some("Oswald".into()),
+            n_lines: Some(2),
+            size_frac: Some(0.08),
+            scene_color: Some("#E0E0E0".into()),
+            scene_flat: false,
+            solid: false,
+            ..Default::default()
+        };
+        let ass = build_str(464, 824, &ss, &subs1());
+        let s = s_style_line(&ass);
+        // BorderStyle=1, Outline=2, Shadow=0 — та же ветка, что и питон на greedy-входе (никакой плашки).
+        assert!(
+            s.contains(",1,2,0,2,"),
+            "greedy example_original -> BorderStyle=1 Outline=2 (outline-only, паритет с captions.py): {s}"
+        );
+        assert!(
+            !ass.lines().any(|l| l.starts_with("Dialogue: 0,") && l.contains(",KP,")),
+            "на этом входе (scene_flat=false) плашки/cover быть НЕ должно — паритет с питоном"
+        );
+    }
+
+    // Обратная сторона якоря: КОГДА vision читает сплошную КОНТРАСТНУЮ полосу (bg=solid hex) — как
+    // было в эталоне example_dub.mp4 — порт ОБЯЗАН дать чёрную BorderStyle=3 плашку. Это ветка,
+    // воспроизводящая заливку полос эталона (доминанта #000000-класс). Проверено py-прогоном
+    // py_build.py case A -> A_solid_black.ass (BorderStyle=3, Outline=11, &H00000000-плита).
+    #[test]
+    fn solid_band_reproduces_reference_black_plate() {
+        let ss = SubStyle {
+            color: "#FFFFFF".into(),
+            background: Some("#000000".into()),
+            bold: true,
+            uppercase: true,
+            font: Some("Oswald".into()),
+            ..Default::default()
+        };
+        let ass = build_str(464, 824, &ss, &subs1());
+        let s = s_style_line(&ass);
+        assert!(
+            s.contains(",3,11,0,2,") && s.contains("&H00000000"),
+            "сплошная полоса -> BorderStyle=3 Outline=11 чёрная плита (заливка эталона): {s}"
+        );
+    }
 }
