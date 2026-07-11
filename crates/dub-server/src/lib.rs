@@ -10,8 +10,10 @@ mod analyze;
 mod jobs;
 mod media;
 mod patch;
+mod render;
 mod spa;
 mod translate;
+mod wavio;
 
 use axum::extract::{Multipart, Path as AxPath, Query, State};
 use axum::http::StatusCode;
@@ -42,6 +44,16 @@ pub struct AppState {
     pub sortformer_onnx: PathBuf,
     /// llama-server(.exe) — сайдкар перевода/vision. Env DUB_STUDIO_LLAMA_BIN, иначе <repo>/tools/llama/llama-server(.exe).
     pub llama_bin: PathBuf,
+    /// BSRoformer CLI (сепарация). Env DUB_STUDIO_BSROFORMER_DIR/<cli>, иначе <repo>/tools/bsroformer/bs_roformer-cli.exe.
+    pub bsroformer_cli: PathBuf,
+    /// GGUF модель сепарации. Env DUB_STUDIO_BSROFORMER_MODEL, иначе <repo>/models/bsroformer/voc_fv6-Q8_0.gguf.
+    pub bsroformer_model: PathBuf,
+    /// Higgs audiocpp_engine.dll (TTS). Env DUB_STUDIO_HIGGS_DLL, иначе <models>/higgs-engine/audiocpp_engine.dll.
+    pub higgs_dll: PathBuf,
+    /// Каталог весов Higgs (q8_0). Env DUB_STUDIO_HIGGS_MODEL, иначе <models>/higgs-q8_0.
+    pub higgs_model_root: PathBuf,
+    /// Каталог bundled-шрифтов субтитров. Env DUB_STUDIO_FONTS_DIR, иначе <repo>/fonts.
+    pub fonts_dir: PathBuf,
 }
 
 /// Корень моделей: env DUBENGINE_MODELS_ROOT, иначе <repo_root>/models.
@@ -71,6 +83,19 @@ impl AppState {
         // llama-server: env-override, иначе <repo>/tools/llama/llama-server(.exe) (негитуемый каталог,
         // кладёт установщик/раунд 3). Существование проверяет сама стадия перевода (fail-safe).
         let llama_bin = dub_llm::resolve_llama_bin(&repo_root.join("tools").join("llama"));
+        let bsroformer_cli = std::env::var("DUB_STUDIO_BSROFORMER_DIR")
+            .map(|d| PathBuf::from(d).join(dub_sep::ENGINE_CLI_FILE))
+            .unwrap_or_else(|_| dub_sep::engine_dir(&repo_root).join(dub_sep::ENGINE_CLI_FILE));
+        let bsroformer_model = dub_sep::model_path(&repo_root);
+        let higgs_dll = std::env::var("DUB_STUDIO_HIGGS_DLL")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| mroot.join("higgs-engine").join("audiocpp_engine.dll"));
+        let higgs_model_root = std::env::var("DUB_STUDIO_HIGGS_MODEL")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| mroot.join("higgs-q8_0"));
+        let fonts_dir = std::env::var("DUB_STUDIO_FONTS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| repo_root.join("fonts"));
         AppState {
             repo_root,
             workspace,
@@ -80,6 +105,11 @@ impl AppState {
             tdt_dir,
             sortformer_onnx,
             llama_bin,
+            bsroformer_cli,
+            bsroformer_model,
+            higgs_dll,
+            higgs_model_root,
+            fonts_dir,
         }
     }
 
@@ -132,6 +162,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects", post(create_project))
         .route("/projects/{pid}", get(get_project).patch(patch_project))
         .route("/projects/{pid}/analyze", post(analyze_project))
+        .route("/projects/{pid}/render", post(render_project))
+        .route("/projects/{pid}/output", get(output))
+        .route("/projects/{pid}/original", get(original))
+        .route("/projects/{pid}/dub", get(dub_video))
         .route("/jobs/{job_id}/events", get(job_events))
         // SPA fallback — монтируется последним, чтобы не затенять API.
         .fallback(spa_fallback)
@@ -303,6 +337,156 @@ async fn patch_project(
     }
     match proj.to_json() {
         Ok(s) => ([("content-type", "application/json")], s).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ─── POST /projects/{pid}/render ────────────────────────────────────────────
+
+async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let proj_path = dir.join("project.json");
+    if !proj_path.is_file() {
+        return (StatusCode::CONFLICT, "project not analyzed yet").into_response();
+    }
+    // Исходный путь видео из source.txt (как в analyze/app.py).
+    let input = match std::fs::read_to_string(dir.join("source.txt")) {
+        Ok(s) => PathBuf::from(s.trim()),
+        Err(_) => return (StatusCode::CONFLICT, "no source uploaded").into_response(),
+    };
+    let output = dir.join("output.mp4");
+
+    let paths = render::RenderPaths {
+        input,
+        work_dir: dir.clone(),
+        output: output.clone(),
+        bsroformer_cli: st.bsroformer_cli.clone(),
+        bsroformer_model: st.bsroformer_model.clone(),
+        higgs_dll: st.higgs_dll.clone(),
+        higgs_model_root: st.higgs_model_root.clone(),
+        fonts_dir: st.fonts_dir.clone(),
+        higgs_backend: st.opts.device.clone(),
+        higgs_device: 0,
+        higgs_threads: st.opts.num_threads,
+        max_stretch: st.opts.max_stretch as f64,
+    };
+
+    let dir_for_job = dir.clone();
+    let out_for_result = output.clone();
+    let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
+        let cb = |ev: Value| progress(ev);
+        // Загрузить свежий Project (правки могли прийти после enqueue).
+        let text = std::fs::read_to_string(&proj_path).map_err(|e| e.to_string())?;
+        let proj = Project::from_json(&text).map_err(|e| e.to_string())?;
+        // regen_dub если есть dirty-сегменты (voice/text/rewrite правились).
+        let regen = proj.segments.iter().any(|s| s.dirty);
+        render::run(&proj, &paths, regen, &cb)?;
+        // Правки запечены в дубляж -> сбросить dirty (перечитать, чтобы не затереть правки во время рендера).
+        if regen {
+            let baked: std::collections::HashMap<String, String> =
+                proj.segments.iter().map(|s| (s.id.clone(), s.tgt_text.clone())).collect();
+            if let Ok(t2) = std::fs::read_to_string(&proj_path) {
+                if let Ok(mut cur) = Project::from_json(&t2) {
+                    for s in &mut cur.segments {
+                        if baked.get(&s.id) == Some(&s.tgt_text) {
+                            s.dirty = false;
+                        }
+                    }
+                    let _ = save_project_atomic(&dir_for_job, &cur);
+                }
+            }
+        }
+        Ok(json!({ "output": out_for_result.to_string_lossy() }))
+    });
+    let job_id = st.jobs.enqueue(job).await;
+    Json(json!({ "job_id": job_id })).into_response()
+}
+
+// ─── GET /projects/{pid}/output ; /original ; /dub (Range-раздача файла) ─────
+
+async fn output(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let f = dir.join("output.mp4");
+    if !f.is_file() {
+        return (StatusCode::NOT_FOUND, "not rendered").into_response();
+    }
+    let dl = q.get("dl").map(|v| v == "1").unwrap_or(false);
+    let filename = if dl { Some(format!("{pid}_dub.mp4")) } else { None };
+    serve_file_range(&f, req, filename).await
+}
+
+async fn original(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    // Исходное видео (для before/after). Путь из source.txt.
+    let input = match std::fs::read_to_string(dir.join("source.txt")) {
+        Ok(s) => PathBuf::from(s.trim()),
+        Err(_) => return (StatusCode::NOT_FOUND, "no source").into_response(),
+    };
+    if !input.is_file() {
+        return (StatusCode::NOT_FOUND, "source missing").into_response();
+    }
+    serve_file_range(&input, req, None).await
+}
+
+async fn dub_video(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    // Проигрываемое видео: output.mp4, иначе analyzed.mp4.
+    let mut f = dir.join("output.mp4");
+    if !f.is_file() {
+        f = dir.join("analyzed.mp4");
+    }
+    if !f.is_file() {
+        return (StatusCode::NOT_FOUND, "no dubbed video yet").into_response();
+    }
+    serve_file_range(&f, req, None).await
+}
+
+/// Отдать файл с поддержкой Range (для <video> seek). Используем tower-http ServeFile — он
+/// корректно обрабатывает Range/If-Range/Content-Range. dl -> Content-Disposition attachment.
+async fn serve_file_range(
+    path: &Path,
+    req: axum::http::Request<axum::body::Body>,
+    download_name: Option<String>,
+) -> Response {
+    use tower::ServiceExt;
+    use tower_http::services::ServeFile;
+    let svc = ServeFile::new(path);
+    match svc.oneshot(req).await {
+        Ok(mut resp) => {
+            if let Some(name) = download_name {
+                if let Ok(v) = axum::http::HeaderValue::from_str(&format!(
+                    "attachment; filename=\"{name}\""
+                )) {
+                    resp.headers_mut().insert(axum::http::header::CONTENT_DISPOSITION, v);
+                }
+            }
+            resp.map(axum::body::Body::new)
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

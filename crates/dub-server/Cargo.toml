@@ -10,6 +10,10 @@ dub-core = { path = "../dub-core" }
 dub-asr = { path = "../dub-asr" }
 dub-llm = { path = "../dub-llm" }
 dub-translate = { path = "../dub-translate" }
+dub-sep = { path = "../dub-sep" }
+dub-captions = { path = "../dub-captions" }
+audiocpp = { path = "../audiocpp" }
+hound = "3"
 axum = { version = "0.8", features = ["multipart"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "fs"] }

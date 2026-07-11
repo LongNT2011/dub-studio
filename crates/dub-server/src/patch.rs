@@ -117,6 +117,34 @@ fn op_rewrite(p: &mut Project, edit: &Value) -> PatchResult {
     Ok(())
 }
 
+/// recast — сменить режим/голос дубляжа. Порт api.recast: audio.voice.mode/name; все сегменты dirty
+/// (следующий /render перегенерит дубляж с новым голосом). Порт app.py op=="recast" (раунд 4).
+fn op_recast(p: &mut Project, edit: &Value) -> PatchResult {
+    let mode = s(edit, "voice_mode").unwrap_or_else(|| "clone".into());
+    p.audio.voice.mode = mode;
+    p.audio.voice.name = s(edit, "voice_name");
+    mark_all_dirty(p);
+    Ok(())
+}
+
+/// regen — пометить ОДИН сегмент dirty (ре-TTS только его на /render). Порт app.py op=="regen".
+fn op_regen(p: &mut Project, edit: &Value) -> PatchResult {
+    let sid = s(edit, "id").ok_or((400, "missing segment id".into()))?;
+    let seg = p
+        .segments
+        .iter_mut()
+        .find(|x| x.id == sid)
+        .ok_or((404, format!("segment {sid:?} not found")))?;
+    seg.dirty = true;
+    Ok(())
+}
+
+/// regen_all — пометить ВСЕ сегменты dirty (ре-TTS всего дубляжа). Порт app.py op=="regen_all".
+fn op_regen_all(p: &mut Project, _edit: &Value) -> PatchResult {
+    mark_all_dirty(p);
+    Ok(())
+}
+
 /// Применить одну PATCH-операцию к Project. op берётся из поля "op". Неизвестный op -> 400.
 pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
     let op = s(edit, "op").unwrap_or_default();
@@ -126,6 +154,9 @@ pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
         "mode" => op_mode(p, edit),
         "translate" => op_translate(p, edit),
         "rewrite" => op_rewrite(p, edit),
+        "recast" => op_recast(p, edit),
+        "regen" => op_regen(p, edit),
+        "regen_all" => op_regen_all(p, edit),
         other => Err((400, format!("unknown op {other:?}"))),
     }
 }

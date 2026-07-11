@@ -7,9 +7,11 @@ use std::collections::HashMap;
 /// Дефолтный рендер-шрифт libass (bundled, без Arial).
 pub const FONT_NAME: &str = "Montserrat";
 
-/// Реверсы (анимация появления текста) — порядок как в питоне.
+/// Реверсы (анимация появления текста) — порядок как в питоне. Публичный список для GET /presets.
+#[allow(dead_code)]
 pub const REVEALS: [&str; 5] = ["whole", "karaoke", "word", "pop", "highlight"];
 /// Плашки (фон): box..glow непрозрачные (прячут блюр оригинала); none/soft — для FRESH-режима.
+#[allow(dead_code)]
 pub const PLATES: [&str; 8] = [
     "box", "rounded", "pill", "blob", "card", "glow", "none", "soft",
 ];
@@ -229,6 +231,7 @@ pub fn resolve_look(
 }
 
 /// FONTS-словарь (family -> описание) для GET /presets, если понадобится.
+#[allow(dead_code)]
 pub fn fonts_map() -> HashMap<&'static str, &'static str> {
     HashMap::from([
         ("Montserrat", "clean geometric sans"),

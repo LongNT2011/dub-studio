@@ -4,6 +4,7 @@
 
 use dub_captions::{build, set_fonts_dir, BuildArgs, Sub, SubStyle};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 fn fonts_dir() -> PathBuf {
     // тесты запускаются из корня крейта -> ../../fonts (repo/fonts).
@@ -12,13 +13,18 @@ fn fonts_dir() -> PathBuf {
     p
 }
 
+// Уникальный счётчик -> отдельный ASS-файл на каждый вызов (тесты идут ПАРАЛЛЕЛЬНО; общий путь =
+// гонка чтения/записи, из-за которой два None-теста дрались за dc_test_match.ass).
+static SEQ: AtomicU64 = AtomicU64::new(0);
+
 fn gen(caption_style: Option<&str>, sub_style: Option<&SubStyle>) -> String {
     set_fonts_dir(fonts_dir());
     let subs = vec![
         Sub { start: 0.0, end: 2.0, tgt: "one two three".into(), y: Some(1500) },
         Sub { start: 2.0, end: 4.0, tgt: "four five six seven".into(), y: Some(1500) },
     ];
-    let out = std::env::temp_dir().join(format!("dc_test_{}.ass", caption_style.unwrap_or("match")));
+    let uid = SEQ.fetch_add(1, Ordering::Relaxed);
+    let out = std::env::temp_dir().join(format!("dc_test_{}_{uid}.ass", caption_style.unwrap_or("match")));
     let args = BuildArgs {
         subs: &subs,
         sub_style,

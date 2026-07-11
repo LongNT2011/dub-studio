@@ -125,3 +125,111 @@ pub fn extract_wav_16k_mono(input: &Path, out_wav: &Path) -> Result<(), String> 
     }
     Ok(())
 }
+
+// ─── Рендер-хелперы (порт media.py: extract_audio/duration/time_stretch/mix/mux/trim) ─────────
+
+fn run_ff(args: &[&std::ffi::OsStr]) -> Result<(), String> {
+    let out = Command::new(FFMPEG)
+        .args(args)
+        .output()
+        .map_err(|e| format!("ffmpeg запуск: {e}"))?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let tail: String = err.chars().rev().take(1500).collect::<String>().chars().rev().collect();
+        return Err(format!("ffmpeg код {:?}:\n{tail}", out.status.code()));
+    }
+    Ok(())
+}
+
+use std::ffi::OsStr;
+
+/// Извлечь аудио в WAV sr/ac (порт media.extract_audio). Для сепарации: sr=44100, ac=2.
+pub fn extract_audio(video: &Path, out_wav: &Path, sr: u32, ac: u32) -> Result<(), String> {
+    let sr = sr.to_string();
+    let ac = ac.to_string();
+    run_ff(&[
+        OsStr::new("-y"), OsStr::new("-i"), video.as_os_str(),
+        OsStr::new("-vn"), OsStr::new("-ac"), OsStr::new(&ac),
+        OsStr::new("-ar"), OsStr::new(&sr), out_wav.as_os_str(),
+    ])
+}
+
+/// WAV/медиа -> 16k mono (порт media.to_16k_mono).
+pub fn to_16k_mono(src: &Path, dst: &Path) -> Result<(), String> {
+    run_ff(&[
+        OsStr::new("-y"), OsStr::new("-i"), src.as_os_str(),
+        OsStr::new("-vn"), OsStr::new("-ac"), OsStr::new("1"),
+        OsStr::new("-ar"), OsStr::new("16000"), dst.as_os_str(),
+    ])
+}
+
+/// Длительность файла в секундах (ffprobe format.duration). Порт media.duration.
+pub fn duration(path: &Path) -> Result<f64, String> {
+    let out = Command::new(FFPROBE)
+        .args(["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"])
+        .arg(path)
+        .output()
+        .map_err(|e| format!("ffprobe запуск: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("ffprobe duration код {:?}", out.status.code()));
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse::<f64>()
+        .map_err(|e| format!("duration parse: {e}"))
+}
+
+/// atempo-цепочка для factor вне [0.5,2.0] (порт media._atempo_chain).
+fn atempo_chain(factor: f64) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut f = factor;
+    while f > 2.0 {
+        parts.push("atempo=2.0".into());
+        f /= 2.0;
+    }
+    while f < 0.5 {
+        parts.push("atempo=0.5".into());
+        f /= 0.5;
+    }
+    parts.push(format!("atempo={:.6}", f));
+    parts.join(",")
+}
+
+/// factor>1 ускоряет (укорачивает); <1 замедляет. Порт media.time_stretch.
+pub fn time_stretch(src: &Path, dst: &Path, factor: f64) -> Result<(), String> {
+    let chain = atempo_chain(factor);
+    run_ff(&[
+        OsStr::new("-y"), OsStr::new("-i"), src.as_os_str(),
+        OsStr::new("-filter:a"), OsStr::new(&chain), dst.as_os_str(),
+    ])
+}
+
+/// Свести дубль-вокал поверх инструментала (музыка приглушена music_gain=0.45). Порт media.mix.
+pub fn mix(voice: &Path, music: &Path, out: &Path) -> Result<(), String> {
+    let fc = "[1:a]volume=0.45[m];[0:a][m]amix=inputs=2:duration=longest:dropout_transition=0";
+    run_ff(&[
+        OsStr::new("-y"), OsStr::new("-i"), voice.as_os_str(), OsStr::new("-i"), music.as_os_str(),
+        OsStr::new("-filter_complex"), OsStr::new(fc),
+        OsStr::new("-c:a"), OsStr::new("aac"), OsStr::new("-b:a"), OsStr::new("192k"), out.as_os_str(),
+    ])
+}
+
+/// Смуксить видео (copy) + аудио (aac). БЕЗ -shortest (выход по длиннейшему потоку). Порт media.mux.
+pub fn mux(video: &Path, audio: &Path, out: &Path) -> Result<(), String> {
+    run_ff(&[
+        OsStr::new("-y"), OsStr::new("-i"), video.as_os_str(), OsStr::new("-i"), audio.as_os_str(),
+        OsStr::new("-map"), OsStr::new("0:v:0"), OsStr::new("-map"), OsStr::new("1:a:0"),
+        OsStr::new("-c:v"), OsStr::new("copy"), OsStr::new("-c:a"), OsStr::new("aac"), out.as_os_str(),
+    ])
+}
+
+/// Вырезать [start,end] в mono 16k (для клон-референса). Порт media.trim.
+pub fn trim(src: &Path, dst: &Path, start: f64, end: f64) -> Result<(), String> {
+    let ss = format!("{:.3}", start);
+    let to = format!("{:.3}", end);
+    run_ff(&[
+        OsStr::new("-y"), OsStr::new("-ss"), OsStr::new(&ss), OsStr::new("-to"), OsStr::new(&to),
+        OsStr::new("-i"), src.as_os_str(), OsStr::new("-ac"), OsStr::new("1"),
+        OsStr::new("-ar"), OsStr::new("16000"), dst.as_os_str(),
+    ])
+}

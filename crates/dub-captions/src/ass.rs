@@ -18,13 +18,14 @@ pub fn ts(seconds: f64) -> String {
 }
 
 /// Каталог bundled-шрифтов (fonts/). Путь к файлу шрифта для измерения. Env DUB_STUDIO_FONTS_DIR,
-/// иначе <repo>/fonts. Резолв через глобально заданный корень (см. set_fonts_dir).
-static mut FONTS_DIR: Option<std::path::PathBuf> = None;
+/// иначе установленный set_fonts_dir, иначе ./fonts. Потокобезопасно (Mutex — параллельные тесты/джобы
+/// делят процесс; static mut был бы UB).
+static FONTS_DIR: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
 
 /// Установить каталог шрифтов (вызывается сервером/примером до build). Идемпотентно.
 pub fn set_fonts_dir(dir: impl AsRef<Path>) {
-    unsafe {
-        FONTS_DIR = Some(dir.as_ref().to_path_buf());
+    if let Ok(mut g) = FONTS_DIR.lock() {
+        *g = Some(dir.as_ref().to_path_buf());
     }
 }
 
@@ -33,9 +34,8 @@ pub fn fonts_dir() -> std::path::PathBuf {
     if let Ok(d) = std::env::var("DUB_STUDIO_FONTS_DIR") {
         return std::path::PathBuf::from(d);
     }
-    unsafe {
-        #[allow(static_mut_refs)]
-        if let Some(d) = FONTS_DIR.clone() {
+    if let Ok(g) = FONTS_DIR.lock() {
+        if let Some(d) = g.clone() {
             return d;
         }
     }
