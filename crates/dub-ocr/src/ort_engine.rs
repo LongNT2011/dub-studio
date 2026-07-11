@@ -74,6 +74,12 @@ impl OnnxModel {
         Ok(Self { session })
     }
 
+    /// Кастомная метадата модели по ключу "character" (словарь rec, как RapidOCR v3). None если ключа нет.
+    pub fn metadata_character(&self) -> Result<Option<String>, String> {
+        let meta = self.session.metadata().map_err(|e| format!("metadata: {e}"))?;
+        Ok(meta.custom("character").map(|s| s.to_string()))
+    }
+
     /// Прогнать [N,3,H,W] f32 -> (shape, данные) первого выхода.
     pub fn run(&mut self, input: Array4<f32>) -> Result<(Vec<usize>, Vec<f32>), String> {
         // (shape, &data)-форма конструктора тензора — стабильна в rc.12 (ArrayView-бонд капризен).

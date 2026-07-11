@@ -14,6 +14,8 @@ fn main() {
     let mut work = PathBuf::from(".");
     let mut models = PathBuf::from("models");
     let mut fps = 4i32;
+    let mut spoken_arg = String::new();
+    let mut frame_h = 824i64;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut next = || it.next().expect("флаг требует значение");
@@ -22,6 +24,8 @@ fn main() {
             "--work" => work = PathBuf::from(next()),
             "--models" => models = PathBuf::from(next()),
             "--fps" => fps = next().parse().unwrap(),
+            "--frame-h" => frame_h = next().parse().unwrap(),
+            "--spoken" => spoken_arg = next(), // разделитель — запятая
             _ => {}
         }
     }
@@ -34,8 +38,12 @@ fn main() {
     let t0 = std::time::Instant::now();
     let (regions, raw) = detect_regions(&video, &work, &paths, fps, 0.3, 0.3, 8, 20.0, 0.4)
         .expect("detect_regions");
-    let spoken: HashSet<String> = HashSet::new();
-    let (localize, caption_boxes, sub_y) = analyze_layout(&regions, 824, &raw, &spoken);
+    let spoken: HashSet<String> = spoken_arg
+        .split(',')
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_lowercase())
+        .collect();
+    let (localize, caption_boxes, sub_y) = analyze_layout(&regions, frame_h, &raw, &spoken);
     eprintln!(
         "detect: {} regions, {} raw dets, {} caption_boxes, sub_y={:?} ({:.1}s)",
         regions.len(),

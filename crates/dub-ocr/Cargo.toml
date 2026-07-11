@@ -16,7 +16,6 @@ description = "Экранный OCR (PP-OCR ONNX: DBNet det + CRNN rec) для �
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "ndarray", "api-24"] }
 ndarray = "0.16"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
-imageproc = "0.25"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

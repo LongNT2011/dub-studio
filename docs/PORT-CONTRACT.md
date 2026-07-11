@@ -107,14 +107,28 @@ app.py контейнит отдачу web-root: `f.is_file() and (f == WEB_R or
 - `crates/dub-captions` — CapCut-субтитры через ffmpeg+libass (ASS). Порт `captions.py`: build() (титры
   localized-in-place + дублированные субтитры, 26 пресетов/реверсов) + burn()/burn_frame() (gblur боксов
   + оверлей ASS, NVENC). Метрики глифов — ab_glyph (замена PIL). Шрифты в `fonts/`.
-- `crates/dub-ocr` — экранный OCR (PP-OCR DBNet det + CRNN rec, `models/ocr/`) для блюр-боксов вшитого
-  текста. Порт `text_detect.py` (detect_regions: семплинг→det+rec→merge→IoU-трекинг) + `compose.py`
-  (analyze_layout: субтитр-полоса vs титры). Свой ort-пайплайн (rc.12 load-dynamic, как dub-asr — один
-  OrtApi). **ОТКЛОНЕНИЕ от питона (с причиной):** analyze_layout деградирует spoken-гейт к чисто
-  геометрическому сигналу, когда rec ненадёжен (наш CRNN шумит на мелких/motion-blur субтитрах, в отличие
-  от чистого PP-OCR питона) — иначе строгий spoken-match убивал реальную субтитр-полосу. Геометрия
-  (повторяющийся текст в нижней полосе) верна независимо от качества rec.
+- `crates/dub-ocr` — экранный OCR (PP-OCR DBNet det + CRNN rec + cls, `models/ocr/`) для блюр-боксов
+  вшитого текста. Порт `text_detect.py` (detect_regions: семплинг→det+(cls)+rec→merge→IoU-трекинг) +
+  `compose.py` (analyze_layout: субтитр-полоса vs титры). Свой ort-пайплайн (rc.12 load-dynamic api-24,
+  как dub-asr — один OrtApi; БЕЗ download-binaries, ndarray 0.16 — единый набор фич по воркспейсу).
+  Детекция — полный DBPostProcess: connected-components → min-area-rect → box_score_fast → **unclip
+  истинным edge-normal offset** (равномерно растит тонкие широкие боксы сабов по высоте; радиальный
+  сдвиг от центроида резал глифы по высоте → rec шумел). Словарь rec — из **метадаты ONNX** (ключ
+  `character`, как RapidOCR v3; blank префиксуется, токены КАК ЕСТЬ — лишний пробел сдвигал индексы
+  CTC). Живой прогон example_original.mp4: rec читает вшитые сабы чисто («КОРОЧЕ ОН» 0.81, «ПОДКЛЮЧЕН»
+  0.86–0.90, «У МЕНЯ CLAUDE» 0.90, «сигнал» 0.98, «получается» 0.94 — score>0.8).
+  **spoken-гейт analyze_layout — питон-смысл, устойчивый к rec:** геометрия дословно питоновская
+  (`nt>=3` distinct-строк в нижней полосе; A-шный доп. ratio `nt>=0.3*len` снят — питон убрал его как
+  fps-хрупкий). Питоновский порог `spoken_frac>=0.5` структурно недостижим на СКЛЕЕННЫХ read'ах
+  PP-OCR-CRNN (строка выходит без пробелов: «онотправляеТ») — проверено запуском самого питоновского
+  `compose.analyze_layout` на наших raw: он тоже отдаёт 0 боксов (frac полосы ~0.11). Поэтому spoken
+  служит РАЗЛИЧИТЕЛЕМ сцен-графики (снек-паки/вывески НЕ говорят сказанного → frac==0) от субтитр-полосы
+  (говорит → frac>0); измерение усилено фолдингом гомоглифов (латиница↔кириллица, К↔K и т.п. — модель
+  их путает) и матчем по подстроке. Полосу отбрасываем лишь если spoken есть И frac==0 — это верный
+  питоновский смысл (блюрить только реальные субтитры). Живой analyze: sub_y=640, полоса сабов накрыта
+  (fps=2 → 89 caption_boxes; fps=4 → 184), сцен-графика (cy≈464) исключена в localize.
 - Рендер-ядро — `crates/dub-server/src/render.rs`: порт render-половины `pipeline.run` + `_build_dub`
   TTS-ветки + `assemble.py` + `compose.py`(mix)/`media.mix`. OCR-стадия analyze — `ocr.rs`.
 - Остаётся (раунд 5): preview?t&rev, waveform, undo/Cmd-K, remix, прочие PATCH (caption/blur*/title*/
-  preset), портативная упаковка. Rec-качество OCR (шум на быстрых субтитрах — геометрия боксов верна).
+  preset), портативная упаковка. (Rec-качество OCR доведено: edge-normal unclip + словарь-из-меты —
+  вшитые сабы читаются чисто, score>0.8; поглощена ветка r4-ocr.)

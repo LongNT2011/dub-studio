@@ -1,20 +1,16 @@
-//! DBNet-детекция текста (PP-OCR det.onnx). Препроцесс: resize к кратному 32, нормализация ImageNet;
-//! постпроцесс: порог по вероятности -> связные компоненты (imageproc) -> bbox каждого региона,
-//! отфильтрованные по площади. Возвращает боксы (x,y,w,h) в координатах ИСХОДНОГО кадра.
+//! DBNet-детекция текста (PP-OCRv5 det mobile). Порт препроцесса и DBPostProcess из RapidOCR/PP-OCR
+//! с ДЕФОЛТНЫМИ порогами config.yaml: limit_type=min, limit_side_len=736, mean/std=0.5,
+//! thresh=0.3, box_thresh=0.5, unclip_ratio=1.6, use_dilation=true, score_mode=fast.
 //!
-//! Это упрощение классического DB-постпроцесса (без polygon unclip) — для нашей задачи (боксы под
-//! блюр вшитых субтитров) достаточно bbox связной области: блюр всё равно растит бокс, а compose-слой
-//! мержит строки. Никаких эвристик под конкретный клип — чистый порог+CC.
+//! Постпроцесс: порог по карте вероятностей -> дилатация -> связные компоненты -> min-area-rect ->
+//! box_score_fast -> unclip (истинный edge-normal offset, geometry::unclip) -> осевой bbox в
+//! координатах исходного кадра. Именно edge-normal unclip (а не радиальный от центроида) равномерно
+//! растит тонкие широкие боксы сабов по высоте — без него кроп резал глифы и rec шумел.
 
+use crate::geometry::{box_score_fast, connected_components, min_area_rect, unclip, Point};
 use crate::ort_engine::OnnxModel;
-use image::{GrayImage, RgbImage};
-use imageproc::region_labelling::{connected_components, Connectivity};
+use image::RgbImage;
 use ndarray::Array4;
-
-/// Порог вероятности карты DB (стандарт PP-OCR 0.3).
-const BOX_THRESH: f32 = 0.3;
-/// Макс. сторона входа детектора (down-scale для скорости; PP-OCR дефолт 960).
-const MAX_SIDE: u32 = 960;
 
 /// Бокс детекции в координатах исходного кадра.
 #[derive(Clone, Copy, Debug)]
@@ -25,74 +21,159 @@ pub struct DetBox {
     pub h: f32,
 }
 
-/// Прогнать детектор на RGB-кадре -> список боксов. Порт det-части _lines (PP-OCR det).
-pub fn detect(model: &mut OnnxModel, img: &RgbImage) -> Result<Vec<DetBox>, String> {
-    let (ow, oh) = (img.width(), img.height());
-    // resize: длинную сторону к <=MAX_SIDE, обе стороны кратны 32 (требование DBNet).
-    let scale = (MAX_SIDE as f32 / ow.max(oh) as f32).min(1.0);
-    let rw = (((ow as f32 * scale) / 32.0).round() as u32 * 32).max(32);
-    let rh = (((oh as f32 * scale) / 32.0).round() as u32 * 32).max(32);
-    let resized = image::imageops::resize(img, rw, rh, image::imageops::FilterType::Triangle);
+/// Пороги DBNet (дефолты RapidOCR config.yaml, секция Det).
+#[derive(Clone, Copy, Debug)]
+pub struct DetParams {
+    pub limit_side_len: u32,
+    pub thresh: f32,
+    pub box_thresh: f32,
+    pub unclip_ratio: f32,
+    pub use_dilation: bool,
+    pub min_size: f32,
+    pub max_candidates: usize,
+}
 
-    // NCHW f32, нормализация ImageNet (mean/std как в PP-OCR).
-    let mean = [0.485f32, 0.456, 0.406];
-    let std = [0.229f32, 0.224, 0.225];
+impl Default for DetParams {
+    fn default() -> Self {
+        Self {
+            limit_side_len: 736,
+            thresh: 0.3,
+            box_thresh: 0.5,
+            unclip_ratio: 1.6,
+            use_dilation: true,
+            min_size: 3.0,
+            max_candidates: 1000,
+        }
+    }
+}
+
+/// Изменённый размер, кратный 32, по правилу limit_type=min: короткая сторона >= limit_side_len.
+fn resize_shape(w: u32, h: u32, limit_side_len: u32) -> (u32, u32) {
+    let (w, h) = (w as f32, h as f32);
+    let min_side = w.min(h);
+    let ratio = if min_side < limit_side_len as f32 {
+        limit_side_len as f32 / min_side
+    } else {
+        1.0
+    };
+    let round32 = |v: f32| {
+        let r = (v / 32.0).round().max(1.0) * 32.0;
+        r as u32
+    };
+    (round32(w * ratio), round32(h * ratio))
+}
+
+/// Дилатация 3x3 бинарной карты (эквивалент cv2.dilate ядром np.ones((2,2)); берём 3x3 как
+/// консервативное расширение — PP-OCR применяет dilation чтобы соединить разорванные штрихи).
+fn dilate3(bitmap: &[u8], w: usize, h: usize) -> Vec<u8> {
+    let mut out = vec![0u8; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let mut v = 0u8;
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    let nx = x as i32 + dx;
+                    let ny = y as i32 + dy;
+                    if nx >= 0 && ny >= 0 && (nx as usize) < w && (ny as usize) < h {
+                        v |= bitmap[ny as usize * w + nx as usize];
+                    }
+                }
+            }
+            out[y * w + x] = v;
+        }
+    }
+    out
+}
+
+/// Прогнать детектор на RGB-кадре -> список боксов (x,y,w,h) в координатах исходного кадра.
+/// Порт det-части _lines (PP-OCR det + DBPostProcess).
+pub fn detect(model: &mut OnnxModel, img: &RgbImage, p: &DetParams) -> Result<Vec<DetBox>, String> {
+    let (src_w, src_h) = (img.width(), img.height());
+    let (rw, rh) = resize_shape(src_w, src_h, p.limit_side_len);
+    // препроцесс: билинейный ресайз в (rw, rh), нормализация (x/255 - mean)/std, mean=std=0.5.
     let mut input = Array4::<f32>::zeros((1, 3, rh as usize, rw as usize));
-    for (x, y, px) in resized.enumerate_pixels() {
-        for c in 0..3 {
-            let v = px[c] as f32 / 255.0;
-            input[[0, c, y as usize, x as usize]] = (v - mean[c]) / std[c];
+    let sx = src_w as f32 / rw as f32;
+    let sy = src_h as f32 / rh as f32;
+    for oy in 0..rh as usize {
+        let fy = ((oy as f32 + 0.5) * sy - 0.5).clamp(0.0, src_h as f32 - 1.0);
+        let y0 = fy.floor() as usize;
+        let y1 = (y0 + 1).min(src_h as usize - 1);
+        let wy = fy - y0 as f32;
+        for ox in 0..rw as usize {
+            let fx = ((ox as f32 + 0.5) * sx - 0.5).clamp(0.0, src_w as f32 - 1.0);
+            let x0 = fx.floor() as usize;
+            let x1 = (x0 + 1).min(src_w as usize - 1);
+            let wx = fx - x0 as f32;
+            for c in 0..3 {
+                let sample = |xx: usize, yy: usize| img.get_pixel(xx as u32, yy as u32)[c] as f32;
+                let top = sample(x0, y0) * (1.0 - wx) + sample(x1, y0) * wx;
+                let bot = sample(x0, y1) * (1.0 - wx) + sample(x1, y1) * wx;
+                let val = top * (1.0 - wy) + bot * wy;
+                input[[0, c, oy, ox]] = (val / 255.0 - 0.5) / 0.5;
+            }
         }
     }
 
-    let (shape, data) = model.run(input)?;
-    // выход [1,1,H,W] карта вероятностей.
-    let (mh, mw) = (shape[shape.len() - 2], shape[shape.len() - 1]);
-    // бинаризация -> GrayImage (255 где prob>thresh).
-    let mut mask = GrayImage::new(mw as u32, mh as u32);
-    for y in 0..mh {
-        for x in 0..mw {
-            let p = data[y * mw + x];
-            mask.put_pixel(x as u32, y as u32, image::Luma([if p > BOX_THRESH { 255 } else { 0 }]));
+    let (shape, flat) = model.run(input)?;
+    // форма (1,1,ph,pw) -> вероятностная карта
+    let (ph, pw) = (shape[shape.len() - 2], shape[shape.len() - 1]);
+
+    // порог -> бинарная карта
+    let mut bitmap = vec![0u8; pw * ph];
+    for i in 0..pw * ph {
+        if flat[i] > p.thresh {
+            bitmap[i] = 1;
         }
     }
+    let bitmap = if p.use_dilation {
+        dilate3(&bitmap, pw, ph)
+    } else {
+        bitmap
+    };
 
-    // связные компоненты -> bbox каждой метки.
-    let labels = connected_components(&mask, Connectivity::Eight, image::Luma([0u8]));
-    let mut bounds: std::collections::HashMap<u32, (u32, u32, u32, u32)> = std::collections::HashMap::new();
-    for (x, y, px) in labels.enumerate_pixels() {
-        let l = px[0];
-        if l == 0 {
+    let comps = connected_components(&bitmap, pw, ph);
+    // масштаб карты -> исходный кадр
+    let scale_x = src_w as f32 / pw as f32;
+    let scale_y = src_h as f32 / ph as f32;
+
+    let mut boxes: Vec<DetBox> = Vec::new();
+    for comp in comps.into_iter().take(p.max_candidates.max(1) * 4) {
+        if comp.len() < 4 {
             continue;
         }
-        let e = bounds.entry(l).or_insert((x, y, x, y));
-        e.0 = e.0.min(x);
-        e.1 = e.1.min(y);
-        e.2 = e.2.max(x);
-        e.3 = e.3.max(y);
-    }
-
-    // масштаб карты -> исходный кадр.
-    let sx = ow as f32 / mw as f32;
-    let sy = oh as f32 / mh as f32;
-    let min_area = (mw * mh) as f32 * 0.00003; // отсечь пиксельный шум
-    // unclip: DB-боксы тесно облегают ink; расширяем ~на 15% высоты по всем сторонам, чтобы кроп
-    // захватил полные глифы (иначе rec режет края букв -> шум). Аналог DB unclip_ratio (упрощённо).
-    let mut boxes = Vec::new();
-    for (_, (x0, y0, x1, y1)) in bounds {
-        let bw = (x1 - x0 + 1) as f32;
-        let bh = (y1 - y0 + 1) as f32;
-        if bw * bh < min_area {
+        let pts: Vec<Point> = comp
+            .iter()
+            .map(|&idx| ((idx % pw) as f32, (idx / pw) as f32))
+            .collect();
+        let quad = min_area_rect(&pts);
+        if quad.min_side() < p.min_size {
             continue;
         }
-        let (fx, fy, fw, fh) = (x0 as f32 * sx, y0 as f32 * sy, bw * sx, bh * sy);
-        let ex = fh * 0.15; // разгон по горизонтали шире (буквы обрезаются по бокам сильнее)
-        let ey = fh * 0.12;
-        let nx = (fx - ex).max(0.0);
-        let ny = (fy - ey).max(0.0);
-        let nw = (fw + 2.0 * ex).min(ow as f32 - nx);
-        let nh = (fh + 2.0 * ey).min(oh as f32 - ny);
-        boxes.push(DetBox { x: nx, y: ny, w: nw, h: nh });
+        // score по карте вероятностей (в координатах карты)
+        let score = box_score_fast(&flat, pw, ph, &quad);
+        if score < p.box_thresh {
+            continue;
+        }
+        let expanded = unclip(&quad, p.unclip_ratio);
+        if expanded.min_side() < p.min_size + 2.0 {
+            continue;
+        }
+        let (x0, y0, x1, y1) = expanded.aabb();
+        let bx = (x0 * scale_x).max(0.0);
+        let by = (y0 * scale_y).max(0.0);
+        let bw = ((x1 - x0) * scale_x).min(src_w as f32 - bx);
+        let bh = ((y1 - y0) * scale_y).min(src_h as f32 - by);
+        if bw >= 1.0 && bh >= 1.0 {
+            boxes.push(DetBox {
+                x: bx,
+                y: by,
+                w: bw,
+                h: bh,
+            });
+        }
+        if boxes.len() >= p.max_candidates {
+            break;
+        }
     }
     Ok(boxes)
 }

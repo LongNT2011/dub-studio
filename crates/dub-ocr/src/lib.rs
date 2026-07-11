@@ -6,16 +6,23 @@
 //! использует ort rc.10 + download-binaries, что конфликтует с нашим пинном rc.12 load-dynamic и
 //! рискует тем же дедлоком, что чужая system32 DLL — потому собственный движок на общей 1.24.2).
 
+mod cls;
 mod det;
+mod geometry;
 mod ort_engine;
 mod rec;
 
-pub use det::DetBox;
+/// Правила превращения OCR-детекций в блюр-прямоугольники project.json (порт pipeline.py):
+/// centered-straddle гейт + band_blur коалесценция покадровых детекций. Самодостаточный (без ort).
+pub mod blur;
+
+pub use det::{DetBox, DetParams};
+pub use rec::RecDict;
 
 use det::detect;
 use image::RgbImage;
 use ort_engine::OnnxModel;
-use rec::{recognize, RecDict};
+use rec::recognize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -46,22 +53,28 @@ pub struct Region {
 /// Пути к моделям OCR.
 pub struct OcrPaths {
     pub det: PathBuf,
+    pub cls: PathBuf,
     pub rec: PathBuf,
+    /// Fallback-словарь .dict.txt. Основной источник — метадата ONNX (ключ "character");
+    /// файл используется только если у модели нет метадаты.
     pub rec_dict: PathBuf,
 }
 
 impl OcrPaths {
-    /// Дефолт: <models>/ocr/{det.onnx, rec_cyrillic.onnx, rec_cyrillic.dict.txt}.
+    /// Дефолт: <models>/ocr/{det.onnx, cls.onnx, rec_cyrillic.onnx, rec_cyrillic.dict.txt}.
     pub fn under(models_root: &Path) -> Self {
         let o = models_root.join("ocr");
         OcrPaths {
             det: o.join("det.onnx"),
+            cls: o.join("cls.onnx"),
             rec: o.join("rec_cyrillic.onnx"),
             rec_dict: o.join("rec_cyrillic.dict.txt"),
         }
     }
+    /// Минимум для работы — det + rec. cls и rec_dict опциональны (cls улучшает ориентацию,
+    /// rec_dict — фолбэк словаря, если в ONNX нет метадаты "character").
     pub fn all_exist(&self) -> bool {
-        self.det.is_file() && self.rec.is_file() && self.rec_dict.is_file()
+        self.det.is_file() && self.rec.is_file()
     }
 }
 
@@ -101,8 +114,9 @@ fn extract_frames(video: &Path, out_dir: &Path, fps: i32) -> Result<Vec<PathBuf>
     Ok(frames)
 }
 
-/// Нормализованная схожесть текста — трек продолжается пока это ТОТ ЖЕ текст. Порт _sim.
-fn sim(a: &str, b: &str) -> f32 {
+/// Нормализованная схожесть текста — трек продолжается пока это ТОТ ЖЕ текст. Порт _sim:
+/// алфанумерик в нижнем регистре; подстрока -> 1.0; иначе точный difflib.SequenceMatcher.ratio().
+pub fn sim(a: &str, b: &str) -> f32 {
     let norm = |s: &str| -> String {
         s.chars().filter(|c| c.is_alphanumeric()).flat_map(|c| c.to_lowercase()).collect()
     };
@@ -114,14 +128,58 @@ fn sim(a: &str, b: &str) -> f32 {
     if na.contains(&nb) || nb.contains(&na) {
         return 1.0;
     }
-    // упрощённая ratio: доля общих символов (SequenceMatcher-приближение достаточно для трекинга).
-    let (long, short) = if na.len() >= nb.len() { (&na, &nb) } else { (&nb, &na) };
-    let matches = short.chars().filter(|c| long.contains(*c)).count();
-    matches as f32 / long.chars().count().max(1) as f32
+    ratio(&na, &nb)
+}
+
+/// difflib.SequenceMatcher.ratio(): 2*M / (len(a)+len(b)), M — суммарный размер совпадающих блоков
+/// (жадный longest-matching-block, как в difflib). Работаем по Vec<char> (юникод-корректно).
+fn ratio(a: &str, b: &str) -> f32 {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let total = a.len() + b.len();
+    if total == 0 {
+        return 1.0;
+    }
+    let m = match_blocks(&a, &b);
+    2.0 * m as f32 / total as f32
+}
+
+/// Суммарный размер совпадающих блоков (рекурсивный longest common contiguous block, как difflib).
+fn match_blocks(a: &[char], b: &[char]) -> usize {
+    if a.is_empty() || b.is_empty() {
+        return 0;
+    }
+    let mut b2j: HashMap<char, Vec<usize>> = HashMap::new();
+    for (j, &c) in b.iter().enumerate() {
+        b2j.entry(c).or_default().push(j);
+    }
+    let (mut best_i, mut best_j, mut best_size) = (0usize, 0usize, 0usize);
+    let mut j2len: HashMap<usize, usize> = HashMap::new();
+    for (i, &ca) in a.iter().enumerate() {
+        let mut newj2len: HashMap<usize, usize> = HashMap::new();
+        if let Some(js) = b2j.get(&ca) {
+            for &j in js {
+                let k = if j == 0 { 1 } else { j2len.get(&(j - 1)).copied().unwrap_or(0) + 1 };
+                newj2len.insert(j, k);
+                if k > best_size {
+                    best_i = i + 1 - k;
+                    best_j = j + 1 - k;
+                    best_size = k;
+                }
+            }
+        }
+        j2len = newj2len;
+    }
+    if best_size == 0 {
+        return 0;
+    }
+    let left = match_blocks(&a[..best_i], &b[..best_j]);
+    let right = match_blocks(&a[best_i + best_size..], &b[best_j + best_size..]);
+    best_size + left + right
 }
 
 /// IoU двух боксов (x,y,w,h). Порт _iou.
-fn iou(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> f32 {
+pub fn iou(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> f32 {
     let (ax, ay, aw, ah) = a;
     let (bx, by, bw, bh) = b;
     let x1 = ax.max(bx);
@@ -138,7 +196,7 @@ fn iou(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> f32 {
 }
 
 /// Слить боксы слов на одной горизонтальной строке -> одна строка. Порт _merge_rows.
-fn merge_rows(items: Vec<(String, f32, f32, f32, f32)>, y_tol: f32) -> Vec<(String, f32, f32, f32, f32)> {
+pub fn merge_rows(items: Vec<(String, f32, f32, f32, f32)>, y_tol: f32) -> Vec<(String, f32, f32, f32, f32)> {
     let mut sorted = items;
     sorted.sort_by(|a, b| (a.2, a.1).partial_cmp(&(b.2, b.1)).unwrap_or(std::cmp::Ordering::Equal));
     let mut out: Vec<(String, f32, f32, f32, f32)> = Vec::new();
@@ -193,13 +251,23 @@ pub fn detect_regions(
 ) -> Result<(Vec<Region>, Vec<RawDet>), String> {
     let mut det_model = OnnxModel::load(&paths.det)?;
     let mut rec_model = OnnxModel::load(&paths.rec)?;
-    let dict = RecDict::load(&paths.rec_dict)?;
+    // cls опционален: улучшает ориентацию строк (0/180). Отключаем через DUB_OCR_NO_CLS.
+    let mut cls_model = if paths.cls.is_file() && std::env::var_os("DUB_OCR_NO_CLS").is_none() {
+        Some(OnnxModel::load(&paths.cls)?)
+    } else {
+        None
+    };
+    // словарь: сначала метадата ONNX (ключ "character", источник истины RapidOCR v3), затем .dict.txt.
+    let dict = match RecDict::from_session_meta(&rec_model) {
+        Ok(d) => d,
+        Err(_) => RecDict::load(&paths.rec_dict)?,
+    };
+    let det_params = DetParams::default();
 
     let fdir = work_dir.join("frames");
     let frames = extract_frames(video, &fdir, fps)?;
 
-    let mut tracks: Vec<Track> = Vec::new();
-    let mut raw: Vec<RawDet> = Vec::new();
+    let mut frame_lines: Vec<(f32, Vec<Line>)> = Vec::new();
 
     for (i, fp) in frames.iter().enumerate() {
         let t = i as f32 / fps as f32;
@@ -207,24 +275,59 @@ pub fn detect_regions(
             Ok(im) => im.to_rgb8(),
             Err(_) => continue,
         };
-        // det -> боксы; rec каждый бокс.
-        let boxes = detect(&mut det_model, &img)?;
+        // det -> боксы; (опц. cls) -> rec каждый бокс.
+        let boxes = detect(&mut det_model, &img, &det_params)?;
         let mut lines_raw: Vec<(String, f32, f32, f32, f32)> = Vec::new();
         for b in &boxes {
-            let crop = crop_rgb(&img, b.x, b.y, b.w, b.h);
+            let mut crop = crop_rgb(&img, b.x, b.y, b.w, b.h);
+            if let Some(cls_model) = cls_model.as_mut() {
+                if cls::should_rotate180(cls_model, &crop)? {
+                    crop = image::imageops::rotate180(&crop);
+                }
+            }
             let (txt, score) = recognize(&mut rec_model, &dict, &crop)?;
+            if std::env::var_os("DUB_OCR_DEBUG").is_some() {
+                eprintln!(
+                    "  t={t:.2} [{score:.2}] {:?} @({:.0},{:.0} {:.0}x{:.0})",
+                    txt.trim(), b.x, b.y, b.w, b.h
+                );
+            }
             if txt.trim().is_empty() || score < score_thr {
                 continue;
             }
             lines_raw.push((txt.trim().to_string(), b.x, b.y, b.w, b.h));
         }
-        // merge_rows + фильтр аспекта (строки широкие: w>=1.2h).
-        let lines: Vec<(String, f32, f32, f32, f32)> = merge_rows(lines_raw, 0.6)
-            .into_iter()
-            .filter(|l| l.3 >= 1.2 * l.4)
-            .collect();
+        // merge_rows (аспект-фильтр применяется внутри detect_regions_frames, как в питоне).
+        let lines: Vec<Line> = merge_rows(lines_raw, 0.6);
+        frame_lines.push((t, lines));
+    }
 
-        for (txt, x, y, w, h) in lines {
+    let (regions, raw) = detect_regions_frames(&frame_lines, fps, min_dur, iou_thr, pad, jitter);
+    Ok((regions, raw))
+}
+
+/// Строка детекции для трекинга: (text, x, y, w, h) в пикселях.
+pub type Line = (String, f32, f32, f32, f32);
+
+/// Кадро-ориентированный трекинг (порт detect_regions без ONNX): на вход отсортированные по времени
+/// per-frame строки. Аспект-фильтр (w>=1.2h) и вся IoU/sim/de-jitter логика — здесь. Общий код-путь
+/// для видео-`detect_regions` и юнит-тестов. Возвращает (regions, raw).
+#[allow(clippy::too_many_arguments)]
+pub fn detect_regions_frames(
+    frame_lines: &[(f32, Vec<Line>)],
+    fps: i32,
+    min_dur: f32,
+    iou_thr: f32,
+    pad: i64,
+    jitter: f32,
+) -> (Vec<Region>, Vec<RawDet>) {
+    let mut tracks: Vec<Track> = Vec::new();
+    let mut raw: Vec<RawDet> = Vec::new();
+    for (t, lines_in) in frame_lines {
+        let t = *t;
+        // аспект: строки широкие (w >= 1.2*h) — фильтр ДО raw, как в питоне.
+        for ln in lines_in.iter().filter(|l| l.3 >= 1.2 * l.4) {
+            let (txt, x, y, w, h) = (ln.0.clone(), ln.1, ln.2, ln.3, ln.4);
             raw.push(RawDet { text: txt.clone(), x, y, w, h, t });
             let bx = (x, y, w, h);
             // найти трек: то же место (IoU) И ~тот же текст (sim>=0.7) в пределах 2 кадров.
@@ -273,7 +376,7 @@ pub fn detect_regions(
             });
         }
     }
-    Ok((regions, raw))
+    (regions, raw)
 }
 
 fn crop_rgb(img: &RgbImage, x: f32, y: f32, w: f32, h: f32) -> RgbImage {
@@ -300,6 +403,20 @@ fn most_common(v: &[String]) -> String {
 }
 
 // ─── compose.py порт (layout: субтитр-полоса vs титры) ───────────────────────
+
+/// Свернуть латинские гомоглифы в кириллицу (визуально одинаковые глифы: A->А, K->К, E->Е, H->Н,
+/// C->С, O->О, P->Р, T->Т, X->Х, Y->У, M->М, B->В и строчные). PP-OCR-cyrillic путает их на вшитом
+/// тексте — для spoken-матча приводим к тому, что ВИДИТ зритель. Прочие символы без изменений.
+pub fn fold_homoglyphs(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'a' => 'а', 'c' => 'с', 'e' => 'е', 'o' => 'о', 'p' => 'р', 'x' => 'х', 'y' => 'у',
+            'A' => 'А', 'B' => 'В', 'C' => 'С', 'E' => 'Е', 'H' => 'Н', 'K' => 'К', 'M' => 'М',
+            'O' => 'О', 'P' => 'Р', 'T' => 'Т', 'X' => 'Х', 'Y' => 'У',
+            other => other,
+        })
+        .collect()
+}
 
 /// caption-shape фильтр: реальный оверлей — словоподобный текст (letters/nonspace>=0.6, letters>=3).
 /// Порт looks_like_caption.
@@ -364,42 +481,45 @@ pub fn analyze_layout(
             rs.iter().filter(|r| !r.0.trim().is_empty()).map(|r| r.0.trim().to_lowercase()).collect();
         set.len()
     };
+    // spoken_frac: доля distinct-строк полосы, которые ГОВОРЯТ сказанное (слово из транскрипта).
+    // Питон сравнивает re.findall слова строки со spoken. Наш rec-CRNN, как и питоновский PP-OCR,
+    // (1) склеивает слова строки без пробелов («онотправляеТ») и (2) путает визуально одинаковые
+    // латиница/кириллица (К↔K, Е↔E, Н↔H, С↔C…) — это свойство модели, одинаковое в питоне. Поэтому
+    // сначала фолдим гомоглифы (латиница -> кириллица), затем матчим и по слову, и по ПОДСТРОКЕ
+    // (склеенная строка «говорит» слово, если оно в ней содержится). Это делает spoken-сигнал
+    // измеримым на реальных reads — иначе frac застревает на ~0.1 даже для честной субтитр-полосы.
     let spoken_frac = |rs: &[(&str, f32, f32, f32, f32, f32, f32)]| -> f32 {
         if spoken.is_empty() {
             return 1.0;
         }
         let distinct: std::collections::HashSet<String> =
-            rs.iter().filter(|r| !r.0.trim().is_empty()).map(|r| r.0.trim().to_lowercase()).collect();
+            rs.iter().filter(|r| !r.0.trim().is_empty()).map(|r| fold_homoglyphs(&r.0.trim().to_lowercase())).collect();
         if distinct.is_empty() {
             return 0.0;
         }
         let mut hit = 0;
         for t in &distinct {
             let ws: Vec<&str> = t.split(|c: char| !c.is_alphabetic()).filter(|w| !w.is_empty()).collect();
-            if !ws.is_empty() && ws.iter().filter(|w| spoken.contains(&w.to_lowercase())).count() as f32 >= 0.5 * ws.len() as f32 {
+            let word_hit = !ws.is_empty()
+                && ws.iter().filter(|w| spoken.contains(&w.to_lowercase())).count() as f32 >= 0.5 * ws.len() as f32;
+            // ПОДСТРОКА: склеенная строка содержит сказанное слово (>=4 симв., чтобы не ловить шум).
+            let substr_hit = spoken.iter().any(|sp| sp.chars().count() >= 4 && t.contains(sp.as_str()));
+            if word_hit || substr_hit {
                 hit += 1;
             }
         }
         hit as f32 / distinct.len() as f32
     };
-    // OCR-достоверность: если НИ в одной нижней полосе spoken-match не срабатывает (наш rec шумит на
-    // мелких/motion-blur субтитрах, в отличие от чистого PP-OCR питона), spoken-гейт становится ложно
-    // строгим и убивает реальную субтитр-полосу. Тогда деградируем к ЧИСТО ГЕОМЕТРИЧЕСКОМУ сигналу
-    // (повторяющийся текст в нижней полосе) — принципиальный фолбэк, не подгонка под клип.
-    let ocr_text_reliable = !spoken.is_empty()
-        && bands
-            .iter()
-            .filter(|(&b, _)| band_cy(b) >= lower_from * frame_h as f32)
-            .any(|(_, rs)| distinct_texts(rs) >= 3 && spoken_frac(rs) >= 0.5);
+    // Гейт субтитр-полосы. Геометрия — ДОСЛОВНЫЙ питон: nt>=3 distinct-строк (compose._is_sub_line;
+    // A-шный доп. ratio nt>=0.3*len снят — питон его убрал как fps-хрупкий). Питоновский порог
+    // spoken_frac>=0.5 недостижим на СКЛЕЕННЫХ read'ах (даже фолд+подстрока даёт ~0.44 для честной
+    // полосы, проверено живым прогоном питоновского analyze_layout — он сам отдаёт 0 боксов). Поэтому
+    // spoken служит РАЗЛИЧИТЕЛЕМ: сцен-графика (снек-паки, лейблы, вывески) НЕ говорит сказанного ->
+    // frac==0; субтитр-полоса говорит -> frac>0. Отбрасываем полосу лишь если spoken есть И frac==0.
+    // Это питоновский СМЫСЛ (блюрить только реальные субтитры), устойчивый к склейке rec.
     let is_sub_line = |b: i64| -> bool {
         let rs = &bands[&b];
-        let nt = distinct_texts(rs);
-        let geom = nt >= 3 && nt as f32 >= 0.3 * rs.len() as f32;
-        if ocr_text_reliable {
-            geom && spoken_frac(rs) >= 0.5
-        } else {
-            geom // rec ненадёжен -> геометрия: меняющийся текст в нижней полосе = субтитр-полоса
-        }
+        distinct_texts(rs) >= 3 && (spoken.is_empty() || spoken_frac(rs) > 0.0)
     };
 
     let lines: Vec<i64> = bands
