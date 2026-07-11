@@ -94,5 +94,14 @@ app.py контейнит отдачу web-root: `f.is_file() and (f == WEB_R or
   Порт `dubengine/asr.py` (`_segment`, `transcribe`, `transcribe_turns`) и `diarize.py` (turns/assign).
 - `crates/audiocpp` — Higgs Audio v3 TTS/клон голоса (FFI над audiocpp_engine.dll). Порт `tts.py`/`voices.py`.
 - `crates/dub-core` — типы Project (serde, extra="allow" round-trip) и EngineOpts. Порт `project.py`/`opts.py`.
-- Будущие раунды: перевод/vision (llama.cpp + Gemma), separation (sherpa-onnx), OCR (RapidOcrOnnx),
-  captions/рендер (ffmpeg) — `pipeline.py`, `captions.py`, `ctx_translate.py`, `compose.py`, `assemble.py`.
+- `crates/dub-sep` — вокал/инструментал сепарация. Порт `dubengine/separate.py`, но ДВИЖОК ЗАМЕНЁН
+  приказом юзера (2026-07-11): вместо UVR-MDX (audio-separator) — **Mel-Band Roformer voc_fv6-Q8_0**
+  через нативный сайдкар **BSRoformer.cpp** (C++/ggml, CUDA). CLI отдаёт ТОЛЬКО вокал-стем (num_stems=1);
+  инструментал = `mix − vocals` во временной области (выход выровнен по семплам, реконструкция точная).
+  Движок — `tools/bsroformer/` (bs_roformer-cli.exe + 4 ggml-DLL, CUDA), модель — `models/bsroformer/`
+  (в .gitignore, копируются с диска, не качаются). Вход движка 44.1кГц.
+  **ВРЕЗКА (раунд 4):** analyze audio-context (Gemma «слышит» вокал) сейчас получает vocals-стем
+  сепарации, а не полный микс (в раунде 3 подавался `vocals16` из полного микса — теперь перед
+  извлечением 16k mono микс прогоняется через dub-sep). Рендер использует instrumental как фон.
+- Будущие раунды: OCR (PP-OCR ONNX), captions/рендер (ffmpeg) — `text_detect.py`/`compose.py`,
+  `captions.py`, `pipeline.py`, `compose.py`, `assemble.py`.

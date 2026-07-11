@@ -6,6 +6,7 @@ members = [
     "crates/dub-core",
     "crates/dub-llm",
     "crates/dub-translate",
+    "crates/dub-sep",
     "crates/dub-server",
 ]
 # Оболочка Tauri — отдельная единица сборки (тяжёлое дерево tauri), собирается своим

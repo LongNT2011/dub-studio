@@ -11,6 +11,7 @@
 | `audiocpp` | FFI над `audiocpp_engine.dll` — Higgs Audio v3 TTS + клон голоса. Самостоятельный (без Tauri). | `dubengine/tts.py`, `voices.py` |
 | `dub-asr` | ASR со словными таймстемпами (Parakeet-TDT-v3) + диаризация (Sortformer v2) через parakeet-rs/ONNX. | `dubengine/asr.py`, `diarize.py` |
 | `dub-core` | Типы `Project` (serde, extra="allow" round-trip) и `EngineOpts`. | `dubengine/project.py`, `opts.py` |
+| `dub-sep` | Вокал/инструментал сепарация — Mel-Band Roformer voc_fv6-Q8_0 через BSRoformer.cpp (сайдкар). Инструментал = mix−vocals. | `dubengine/separate.py` (движок ЗАМЕНЁН приказом юзера) |
 | `dub-server` | axum: SPA-раздача (защита от traversal), `/engine/capabilities`, `/projects` (upload), SSE-джобы. | `backend/app.py` |
 
 ## Сборка
