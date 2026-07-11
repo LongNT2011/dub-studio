@@ -729,6 +729,55 @@ mod tests {
         assert_eq!(bbox[1], (yc - vh as f64 * 0.045) as i64); // 256-57=199
     }
 
+    // РЕГРЕСС ТИТРА (задача #34, приказ юзера 2026-07-12): прогон ae61067 отрисовал 0 титр-Dialogue —
+    // тот артефакт создан ДО compose-фикса (project.json 00:59 < f6fd476 01:51), титр шёл из raw_ctx с
+    // bbox=null, emit_title его скипал. КОРЕНЬ: композит не вызывался/не проставлял bbox. Текущий run
+    // ОБЯЗАН всегда давать титру валидный 4-эл. bbox (матч localize ИЛИ fallback центр-полоса) при
+    // непустом tgt — иначе титр молча пропадает. Здесь воспроизведён ТОЧНЫЙ титр ae61067
+    // ("THAT VERY PROGRESSIVE ACQUAINTANCE", y_frac=0.54) в ДВУХ входах: (1) с localize-боксами на его
+    // y, (2) с ПУСТЫМ localize (OCR ничего не дал на этом кадре). Оба -> ровно 1 нарисованный титр с
+    // непустым tgt и bbox.len()==4 (никогда 0 титров).
+    #[test]
+    fn ae61067_title_always_drawn_with_bbox() {
+        let vw = 464i64;
+        let vh = 824i64;
+        let yc = (0.54 * vh as f64) as i64; // 444
+        let mk = |localize: &[Region]| -> Project {
+            let mut proj = Project::default();
+            proj.mode = "dub".into();
+            proj.raw_ctx.insert(
+                "titles".into(),
+                serde_json::json!([{
+                    "text": "ТОТ САМЫЙ ПРОГРЕССИВНЫЙ ЗНАКОМЫЙ",
+                    "tgt": "THAT VERY \"PROGRESSIVE\" ACQUAINTANCE",
+                    "y_frac": 0.54, "color": "#FFFFFF", "bg": null, "solid": false
+                }]),
+            );
+            let paths = dummy_paths();
+            let ctx = ComposeCtx {
+                vw, vh, total: 60.0, do_translate: false, fresh_subs: false,
+                src_lang: "ru", paths: &paths,
+            };
+            let noop: Box<Progress> = Box::new(|_| {});
+            run(&mut proj, localize, &[], &[], &ctx, &noop);
+            proj
+        };
+        // (1) localize-боксы на y титра -> матч (bbox из них).
+        let with_ocr = vec![
+            reg("ТОТ САМЫЙ", 90, yc, 180, 40, 0.0, 1.5),
+            reg("ЗНАКОМЫЙ", 100, yc + 42, 160, 40, 0.0, 1.5),
+        ];
+        for localize in [with_ocr.as_slice(), &[]] {
+            let proj = mk(localize);
+            assert_eq!(proj.captions.titles.len(), 1, "ровно 1 титр (не 0!) для localize={}", localize.len());
+            let t = &proj.captions.titles[0];
+            assert_eq!(t.tgt, "THAT VERY \"PROGRESSIVE\" ACQUAINTANCE");
+            let bbox = t.bbox.as_ref().expect("bbox не должен быть null (иначе emit_title скипнет титр)");
+            assert_eq!(bbox.len(), 4, "bbox из 4 элементов");
+            assert!(bbox[2] > 0 && bbox[3] > 0, "ненулевые w/h: {bbox:?}");
+        }
+    }
+
     // white-card fallback: sub_style без scene_color + solid светлый (lum>0.7) титр -> scene_color=#FFFFFF.
     #[test]
     fn white_card_activates_cover() {
