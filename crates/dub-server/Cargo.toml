@@ -8,6 +8,8 @@ description = "axum-сервер Dub Studio: тот же REST/SSE контрак
 [dependencies]
 dub-core = { path = "../dub-core" }
 dub-asr = { path = "../dub-asr" }
+dub-llm = { path = "../dub-llm" }
+dub-translate = { path = "../dub-translate" }
 axum = { version = "0.8", features = ["multipart"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "fs"] }

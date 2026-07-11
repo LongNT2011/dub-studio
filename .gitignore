@@ -26,6 +26,9 @@ target/
 Cargo.lock
 *.dll
 
+# llama.cpp prebuilt-бинари (сайдкар llama-server) — негитуемо, кладёт раунд 3
+tools/
+
 
 # Tauri auto-generated schemas
 desktop/src-tauri/gen/

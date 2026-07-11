@@ -30,6 +30,9 @@ pub struct AnalyzePaths {
     pub work_dir: std::path::PathBuf, // workspace/<pid>
     pub tdt_dir: std::path::PathBuf, // каталог TDT-модели
     pub sortformer_onnx: std::path::PathBuf, // sortformer .onnx
+    pub llama_bin: std::path::PathBuf, // llama-server(.exe) — сайдкар перевода/vision
+    pub mt_model: std::path::PathBuf, // Gemma GGUF
+    pub mmproj: std::path::PathBuf,   // mmproj GGUF (vision-проектор)
 }
 
 /// Колбэк прогресса джобы (msg + произвольные поля). stage — фаза как в питоне.
@@ -183,7 +186,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         &format!("{} сегментов, {} спикер(ов)", segments.len(), n_spk),
     );
 
-    // 5) собрать Project по контракту dub-core (mode-дефолты; перевод/капшены пусты — честно, раунд 3).
+    // 5) собрать Project по контракту dub-core (mode-дефолты).
     let (mode, subs_mode) = resolve_modes(args);
     let mut proj = Project::default();
     proj.meta = Meta {
@@ -203,6 +206,14 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     if !args.rewrite.is_empty() {
         proj.audio.rewrite = Some(args.rewrite.clone());
     }
+
+    // 6) стадии translate + vision (раунд 3). Порт pipeline._build_dub translate-ветки: если есть
+    //    что переводить, поднимаем llama-server (сайдкар Gemma+mmproj), гоним единый ctx-проход
+    //    (vision layout/scene + перевод всего транскрипта), заполняем tgt_text/titles/sub_style.
+    //    Пайплайн последовательный: TTS в этот момент не загружен (как tts.release() в питоне) —
+    //    Gemma получает всю VRAM. Fail-safe: сбой стадии оставляет tgt пустым (перевод — не блокер analyze).
+    let vocals16 = paths.work_dir.join("vocals16.wav");
+    crate::translate::stage(args, paths, &mut proj, &vocals16, meta.height, meta.duration, progress);
 
     Ok(proj)
 }

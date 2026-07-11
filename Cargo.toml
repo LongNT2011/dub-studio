@@ -4,6 +4,8 @@ members = [
     "crates/audiocpp",
     "crates/dub-asr",
     "crates/dub-core",
+    "crates/dub-llm",
+    "crates/dub-translate",
     "crates/dub-server",
 ]
 # Оболочка Tauri — отдельная единица сборки (тяжёлое дерево tauri), собирается своим

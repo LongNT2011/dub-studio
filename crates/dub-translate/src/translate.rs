@@ -1,0 +1,300 @@
+//! Порт dubengine/translate.py — плоский MT через Gemma (llama.cpp): весь транскрипт как нумерованные
+//! строки в ОДНОМ вызове (чанки по 40), чтобы каждая строка переводилась в контексте всего диалога;
+//! глоссарий пиннит повторяющиеся ИМЕНА; при рассинхроне нумерации — надёжный per-line фолбэк.
+//!
+//! Промпты и параметры сэмплинга перенесены ДОСЛОВНО (они выверены на тест-сете). Не менять формулировки.
+
+use std::collections::HashMap;
+
+use dub_llm::{strip_think, ChatClient, Message, Sampling};
+use regex::Regex;
+
+use crate::seg::Seg;
+use crate::TranslateError;
+
+const CHUNK: usize = 40;
+
+/// _LANGS из translate.py — код -> английское имя языка.
+fn lang_name(code: &str, default: &str) -> String {
+    let c = code.trim().to_lowercase();
+    if c.is_empty() || c == "auto" {
+        return default.to_string();
+    }
+    let m: HashMap<&str, &str> = [
+        ("ru", "Russian"), ("en", "English"), ("uk", "Ukrainian"), ("de", "German"),
+        ("fr", "French"), ("es", "Spanish"), ("it", "Italian"), ("pt", "Portuguese"),
+        ("zh", "Chinese"), ("ja", "Japanese"), ("ko", "Korean"), ("pl", "Polish"),
+        ("tr", "Turkish"), ("ar", "Arabic"), ("nl", "Dutch"), ("hi", "Hindi"),
+    ]
+    .into_iter()
+    .collect();
+    m.get(c.as_str()).map(|s| s.to_string()).unwrap_or_else(|| code.to_string())
+}
+
+/// _name(code, default="the source language").
+fn name_src(code: &str) -> String {
+    lang_name(code, "the source language")
+}
+
+fn has_cjk(s: &str) -> bool {
+    // re.search(r"[぀-ヿ一-鿿]") — хирагана/катакана + CJK-иероглифы.
+    s.chars().any(|c| ('\u{3040}'..='\u{30FF}').contains(&c) || ('\u{4E00}'..='\u{9FFF}').contains(&c))
+}
+
+/// _parse_numbered: вытащить строки 'N. перевод' (1..n) в порядке; None для пропущенных.
+fn parse_numbered(text: &str, n: usize) -> Vec<Option<String>> {
+    // re.match(r"\s*(\d+)\s*[.)\]:]\s*(.+)")
+    let re = Regex::new(r"^\s*(\d+)\s*[.)\]:]\s*(.+)").unwrap();
+    let mut got: HashMap<usize, String> = HashMap::new();
+    for line in text.lines() {
+        if let Some(c) = re.captures(line) {
+            let i: usize = c[1].parse().unwrap_or(0);
+            let val = c[2].trim();
+            if (1..=n).contains(&i) && !got.contains_key(&i) && !val.is_empty() {
+                // " ".join(m.group(2).split()) — схлопнуть пробелы.
+                got.insert(i, val.split_whitespace().collect::<Vec<_>>().join(" "));
+            }
+        }
+    }
+    (1..=n).map(|i| got.get(&i).cloned()).collect()
+}
+
+/// _translate_one — нативный однострочный вызов (надёжный фолбэк при рассинхроне батча).
+fn translate_one(
+    llm: &ChatClient,
+    txt: &str,
+    tgt_name: &str,
+    extra: &str,
+    gloss_str: &str,
+) -> Result<String, TranslateError> {
+    let prompt = format!(
+        "Translate the following text into {tgt_name}.{extra}{gloss_str} Note that you should only \
+         output the translated result without any additional explanation:\n\n{txt}"
+    );
+    let s = Sampling::new(0.7, 0.6, 512).top_k(20).repeat_penalty(1.05);
+    let out = strip_think(&llm.chat(&[Message::user_text(prompt)], &s)?);
+    Ok(out
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join(" "))
+}
+
+/// _glossary — запиннить повторяющиеся собственные ИМЕНА (заглавные + повторяющиеся) для консистентности.
+fn glossary(
+    llm: &ChatClient,
+    texts: &[String],
+    src: &str,
+    tgt: &str,
+) -> Result<String, TranslateError> {
+    // counts по \b[A-Z][a-z]{2,}\b
+    let re = Regex::new(r"\b[A-Z][a-z]{2,}\b").unwrap();
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for t in texts {
+        for m in re.find_iter(t) {
+            *counts.entry(m.as_str().to_string()).or_insert(0) += 1;
+        }
+    }
+    // most_common(6), c>=3
+    let mut items: Vec<(String, usize)> = counts.into_iter().collect();
+    items.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let terms: Vec<String> = items.into_iter().take(6).filter(|(_, c)| *c >= 3).map(|(w, _)| w).collect();
+
+    let mut gloss: Vec<(String, String)> = Vec::new();
+    for w in terms {
+        let sys = format!(
+            "Translate this single name/word from {src} to {tgt}. Output only the {tgt} word."
+        );
+        let s = Sampling::new(0.2, 0.9, 16);
+        let v = strip_think(&llm.chat(&[Message::system(sys), Message::user_text(&w)], &s)?);
+        // v.splitlines()[0].strip(' ."')
+        let v = v.lines().next().unwrap_or("").trim_matches(|c| c == ' ' || c == '.' || c == '"').to_string();
+        if !v.is_empty() && !has_cjk(&v) {
+            gloss.push((w, v));
+        }
+    }
+    if gloss.is_empty() {
+        Ok(String::new())
+    } else {
+        let joined = gloss.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(", ");
+        Ok(format!(" Keep these names consistent: {joined}."))
+    }
+}
+
+/// run — перевод каждого seg.text -> seg.tgt через Gemma (плоский MT, порт _run_hunyuan).
+pub fn run(
+    llm: &ChatClient,
+    segs: &mut [Seg],
+    src: &str,
+    tgt: &str,
+    spoken: bool,
+) -> Result<(), TranslateError> {
+    let tgt_name = lang_name(tgt, tgt);
+    let gloss_str = glossary(llm, &segs.iter().map(|s| s.text.clone()).collect::<Vec<_>>(), &name_src(src), &tgt_name)?;
+    let extra = if spoken {
+        " Spell out all numbers, dates, times and symbols as full words."
+    } else {
+        ""
+    };
+    for s in segs.iter_mut() {
+        s.tgt = String::new();
+    }
+    let idxs: Vec<usize> = segs.iter().enumerate().filter(|(_, s)| !s.text.trim().is_empty()).map(|(i, _)| i).collect();
+    // nspk = число уникальных speaker среди idxs.
+    let nspk = {
+        let set: std::collections::HashSet<i64> = idxs.iter().map(|&i| segs[i].speaker).collect();
+        set.len()
+    };
+
+    let mut c0 = 0;
+    while c0 < idxs.len() {
+        let chunk: Vec<usize> = idxs[c0..(c0 + CHUNK).min(idxs.len())].to_vec();
+        let numbered = chunk
+            .iter()
+            .enumerate()
+            .map(|(j, &gi)| format!("{}. {}", j + 1, segs[gi].text.trim()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let dlg = if nspk > 1 {
+            format!(
+                " This is a DIALOGUE between {nspk} speakers taking turns — render it as one coherent \
+                 back-and-forth conversation, keeping each speaker's voice and tone consistent."
+            )
+        } else {
+            String::new()
+        };
+        let sysmsg = format!(
+            "You are a professional subtitle translator localizing a SHORT video for DUBBING into {tgt_name}.\
+             {dlg} Use the WHOLE numbered list as shared context so each line (even one word) is correct and \
+             consistent. Preserve the MEANING, write natural SPOKEN {tgt_name}, and keep each line about the \
+             SAME LENGTH as its source so it fits the dub timing.{extra}{gloss_str} Reply with ONLY the \
+             numbered {tgt_name} translations (1., 2., 3., …), one per line, nothing else — no reasoning, no \
+             English, no notes."
+        );
+        let max_tokens = (96 + 48 * chunk.len()).min(4096) as u32;
+        let s = Sampling::new(0.3, 0.9, max_tokens).top_k(20).repeat_penalty(1.05);
+        let out = strip_think(&llm.chat(&[Message::system(sysmsg), Message::user_text(numbered)], &s)?);
+        let parsed = parse_numbered(&out, chunk.len());
+        if parsed.iter().all(|p| p.is_some()) {
+            for (j, &gi) in chunk.iter().enumerate() {
+                segs[gi].tgt = parsed[j].clone().unwrap();
+            }
+        } else {
+            // нумерация уплыла -> надёжный per-line режим для этого чанка.
+            for &gi in &chunk {
+                let txt = segs[gi].text.trim().to_string();
+                segs[gi].tgt = translate_one(llm, &txt, &tgt_name, extra, &gloss_str)?;
+            }
+        }
+        c0 += CHUNK;
+    }
+    // деградация: пустые -> оставить исходник, чтобы дубляж не был пуст (как в питоне).
+    let empty: Vec<usize> = idxs.iter().cloned().filter(|&gi| segs[gi].tgt.is_empty()).collect();
+    for &gi in &empty {
+        segs[gi].tgt = segs[gi].text.trim().to_string();
+    }
+    if !idxs.is_empty() && empty.len() == idxs.len() {
+        return Err(TranslateError::Empty(idxs.len()));
+    }
+    Ok(())
+}
+
+/// rewrite — творческое ПЕРЕОЗВУЧИВАНИЕ всего транскрипта по инструкции. Порт translate.rewrite.
+pub fn rewrite(
+    llm: &ChatClient,
+    segs: &mut [Seg],
+    instruction: &str,
+    _src: &str,
+    tgt: &str,
+    spoken: bool,
+) -> Result<(), TranslateError> {
+    let tgt_name = lang_name(tgt, tgt);
+    for s in segs.iter_mut() {
+        s.tgt = String::new();
+    }
+    let idxs: Vec<usize> = segs.iter().enumerate().filter(|(_, s)| !s.text.trim().is_empty()).map(|(i, _)| i).collect();
+    let nspk = {
+        let set: std::collections::HashSet<i64> = idxs.iter().map(|&i| segs[i].speaker).collect();
+        set.len()
+    };
+    let extra = if spoken {
+        " Spell out all numbers, dates, times and symbols as full words."
+    } else {
+        ""
+    };
+    let mut c0 = 0;
+    while c0 < idxs.len() {
+        let chunk: Vec<usize> = idxs[c0..(c0 + CHUNK).min(idxs.len())].to_vec();
+        let numbered = chunk
+            .iter()
+            .enumerate()
+            .map(|(j, &gi)| format!("{}. {}", j + 1, segs[gi].text.trim()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let dlg = if nspk > 1 {
+            format!(" It is a dialogue between {nspk} speakers taking turns — keep the back-and-forth.")
+        } else {
+            String::new()
+        };
+        let sysmsg = format!(
+            "You are a creative scriptwriter RE-DUBBING a short video into {tgt_name}.{dlg} \
+             Rewrite the numbered lines following this instruction: \"{instruction}\". Use the WHOLE \
+             list as context. Output natural SPOKEN {tgt_name}; keep EACH line about the SAME LENGTH as \
+             its source so it fits the dub timing; keep the SAME number of lines.{extra} Reply with ONLY \
+             the numbered {tgt_name} lines (1., 2., 3., …), nothing else — no notes, no source text."
+        );
+        let max_tokens = (128 + 64 * chunk.len()).min(4096) as u32;
+        let s = Sampling::new(0.85, 0.95, max_tokens).top_k(40).repeat_penalty(1.05);
+        let out = strip_think(&llm.chat(&[Message::system(sysmsg), Message::user_text(numbered)], &s)?);
+        let parsed = parse_numbered(&out, chunk.len());
+        for (j, &gi) in chunk.iter().enumerate() {
+            let src_line = segs[gi].text.trim().to_string();
+            if let Some(p) = &parsed[j] {
+                segs[gi].tgt = p.clone();
+            } else {
+                // пропущенная/сбитая строка -> перевести её (не озвучивать сырой исходник).
+                let one = translate_one(llm, &src_line, &tgt_name, extra, "")?;
+                segs[gi].tgt = if one.is_empty() { src_line } else { one };
+            }
+        }
+        c0 += CHUNK;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_numbered_basic() {
+        let out = "1. Hello\n2. World\n3) Foo";
+        let p = parse_numbered(out, 3);
+        assert_eq!(p[0].as_deref(), Some("Hello"));
+        assert_eq!(p[1].as_deref(), Some("World"));
+        assert_eq!(p[2].as_deref(), Some("Foo"));
+    }
+
+    #[test]
+    fn parse_numbered_missing() {
+        let p = parse_numbered("1. A\n3. C", 3);
+        assert_eq!(p[0].as_deref(), Some("A"));
+        assert!(p[1].is_none());
+        assert_eq!(p[2].as_deref(), Some("C"));
+    }
+
+    #[test]
+    fn lang_names() {
+        assert_eq!(lang_name("ru", "x"), "Russian");
+        assert_eq!(name_src("auto"), "the source language");
+        assert_eq!(lang_name("xx", "fallback"), "xx");
+    }
+
+    #[test]
+    fn cjk_detect() {
+        assert!(has_cjk("こんにちは"));
+        assert!(has_cjk("中文"));
+        assert!(!has_cjk("Hello"));
+    }
+}

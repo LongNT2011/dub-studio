@@ -88,6 +88,35 @@ fn op_mode(p: &mut Project, edit: &Value) -> PatchResult {
     Ok(())
 }
 
+/// translate — сменить целевой язык (+режим subs=translate; funny -> rewrite). Порт api.translate.
+/// Помечает все сегменты dirty (перевод/дубляж перегенерятся на следующем analyze/render). Смена языка
+/// требует ре-перевода, но analyze здесь не запускаем — это GPU-джоба; PATCH лишь фиксирует намерение.
+fn op_translate(p: &mut Project, edit: &Value) -> PatchResult {
+    // api.translate(project, lang, mode="plain"): tgt_lang=lang; subs=translate; funny -> rewrite.
+    if let Some(lang) = s(edit, "lang") {
+        p.tgt_lang = lang;
+    }
+    p.subs.mode = "translate".into();
+    if s(edit, "mode").as_deref() == Some("funny") {
+        p.audio.rewrite = Some("make it a funny, playful dub".into());
+    }
+    mark_all_dirty(p);
+    Ok(())
+}
+
+/// rewrite — задать творческую инструкцию ре-дубляжа. Порт api.rewrite: audio.rewrite=instruction;
+/// mode=dub; все dirty. Пустая инструкция -> 400 (нечего переписывать).
+fn op_rewrite(p: &mut Project, edit: &Value) -> PatchResult {
+    let instr = s(edit, "instruction").unwrap_or_default();
+    if instr.trim().is_empty() {
+        return Err((400, "rewrite requires non-empty instruction".into()));
+    }
+    p.audio.rewrite = Some(instr);
+    p.mode = "dub".into();
+    mark_all_dirty(p);
+    Ok(())
+}
+
 /// Применить одну PATCH-операцию к Project. op берётся из поля "op". Неизвестный op -> 400.
 pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
     let op = s(edit, "op").unwrap_or_default();
@@ -95,6 +124,8 @@ pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
         "segment" => op_segment(p, edit),
         "subpos" => op_subpos(p, edit),
         "mode" => op_mode(p, edit),
+        "translate" => op_translate(p, edit),
+        "rewrite" => op_rewrite(p, edit),
         other => Err((400, format!("unknown op {other:?}"))),
     }
 }
@@ -146,6 +177,34 @@ mod tests {
         assert_eq!(p.mode, "dub");
         assert!(p.segments[0].dirty);
         let e = apply(&mut p, &json!({"op":"mode","value":"nope"})).unwrap_err();
+        assert_eq!(e.0, 400);
+    }
+
+    #[test]
+    fn translate_sets_lang_and_dirty() {
+        let mut p = proj_with_seg();
+        apply(&mut p, &json!({"op":"translate","lang":"de"})).unwrap();
+        assert_eq!(p.tgt_lang, "de");
+        assert_eq!(p.subs.mode, "translate");
+        assert!(p.audio.rewrite.is_none());
+        assert!(p.segments[0].dirty);
+    }
+
+    #[test]
+    fn translate_funny_sets_rewrite() {
+        let mut p = proj_with_seg();
+        apply(&mut p, &json!({"op":"translate","lang":"en","mode":"funny"})).unwrap();
+        assert_eq!(p.audio.rewrite.as_deref(), Some("make it a funny, playful dub"));
+    }
+
+    #[test]
+    fn rewrite_sets_instruction_and_dub() {
+        let mut p = proj_with_seg();
+        apply(&mut p, &json!({"op":"rewrite","instruction":"as a pirate"})).unwrap();
+        assert_eq!(p.audio.rewrite.as_deref(), Some("as a pirate"));
+        assert_eq!(p.mode, "dub");
+        assert!(p.segments[0].dirty);
+        let e = apply(&mut p, &json!({"op":"rewrite","instruction":"  "})).unwrap_err();
         assert_eq!(e.0, 400);
     }
 }

@@ -11,6 +11,7 @@ mod jobs;
 mod media;
 mod patch;
 mod spa;
+mod translate;
 
 use axum::extract::{Multipart, Path as AxPath, Query, State};
 use axum::http::StatusCode;
@@ -39,6 +40,8 @@ pub struct AppState {
     pub tdt_dir: PathBuf,
     /// Путь к Sortformer .onnx (диаризация). Env DUB_STUDIO_SORTFORMER, иначе <models_root>/sortformer/…v2.onnx.
     pub sortformer_onnx: PathBuf,
+    /// llama-server(.exe) — сайдкар перевода/vision. Env DUB_STUDIO_LLAMA_BIN, иначе <repo>/tools/llama/llama-server(.exe).
+    pub llama_bin: PathBuf,
 }
 
 /// Корень моделей: env DUBENGINE_MODELS_ROOT, иначе <repo_root>/models.
@@ -65,6 +68,9 @@ impl AppState {
                     .join("sortformer")
                     .join("diar_streaming_sortformer_4spk-v2.onnx")
             });
+        // llama-server: env-override, иначе <repo>/tools/llama/llama-server(.exe) (негитуемый каталог,
+        // кладёт установщик/раунд 3). Существование проверяет сама стадия перевода (fail-safe).
+        let llama_bin = dub_llm::resolve_llama_bin(&repo_root.join("tools").join("llama"));
         AppState {
             repo_root,
             workspace,
@@ -73,6 +79,7 @@ impl AppState {
             jobs: JobQueue::new(),
             tdt_dir,
             sortformer_onnx,
+            llama_bin,
         }
     }
 
@@ -254,6 +261,9 @@ async fn analyze_project(
         work_dir: dir.clone(),
         tdt_dir: st.tdt_dir.clone(),
         sortformer_onnx: st.sortformer_onnx.clone(),
+        llama_bin: st.llama_bin.clone(),
+        mt_model: st.opts.mt_model_path.clone(),
+        mmproj: st.opts.mmproj_path.clone(),
     };
 
     // Тело джобы: analyze -> project.json (атомарно). Прогресс -> SSE.
