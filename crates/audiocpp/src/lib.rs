@@ -28,7 +28,7 @@ impl AudiocppEngine {
     }
 
     /// Загрузить веса Higgs. backend: "cpu"|"cuda"|"vulkan"|"metal"; device — индекс GPU;
-    /// threads — число потоков; weight_type — вариант квантизации (например "q4", пусто = дефолт модели).
+    /// threads — число потоков; weight_type — вариант квантизации (например "q8_0", пусто = дефолт модели).
     pub fn load_model(
         &self,
         model_root: impl AsRef<Path>,

@@ -72,7 +72,7 @@ impl Default for EngineOpts {
             mt_model_path: mt,
             mmproj_path: mmproj,
             tts_model: "higgs-audio-v3-tts-4b".to_string(),
-            tts_quant: "q4".to_string(),
+            tts_quant: "q8_0".to_string(),
             tts_steps: 10,
             tts_cuda_graphs: true,
             tts_triton: true,
