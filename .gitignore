@@ -19,3 +19,10 @@ cache/
 output/
 cuda_version.txt
 run-dev.bat
+
+# Rust-порт (crates/): артефакты сборки; веса/бинари движков не коммитим
+/target/
+target/
+Cargo.lock
+*.dll
+
