@@ -39,6 +39,63 @@ pub use segment::{segment_words, Segment, Word};
 /// Целевая частота parakeet-rs.
 pub const TARGET_SR: u32 = 16_000;
 
+/// Гарантировать, что ort (load-dynamic) грузит ПРАВИЛЬНУЮ onnxruntime.dll (1.24.2, под которую собран
+/// ort rc.12). Без явного ORT_DYLIB_PATH ort ищет DLL по системному PATH и цепляет
+/// C:\Windows\System32\onnxruntime.dll (1.17, поставляется с Windows) — рассинхрон OrtApi даёт ДЕДЛОК
+/// при создании сессии (процесс висит с 0% CPU, ни модель, ни диск не грузятся). Поэтому если
+/// ORT_DYLIB_PATH не задан пользователем, выставляем его на встроенную 1.24.2-DLL до первого касания ort.
+///
+/// Поиск (первый существующий): env DUB_ASR_ORT_DYLIB -> <models_root>/runtime/onnxruntime-win-x64-1.24.2/
+/// lib/onnxruntime.dll -> та же DLL рядом с бинарём (портативная раскладка). models_root: env
+/// DUBENGINE_MODELS_ROOT, иначе <exe_dir>/models или <exe_dir>/../../models (dev-раскладка target/…).
+fn ensure_ort_dylib() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        // Пользователь задал явно -> уважаем, ничего не трогаем.
+        if std::env::var_os("ORT_DYLIB_PATH").is_some() {
+            return;
+        }
+        let mut cands: Vec<PathBuf> = Vec::new();
+        if let Some(p) = std::env::var_os("DUB_ASR_ORT_DYLIB") {
+            cands.push(PathBuf::from(p));
+        }
+        // корни для поиска models/
+        let mut roots: Vec<PathBuf> = Vec::new();
+        if let Some(m) = std::env::var_os("DUBENGINE_MODELS_ROOT") {
+            roots.push(PathBuf::from(m));
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                roots.push(dir.join("models"));
+                // dev-раскладка: target/release/examples/asr.exe -> ../../../models
+                if let Some(p2) = dir.parent().and_then(|d| d.parent()).and_then(|d| d.parent()) {
+                    roots.push(p2.join("models"));
+                }
+                if let Some(p1) = dir.parent().and_then(|d| d.parent()) {
+                    roots.push(p1.join("models"));
+                }
+                // DLL рядом с бинарём (портативная упаковка)
+                cands.push(dir.join("onnxruntime.dll"));
+            }
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            roots.push(cwd.join("models"));
+        }
+        for r in &roots {
+            cands.push(r.join("runtime").join("onnxruntime-win-x64-1.24.2").join("lib").join("onnxruntime.dll"));
+        }
+        for c in cands {
+            if c.is_file() {
+                std::env::set_var("ORT_DYLIB_PATH", &c);
+                return;
+            }
+        }
+        // Ничего не нашли — оставляем как есть; ort даст явную ошибку загрузки (лучше дедлока не станет,
+        // но хотя бы не молча). Диагностику берёт на себя вызывающий по AsrError.
+    });
+}
+
 #[derive(Error, Debug)]
 pub enum AsrError {
     #[error("parakeet: {0}")]
@@ -83,6 +140,7 @@ impl Asr {
 
     fn model(&mut self) -> Result<&mut ParakeetTDT, AsrError> {
         if self.model.is_none() {
+            ensure_ort_dylib(); // до первого касания ort — иначе дедлок на чужой system32 DLL
             let m = ParakeetTDT::from_pretrained(&self.tdt_dir, Some(exec_config()))
                 .map_err(|e| AsrError::Parakeet(e.to_string()))?;
             self.model = Some(m);
@@ -162,6 +220,7 @@ pub fn diarize(
     wav: impl AsRef<Path>,
     sortformer_onnx: impl AsRef<Path>,
 ) -> Result<Vec<Turn>, AsrError> {
+    ensure_ort_dylib(); // до первого касания ort — иначе дедлок на чужой system32 DLL
     let (audio, sr) = load_wav_16k_mono(wav.as_ref())?;
     let mut sf = Sortformer::with_config(
         sortformer_onnx.as_ref(),

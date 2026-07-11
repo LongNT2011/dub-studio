@@ -138,7 +138,7 @@ pub fn analyze_layout(
     // Мега-промпт VP (тайтлы + вторичные капшены). ДОСЛОВНО из ctx_translate.py.
     let vp = format!(
         "You are an on-screen-text style analyst. Each text will be re-drawn in another language and must \
-looks NATIVE. In \"sub\" describe the MAIN running SUBTITLE / spoken-word caption style — the \
+look NATIVE. In \"sub\" describe the MAIN running SUBTITLE / spoken-word caption style — the \
 prominent recurring on-screen WORDS that present the narration/dialogue (a bottom dialogue line, OR \
 styled centred punchline captions, e.g. big italic outlined words). ALWAYS fill \"sub\" whenever ANY \
 such words appear — they ARE the subtitles even if styled/centred. Report its size_frac = the letter \
