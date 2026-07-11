@@ -12,6 +12,7 @@ mod look;
 mod types;
 
 pub use burn::{burn, burn_frame};
+pub use look::lum;
 pub use look::{DEFAULT_PRESET, DEFAULT_TEMPLATE, FRESH_DEFAULT, FONT_NAME};
 pub use types::{BlurBox, Sub, SubStyle, Title};
 
