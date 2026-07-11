@@ -62,23 +62,47 @@ export ORT_DYLIB_PATH="D:\Projects\TEMP\dub-studio\models\runtime\onnxruntime.dl
 дефолтный parakeet-rs Level3 виснет при создании CPU-сессии на минуты; крейт понижает до Level1.
 GPU-провайдер (`--features cuda` + CUDA EP) снимает это ограничение.
 
-### synth (TTS / клон голоса через Higgs DLL)
+### synth (TTS / клон голоса через Higgs DLL) — Q8_0 на CUDA
 ```bash
-./target/release/examples/synth --dll <audiocpp_engine.dll> --model-root <higgs_weights> \
-    --text "Привет" --out out.wav --backend cpu
+# движок ищет cuda/ggml/vcruntime DLL в своём каталоге -> держим их рядом с audiocpp_engine.dll
+# (models/higgs-engine/: cudart64_13, cublas64_13, cublasLt64_13, MSVCP140/VCOMP140/VCRUNTIME140*)
+./target/release/examples/synth --dll models/higgs-engine/audiocpp_engine.dll \
+    --model-root models/higgs-q8_0 --text "Привет" --backend cuda --device 0 --out out.wav
 # клон голоса:
-./target/release/examples/synth --dll ... --model-root ... --text "..." \
-    --ref-wav ref.wav --ref-text "референсный текст" --out out.wav
+./target/release/examples/synth --dll models/higgs-engine/audiocpp_engine.dll \
+    --model-root models/higgs-q8_0 --text "..." \
+    --ref-wav ref.wav --ref-text "референсный текст" --backend cuda --device 0 --out out.wav
 ```
 
 ### Сервер
 ```bash
-DUB_STUDIO_ROOT=<repo> ./target/release/dub-server   # слушает 127.0.0.1:8765
+DUB_STUDIO_ROOT=<repo> ORT_DYLIB_PATH=<...>/onnxruntime-1.24.dll ./target/release/dub-server
+#   слушает 127.0.0.1:8765 (порт: env DUB_STUDIO_PORT). Раздаёт SPA (frontend/dist) + API.
 ```
+
+### Десктоп (Tauri-оболочка)
+```bash
+# frontend собрать заранее: (cd frontend && npm ci && npm run build)
+cd desktop && npx tauri build --no-bundle      # -> desktop/src-tauri/target/release/dub-studio-desktop.exe
+```
+Оболочка поднимает `dub-server` на 127.0.0.1:<свободный порт> и открывает окно на этот URL.
+Портатив: рантайм (onnxruntime.dll, models/) держится рядом с exe; WEBVIEW2_USER_DATA_FOLDER там же.
+
+## Статус (раунд 2)
+
+Собрано и проверено (`cargo build --workspace --examples` + `cargo test --workspace` зелёные, 9 тестов):
+- **Higgs Q8_0 синтез** реален: TTS русской фразы и voice_clone прогнаны на CUDA (RTX 4090), движок
+  `audiocpp_engine.dll` v0.2.3 + self-contained CUDA13/vcruntime DLL. Артефакты — не тишина (-24dB).
+- **analyze-ядро** (`POST /projects/{pid}/analyze`) как джоба: ffmpeg extract 16k mono → Sortformer
+  turns (single-speaker деградация при <2 спикеров) → TDT int8 словные таймстемпы → Project. Прогнан
+  на реальном ролике (docs/example_original.mp4): 11 сегментов, spk=0, слова, валидный русский UTF-8.
+- **PATCH** segment/subpos/mode (атомарно tmp+rename), проверено на живом сервере.
+- **Tauri-оболочка** desktop/src-tauri: `--no-bundle` собрана, запуск поднимает сервер на рандом-порту.
+
+Следующий раунд (3): перевод/vision (llama.cpp + Gemma), separation, OCR, captions/render — карта в
+`docs/PORT-CONTRACT.md`.
 
 ## Статус (раунд 1)
 
-Собрано и проверено: `cargo build --workspace --examples` зелёный; `dub-core` round-trip тесты и
-`dub-asr` сегментация — проходят; ASR-пример прогнан на реальном речевом WAV. Каркас сервера (capabilities,
-upload, get project, SSE-джобы, SPA). GPU-эндпоинты analyze/render/preview — следующие раунды
-(карта в `docs/PORT-CONTRACT.md`).
+Каркас сервера (capabilities, upload, get project, SSE-джобы, SPA); `dub-core` round-trip и `dub-asr`
+сегментация — тесты проходят; ASR-пример прогнан на реальном речевом WAV.
