@@ -136,9 +136,16 @@ fn build_dub(
     progress: &Progress,
 ) -> Result<PathBuf, String> {
     let wd = &paths.work_dir;
-    // Сегменты с непустым tgt (как в питоне: только строки с текстом синтезируются).
-    let segs: Vec<&dub_core::Segment> =
-        proj.segments.iter().filter(|s| !s.tgt_text.trim().is_empty()).collect();
+    // Сегменты с непустым tgt (как в питоне: только строки с текстом синтезируются). Несём индекс в
+    // ПОЛНОМ списке proj.segments — слот next.start считается по индексу i+1 полного списка (порт
+    // pipeline.py:207: nxt = segs[i+1].start, где segs — весь транскрипт, пустые пропускаются continue,
+    // но индекс i+1 идёт по полному списку). item#7 аудита.
+    let segs: Vec<(usize, &dub_core::Segment)> = proj
+        .segments
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| !s.tgt_text.trim().is_empty())
+        .collect();
     if segs.is_empty() {
         emit(progress, "tts", "нет строк с переводом -> тишина, оригинальная дорожка");
         return Ok(paths.input.clone());
@@ -191,28 +198,29 @@ fn build_dub(
         )
         .map_err(|e| format!("Higgs load_model: {e}"))?;
 
-    // placed = [(at, wav_path)]. cursor-aware fit (как в питоне).
+    // placed = [(at, wav_path)]. cursor-aware fit (как в питоне). Имя seg-файла и слот next.start —
+    // по индексу fi в ПОЛНОМ списке proj.segments (питон: seg_{i:03d}.wav, nxt = segs[i+1].start).
     let mut placed: Vec<(f64, PathBuf)> = Vec::with_capacity(segs.len());
     let mut cursor = 0.0f64;
-    // индекс сегмента в общем массиве для «следующего по времени» слота.
-    let all: Vec<&dub_core::Segment> = proj.segments.iter().collect();
-    for (i, s) in segs.iter().enumerate() {
+    let n_all = proj.segments.len();
+    for &(fi, s) in segs.iter() {
         let tgt = s.tgt_text.trim();
-        let raw = wd.join(format!("seg_{:03}.wav", i));
+        let raw = wd.join(format!("seg_{:03}.wav", fi));
         // регенерация: синтез если dirty ИЛИ кэша нет ИЛИ полный regen выключен но файла нет.
         let need_synth = regen_dub && s.dirty || !raw.is_file();
         if need_synth {
             let (samples, sr) = engine
                 .voice_clone(tgt, &ref_wav.to_string_lossy(), None, "")
-                .map_err(|e| format!("Higgs clone seg{i}: {e}"))?;
+                .map_err(|e| format!("Higgs clone seg{fi}: {e}"))?;
             let wav = AudiocppEngine::encode_wav(&samples, sr, 1);
-            std::fs::write(&raw, &wav).map_err(|e| format!("запись seg{i}: {e}"))?;
+            std::fs::write(&raw, &wav).map_err(|e| format!("запись seg{fi}: {e}"))?;
         }
-        // слот: от текущего onset до следующей строки ПО ВРЕМЕНИ / конца видео.
+        // слот: от текущего onset до старта СЛЕДУЮЩЕГО сегмента ПО ИНДЕКСУ (fi+1) полного списка /
+        // конца видео (питон nxt = segs[i+1].start if i+1<len else total).
         let at = s.start.max(cursor);
-        let nxt = next_start_after(&all, s.start, total);
+        let nxt = if fi + 1 < n_all { proj.segments[fi + 1].start } else { total };
         let room = (nxt - at).max(0.3);
-        let fit = fit_to_slot(&raw, room, &wd.join(format!("seg_{:03}_fit.wav", i)), paths.max_stretch)?;
+        let fit = fit_to_slot(&raw, room, &wd.join(format!("seg_{:03}_fit.wav", fi)), paths.max_stretch)?;
         cursor = at + media::duration(&fit)?;
         placed.push((at, fit));
     }
@@ -244,30 +252,18 @@ fn build_dub(
 
 /// Референс клона: самый длинный сегмент с текстом -> trim из вокала (<=12с). Порт _pick_reference.
 fn pick_reference(
-    segs: &[&dub_core::Segment],
+    segs: &[(usize, &dub_core::Segment)],
     vocals16: &Path,
     wd: &Path,
     _total: f64,
 ) -> Result<PathBuf, String> {
-    let cand = segs
+    let (_, cand) = segs
         .iter()
-        .max_by(|a, b| (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap())
+        .max_by(|(_, a), (_, b)| (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap())
         .unwrap();
     let ref_wav = wd.join("ref.wav");
     media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + 12.0))?;
     Ok(ref_wav)
-}
-
-/// Следующий по ВРЕМЕНИ старт сегмента после `start` (или total). Аналог segs[i+1].start в питоне,
-/// где segs отсортированы по времени.
-fn next_start_after(all: &[&dub_core::Segment], start: f64, total: f64) -> f64 {
-    all.iter()
-        .map(|s| s.start)
-        .filter(|&st| st > start + 1e-6)
-        .fold(f64::INFINITY, f64::min)
-        .min(total)
-        .max(if total.is_finite() { 0.0 } else { total })
-        .min(total)
 }
 
 /// Ускорить дубль под target_dur, если он длиннее (никогда не замедлять). Порт assemble.fit_to_slot.
@@ -328,6 +324,38 @@ fn timeline(placed: &[(f64, PathBuf)], total_dur: f64, out_wav: &Path) -> Result
     }
     wavio::write_mono_f32(out_wav, &track, sr)?;
     Ok(())
+}
+
+/// E2E-верификация капшенов без TTS/аудио: собрать ASS из Project и вжечь блюр+сабы в captioned.mp4.
+/// Используется примером verify_captions (реальные кадры порт-vs-эталон). Порт captions.build+burn
+/// call-site pipeline.run, но БЕЗ аудио-ветки.
+pub(crate) fn build_and_burn_captions(
+    proj: &Project,
+    input: &Path,
+    out_ass: &Path,
+    captioned: &Path,
+    fonts_dir: &Path,
+    vw: i64,
+    vh: i64,
+    total: f64,
+    src_codec: &str,
+) -> Result<(), String> {
+    dub_captions::set_fonts_dir(fonts_dir);
+    build_ass(proj, out_ass, vw, vh, total)?;
+    let blur_boxes = collect_blur_boxes(proj);
+    dub_captions::burn(
+        input,
+        out_ass,
+        captioned,
+        &blur_boxes,
+        Some((vw, vh)),
+        proj.render.blur,
+        true,
+        true,
+        proj.render.burn_cq,
+        Some(src_codec),
+        proj.render.blur_sigma,
+    )
 }
 
 /// Собрать ASS через dub-captions из Project. Порт captions.build call-site pipeline.run.

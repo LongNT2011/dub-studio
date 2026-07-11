@@ -5,10 +5,10 @@
 //! Fail-safe: любой сбой (нет llama-бинаря / нет весов / упал сервер) логируется в SSE и оставляет tgt
 //! пустым — перевод не блокирует транскрипт-стадию analyze (её результат уже валиден).
 
-use dub_core::{Brand, Project, SubStyle, Title};
+use dub_core::{Brand, Project, SubStyle};
 use dub_llm::{ChatClient, LlamaServer, ServerOpts};
 use dub_translate::{ctx_run, CtxConfig, Seg};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::analyze::{AnalyzeArgs, AnalyzePaths, Progress};
 
@@ -169,14 +169,10 @@ fn apply_extra(proj: &mut Project, extra: &Value) {
     if let Some(y) = extra.get("sub_y").and_then(|v| v.as_i64()) {
         proj.captions.sub_y = Some(y);
     }
-    // titles (уже с tgt после перевода)
-    if let Some(arr) = extra.get("titles").and_then(|v| v.as_array()) {
-        proj.captions.titles = arr
-            .iter()
-            .filter(|t| t.is_object())
-            .filter_map(|t| title_from_vision(t))
-            .collect();
-    }
+    // titles: НЕ строим здесь. Их финальный вид (bbox + время + стиль) собирает caption-композит
+    // (compose.rs) ПОСЛЕ OCR-стадии — до OCR у нас нет localize-боксов для матчинга y_frac -> bbox, а
+    // без bbox emit_title молча скипает титр. raw_ctx["titles"] (уже с tgt) переносится выше как есть,
+    // композит читает его оттуда. Порт pipeline.run:497-543 живёт в compose::run.
     // brands
     if let Some(arr) = extra.get("brands").and_then(|v| v.as_array()) {
         proj.captions.brands = arr
@@ -187,16 +183,3 @@ fn apply_extra(proj: &mut Project, extra: &Value) {
     }
 }
 
-/// Собрать типизированный Title из vision-словаря (_style_block + tgt). Ключи vision (y_frac/bg/solid/…)
-/// ложатся в Title.extra через flatten; text/tgt/align/color/font/italic/bold — в типизированные поля.
-fn title_from_vision(t: &Value) -> Option<Title> {
-    let obj = t.as_object()?;
-    let mut m: Map<String, Value> = obj.clone();
-    // vision кладёт цвет в "color", фон-плашку в "bg" -> Title.bg; solid -> Title.solid. Совместимо по именам.
-    // text/tgt уже есть. Остальное (y_frac/outline/align/font/italic/bold) — по именам полей Title/extra.
-    // align по умолчанию center если пусто.
-    if !m.contains_key("align") {
-        m.insert("align".into(), Value::from("center"));
-    }
-    serde_json::from_value::<Title>(Value::Object(m)).ok()
-}

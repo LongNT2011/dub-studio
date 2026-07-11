@@ -44,9 +44,30 @@ fn emit(progress: &Progress, stage: &str, msg: &str) {
     progress(json!({ "stage": stage, "msg": msg }));
 }
 
+/// _has_speech (порт pipeline.py:66-78): есть ли РЕАЛЬНАЯ дубляж-годная речь? ASR галлюцинирует на
+/// музыке/неподдерживаемом языке — обычно короткая фраза повторяется (заполняет таймлайн, но почти без
+/// РАЗНООБРАЗИЯ слов). Гейтим по разнообразию слов + покрытию: uniq>=0.35 и coverage>=0.10. Пустой
+/// транскрипт (<4 слов) -> нет речи.
+fn has_speech(segs: &[Segment], total: f64) -> bool {
+    let mut words: Vec<String> = Vec::new();
+    for s in segs {
+        for w in s.src_text.split(|c: char| !c.is_alphabetic()) {
+            if !w.is_empty() {
+                words.push(w.to_lowercase());
+            }
+        }
+    }
+    if words.len() < 4 {
+        return false;
+    }
+    let cov: f64 = segs.iter().map(|s| (s.end - s.start).max(0.0)).sum::<f64>() / total.max(0.1);
+    let uniq = words.iter().collect::<std::collections::HashSet<_>>().len() as f64 / words.len() as f64;
+    cov >= 0.10 && uniq >= 0.35
+}
+
 /// Разбить mode/subs как в pipeline: dub vs subs-only vs transcribe. В транскрипт-стадии нам нужно лишь
-/// решить итоговый Project.mode и Project.subs.mode. auto -> dub (реальный выбор dub/nodub делает
-/// vision-стадия в раунде 3; здесь честно даём dub-дефолт, транскрипт от этого не зависит).
+/// решить итоговый Project.mode и Project.subs.mode. auto -> dub (флип в nodub делает has_speech-гейт
+/// ниже, после ASR — как в питоне pipeline.py:124-129).
 fn resolve_modes(args: &AnalyzeArgs) -> (String, String) {
     // subs=auto: для dub/transcribe режимов оставляем translate (перевод придёт в раунде 3), для
     // transcribe-режима — transcribe. Совпадает с логикой api.analyze mode-присвоения.
@@ -189,7 +210,22 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     );
 
     // 5) собрать Project по контракту dub-core (mode-дефолты).
-    let (mode, subs_mode) = resolve_modes(args);
+    let (mut mode, subs_mode) = resolve_modes(args);
+    // auto -> nodub гейт (порт pipeline.py:124-129): режим auto дублирует ТОЛЬКО при реальной речи;
+    // музыкальный/иноязычный клип (пустой транскрипт ИЛИ галлюцинация-повтор) -> nodub (оставить
+    // оригинальную дорожку, локализовать лишь экранный текст). Пустые сегменты -> тоже nodub.
+    if args.mode == "auto" && (segments.is_empty() || !has_speech(&segments, meta.duration)) {
+        mode = "nodub".to_string();
+        emit(
+            progress,
+            "asr",
+            if segments.is_empty() {
+                "нет речевых сегментов; оставляю оригинальную дорожку (nodub)"
+            } else {
+                "auto: нет дубляж-годной речи -> NODUB (оригинал + локализация экранного текста)"
+            },
+        );
+    }
     let mut proj = Project::default();
     proj.meta = Meta {
         video: paths.input.to_string_lossy().into_owned(),
@@ -220,7 +256,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     // 7) OCR-стадия (раунд 4): детекция вшитого текста -> блюр-боксы субтитр-полосы + уточнение sub_y.
     //    Порт pipeline.run ocr_detect + compose.analyze_layout. Fail-safe: сбой OCR не валит analyze
     //    (боксы блюра — не блокер; их можно добавить руками в редакторе).
-    crate::ocr::stage(paths, &mut proj, meta.height, progress);
+    crate::ocr::stage(args, paths, &mut proj, meta.width, meta.height, meta.duration, progress);
 
     Ok(proj)
 }

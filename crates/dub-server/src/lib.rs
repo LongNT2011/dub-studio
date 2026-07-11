@@ -7,6 +7,7 @@
 //! раунды; их карта в docs/PORT-CONTRACT.md.
 
 mod analyze;
+mod compose;
 mod jobs;
 mod media;
 mod ocr;
@@ -31,6 +32,71 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub use jobs::JobQueue;
+
+/// E2E-верификация caption-композита БЕЗ ASR/Gemma/TTS: берём УЖЕ проанализированный project.json
+/// (кэш transcript+raw_ctx), заново гоним OCR-стадию + compose (реальная детекция + матчинг титров),
+/// затем вжигаем блюр+сабы в captioned.mp4. Так проверяем items 1-5/8 аудита на живых данных, не
+/// перезапуская тяжёлый Gemma-vision. Возвращает путь к captioned.mp4.
+pub fn verify_captions_e2e(
+    repo_root: &Path,
+    project_json: &Path,
+    input_video: &Path,
+    work_dir: &Path,
+) -> Result<PathBuf, String> {
+    let text = std::fs::read_to_string(project_json).map_err(|e| e.to_string())?;
+    let mut proj = Project::from_json(&text).map_err(|e| e.to_string())?;
+
+    // OCR-стадия перезаписывает captions.blur_boxes/titles/sub_style/sub_px через compose. Чистим
+    // прошлый прогон, чтобы видеть свежий результат (не смешивать со старым blur из project.json).
+    proj.captions.blur_boxes.clear();
+    proj.captions.titles.clear();
+
+    let vw = proj.meta.width;
+    let vh = proj.meta.height;
+    let total = proj.meta.duration;
+    let src_codec = proj.meta.src_codec.clone();
+
+    // Пути резолвим напрямую из repo_root (без AppState — тот тянет Tokio-JobQueue). ocr::stage нужны
+    // лишь models_root/caption_fps/input/work_dir; llama_bin/mt_model — только для таглайн-MT (fail-safe).
+    let opts = EngineOpts::default();
+    let mroot = models_root(repo_root);
+    let fonts_dir = repo_root.join("fonts");
+    let unused = repo_root.join("nonexistent");
+    let args = analyze::AnalyzeArgs {
+        tgt_lang: proj.tgt_lang.clone(),
+        mode: proj.mode.clone(),
+        src_lang: "auto".into(),
+        subs: proj.subs.mode.clone(),
+        rewrite: String::new(),
+    };
+    let paths = analyze::AnalyzePaths {
+        input: input_video.to_path_buf(),
+        work_dir: work_dir.to_path_buf(),
+        tdt_dir: unused.clone(),
+        sortformer_onnx: unused.clone(),
+        llama_bin: dub_llm::resolve_llama_bin(&repo_root.join("tools").join("llama")),
+        mt_model: opts.mt_model_path.clone(),
+        mmproj: opts.mmproj_path.clone(),
+        models_root: mroot,
+        caption_fps: opts.caption_fps,
+    };
+    let cb = |ev: Value| {
+        if let Some(m) = ev.get("msg").and_then(|v| v.as_str()) {
+            eprintln!("[verify] {m}");
+        }
+    };
+    ocr::stage(&args, &paths, &mut proj, vw, vh, total, &cb);
+
+    let out_ass = work_dir.join("verify_caps.ass");
+    let captioned = work_dir.join("verify_captioned.mp4");
+    render::build_and_burn_captions(
+        &proj, input_video, &out_ass, &captioned, &fonts_dir, vw, vh, total, &src_codec,
+    )?;
+    // Записать обновлённый project (с bbox титров) рядом — для инспекции.
+    let dbg = work_dir.join("verify_project.json");
+    let _ = std::fs::write(&dbg, proj.to_json_pretty().unwrap_or_default());
+    Ok(captioned)
+}
 
 #[derive(Clone)]
 pub struct AppState {

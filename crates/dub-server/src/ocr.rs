@@ -1,22 +1,34 @@
-//! OCR-стадия analyze (раунд 4). Порт pipeline.run ocr_detect + compose.analyze_layout: детектим
-//! вшитый текст (dub-ocr), выделяем субтитр-полосу -> блюр-боксы, уточняем sub_y. Спикер-словарь
-//! (spoken) из транскрипта отсекает сцен-графику (не-сказанный текст) от субтитр-полосы.
+//! OCR-стадия analyze (раунд 4/5). Порт pipeline.run ocr_detect + compose.analyze_layout + весь
+//! caption-композит (pipeline.run:388-643). Детектим вшитый текст (dub-ocr), выделяем субтитр-полосу,
+//! коалесцируем её в band_blur (центр-гейт + IoU), затем зовём compose::run — тот собирает финальные
+//! ТИТРЫ с bbox и полный набор блюр-боксов из vision-словаря (raw_ctx) + localize/caption_boxes.
+//! Спикер-словарь (spoken) из транскрипта отсекает сцен-графику от субтитр-полосы.
 //!
 //! Fail-safe: любой сбой (нет моделей OCR / нет ORT_DYLIB_PATH / ffmpeg) логируется в SSE и оставляет
 //! blur_boxes пустыми — analyze не падает (блюр не блокер, редактор добавит руками).
 
 use dub_core::{BlurBox, Project};
-use dub_ocr::{analyze_layout, detect_regions, OcrPaths};
+use dub_ocr::{analyze_layout, blur, detect_regions, OcrPaths};
 use std::collections::HashSet;
 
-use crate::analyze::{AnalyzePaths, Progress};
+use crate::analyze::{AnalyzeArgs, AnalyzePaths, Progress};
+use crate::compose::{self, ComposeCtx};
 
 fn emit(progress: &Progress, stage: &str, msg: &str) {
     progress(serde_json::json!({ "stage": stage, "msg": msg }));
 }
 
-/// Прогнать OCR-стадию. Заполняет proj.captions.blur_boxes (субтитр-полоса) и уточняет sub_y.
-pub fn stage(paths: &AnalyzePaths, proj: &mut Project, vh: i64, progress: &Progress) {
+/// Прогнать OCR-стадию + caption-композит. Заполняет proj.captions.blur_boxes/titles/sub_style/sub_px.
+/// vw/vh — размеры кадра (vw нужен центр-гейту band_blur и композиту).
+pub fn stage(
+    args: &AnalyzeArgs,
+    paths: &AnalyzePaths,
+    proj: &mut Project,
+    vw: i64,
+    vh: i64,
+    total: f64,
+    progress: &Progress,
+) {
     let ocr_paths = OcrPaths::under(&paths.models_root);
     if !ocr_paths.all_exist() {
         emit(progress, "ocr_detect", "модели OCR не найдены -> без блюр-боксов");
@@ -56,42 +68,64 @@ pub fn stage(paths: &AnalyzePaths, proj: &mut Project, vh: i64, progress: &Progr
         }
     };
 
-    let (_localize, caption_boxes, sub_y_det) = analyze_layout(&regions, vh, &raw, &spoken);
+    let (localize, caption_boxes, sub_y_det) = analyze_layout(&regions, vh, &raw, &spoken);
 
-    // caption_boxes -> blur_boxes Project (субтитр-полоса под блюр). Порт band_blur/blur_boxes.
-    // Каждый бокс с небольшим ростом (как питон: +6/-4 по x, +8/-4 по y округлённо — тут держим как
-    // есть, burn сам растит на 2px и pre-roll). t1 = t0 + окно семпла (1/fps) для frame-accurate блюра.
-    let dt = 1.0 / fps as f64;
-    let mut blur: Vec<BlurBox> = Vec::new();
-    for (x, y, w, h, t0, t1) in &caption_boxes {
-        let t1e = if (*t1 as f64) > (*t0 as f64) { *t1 as f64 } else { *t0 as f64 + dt };
-        blur.push(BlurBox {
-            x: (*x - 6).max(0),
-            y: (*y - 4).max(0),
-            w: *w + 12,
-            h: *h + 8,
-            t0: (*t0 as f64 * 100.0).round() / 100.0,
-            t1: (t1e * 100.0).round() / 100.0,
+    // ── band_blur (порт pipeline.py:416-442, item#2 аудита) ────────────────────
+    // caption_boxes -> Det (x,y,w,h,t), отфильтровать центр-straddle гейтом (боковые вывески CHIYA/BAKERY
+    // выпадают), коалесцировать в бокс-спаны (IoU>=0.5, тайм-гейт 1.6*dt), pad (-6,-4,+12,+8), t0..t1+dt.
+    // Раньше здесь был мёртвый путь: по одному BlurBox на каждый raw бокс БЕЗ центр-гейта/коалесценции.
+    let dets: Vec<blur::Det> = caption_boxes
+        .iter()
+        .filter(|b| blur::straddles_center(b.0 as f32, b.2 as f32, vw as f32))
+        .map(|b| (b.0 as f32, b.1 as f32, b.2 as f32, b.3 as f32, b.4))
+        .collect();
+    let band_spans = blur::band_blur(dets, fps as u32);
+    let band_blur: Vec<BlurBox> = band_spans
+        .iter()
+        .map(|s| BlurBox {
+            x: s.0 as i64,
+            y: s.1 as i64,
+            w: s.2 as i64,
+            h: s.3 as i64,
+            t0: s.4 as f64,
+            t1: s.5 as f64,
             hidden: false,
             extra: Default::default(),
-        });
-    }
-    // объединять перекрывающиеся боксы на одном месте в один спан не обязательно — burn переиспользует
-    // ОДИН full-frame gblur и композитит по каждому боксу; лишние боксы лишь чуть удлиняют цепочку.
-    let n = blur.len();
-    proj.captions.blur_boxes = blur;
+        })
+        .collect();
 
-    // sub_y: OCR-детект (усреднён по всем кадрам) — источник истины позиции; перекрывает vision-fallback,
-    // если он был. Не трогаем, если editor уже зафиксировал (sub_y_locked).
+    // sub_y: OCR-детект (усреднён по кадрам) — источник истины позиции; не трогаем при sub_y_locked
+    // и не затираем уже выставленный vision-fallback пустым (как в питоне: sub_y = sub_y_det по умолчанию,
+    // затем ce.sub_y только если sub_y пуст — тут vision уже положил sub_y в apply_extra при наличии).
     if !proj.captions.sub_y_locked {
         if let Some(y) = sub_y_det {
             proj.captions.sub_y = Some(y);
         }
     }
 
+    // ── caption-композит (pipeline.run:388-643) ────────────────────────────────
+    // do_translate = dub || subs==translate; fresh_subs у нас всегда false (нет режима свежих сабов).
+    let do_translate = proj.mode == "dub" || proj.subs.mode == "translate";
+    let cctx = ComposeCtx {
+        vw,
+        vh,
+        total,
+        do_translate,
+        fresh_subs: false,
+        src_lang: &args.src_lang,
+        paths,
+    };
+    compose::run(proj, &localize, &caption_boxes, &band_blur, &cctx, progress);
+
     emit(
         progress,
         "ocr_detect",
-        &format!("OCR: {} регионов -> {} блюр-боксов, sub_y={:?}", regions.len(), n, sub_y_det),
+        &format!(
+            "OCR: {} регионов, {} localize, {} band-спанов, sub_y={:?}",
+            regions.len(),
+            localize.len(),
+            band_blur.len(),
+            proj.captions.sub_y
+        ),
     );
 }
