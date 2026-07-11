@@ -1,10 +1,12 @@
 //! dub-ocr — экранный OCR для блюр-боксов вшитого текста. Порт dubengine/text_detect.py (detect_regions:
-//! семплинг кадров -> PP-OCR det+rec -> merge строк -> IoU-трекинг -> most-frequent текст на трек) +
-//! dubengine/compose.py (looks_like_caption, group_captions, analyze_layout: субтитр-полоса vs титры).
+//! семплинг кадров -> PP-OCR det+(cls)+rec -> merge строк -> IoU-трекинг -> most-frequent текст на трек) +
+//! dubengine/compose.py (looks_like_caption, analyze_layout: субтитр-полоса vs титры).
 //!
-//! Движки det/rec — PP-OCR ONNX через ort (models/ocr/). Рантайм — свой ort-пайплайн (paddle-ocr-rs
-//! использует ort rc.10 + download-binaries, что конфликтует с нашим пинном rc.12 load-dynamic и
-//! рискует тем же дедлоком, что чужая system32 DLL — потому собственный движок на общей 1.24.2).
+//! Движки det (DBNet+DBPostProcess: min-area-rect, edge-normal unclip) / cls (0/180) / rec (CRNN+CTC,
+//! словарь из метадаты ONNX) — PP-OCR ONNX через ort (models/ocr/). Рантайм — свой ort-пайплайн
+//! (paddle-ocr-rs использует ort rc.10 + download-binaries, что конфликтует с нашим пинном rc.12
+//! load-dynamic api-24 и рискует тем же дедлоком, что чужая system32 DLL — потому свой движок на общей
+//! 1.24.2). Внутренности (unclip/словарь/препроцесс/тесты) поглощены из ветки r4-ocr — строго лучше.
 
 mod cls;
 mod det;
