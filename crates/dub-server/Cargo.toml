@@ -1,0 +1,23 @@
+[package]
+name = "dub-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "axum-сервер Dub Studio: тот же REST/SSE контракт, что backend/app.py"
+
+[dependencies]
+dub-core = { path = "../dub-core" }
+axum = { version = "0.8", features = ["multipart"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+tokio = { workspace = true }
+tokio-stream = "0.1"
+futures-util = "0.3"
+async-stream = "0.3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+mime_guess = "2"
