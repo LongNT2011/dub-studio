@@ -40,6 +40,39 @@ pub fn set_fonts_dir(dir: impl AsRef<Path>) {
     ass::set_fonts_dir(dir);
 }
 
+/// FONTS-каталог (family -> описание) в порядке питона — для GET /fonts. Порт dict(captions.FONTS).
+pub fn fonts_catalog() -> serde_json::Map<String, serde_json::Value> {
+    let mut m = serde_json::Map::new();
+    for (k, v) in look::FONTS_ORDERED {
+        m.insert(k.to_string(), serde_json::Value::from(v));
+    }
+    m
+}
+
+/// TEMPLATES-каталог (name -> {reveal,plate,font,base,plate_c?,accent?}) + список REVEALS — для
+/// GET /presets. Порт {k: dict(v)} + list(REVEALS) из app.py. fresh-семейство БЕЗ plate_c (как питон).
+pub fn presets_catalog() -> (serde_json::Map<String, serde_json::Value>, Vec<String>) {
+    let mut presets = serde_json::Map::new();
+    for name in look::TEMPLATE_NAMES {
+        if let Some(t) = look::template(name) {
+            let mut d = serde_json::Map::new();
+            d.insert("reveal".into(), serde_json::Value::from(t.reveal));
+            d.insert("plate".into(), serde_json::Value::from(t.plate));
+            d.insert("font".into(), serde_json::Value::from(t.font));
+            d.insert("base".into(), serde_json::Value::from(t.base));
+            if !look::template_omits_plate_c(name) {
+                d.insert("plate_c".into(), serde_json::Value::from(t.plate_c));
+            }
+            if let Some(a) = t.accent {
+                d.insert("accent".into(), serde_json::Value::from(a));
+            }
+            presets.insert(name.to_string(), serde_json::Value::Object(d));
+        }
+    }
+    let reveals: Vec<String> = look::REVEALS.iter().map(|s| s.to_string()).collect();
+    (presets, reveals)
+}
+
 /// Собрать ОДИН ASS с титрами + дублированными субтитрами и записать в out_ass. Порт captions.build.
 pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Result<(), String> {
     if args.max_lines == 0 {
@@ -299,6 +332,20 @@ fn build_s_style(
     let ital = if ss.italic { -1 } else { 0 };
     let bg = ss.background.clone();
     let sow = ss.outline_w;
+    // Явный контрастный bg от vision (полоса в оригинале) — приоритетнее продуктовой подложки.
+    let vision_band = bg
+        .as_deref()
+        .map(|b| b != "none" && (look::lum(b) - look::lum(&txt_hex)).abs() >= 0.20)
+        .unwrap_or(false);
+    // ПРОДУКТОВОЕ ОТКЛОНЕНИЕ (приказ юзера 2026-07-12): при bg=none/пусто и БЕЗ явной полосы vision —
+    // светлые сабы рисуются на СПЛОШНОЙ плашке (ветка A: BorderStyle=3, Outline=11), цвет по умолчанию
+    // чёрный #000000 (как эталон example_dub.mp4) вместо питоновского тонкого outline. plate=Some(false)
+    // отключает (fall-through к питоновской outline-ветке); plate=None (дефолт) или Some(true) — плашка.
+    // outline_w-оверрайд редактора (ниже) и явная полоса vision — обе главнее продуктовой плашки.
+    // Тёмный текст (lum<=0.45) сохраняет питоновскую БЕЛУЮ плиту (тоже сплошная, но читаемая) — там
+    // чёрная плашка сделала бы текст нечитаемым; продукт-дефолт «сплошная плашка» соблюдён, цвет по
+    // контрасту.
+    let plate_on = ss.plate.unwrap_or(true) && !vision_band && sow.is_none();
     if let Some(w) = sow {
         let soc = look::hex_ass(
             ss.outline
@@ -316,20 +363,26 @@ fn build_s_style(
             "Style: S,{fontname},{sub_fs},{col},&H000000FF,{soc},&H64000000,{bold},{ital},0,0,100,100,0,0,1,{},2,2,80,80,{margin_v},1",
             w.max(0)
         )
-    } else if bg
-        .as_deref()
-        .map(|b| b != "none" && (look::lum(b) - look::lum(&txt_hex)).abs() >= 0.20)
-        .unwrap_or(false)
-    {
+    } else if vision_band {
         format!(
             "Style: S,{fontname},{sub_fs},{col},&H000000FF,{},&H00000000,{bold},{ital},0,0,100,100,0,0,3,11,0,2,80,80,{margin_v},1",
             look::hex_ass(bg.as_deref().unwrap())
         )
     } else if look::lum(&txt_hex) > 0.45 {
-        let bord = ((sub_fs as f64 * 0.025).round() as i64).max(2);
-        format!(
-            "Style: S,{fontname},{sub_fs},{col},&H000000FF,&H00000000,&H00000000,{bold},{ital},0,0,100,100,0,0,1,{bord},0,2,80,80,{margin_v},1"
-        )
+        if plate_on {
+            // Дефолтная подложка: сплошная плашка plate_color (дефолт чёрный), BorderStyle=3/Outline=11.
+            let plate_hex = ss.plate_color.clone().unwrap_or_else(|| "#000000".to_string());
+            format!(
+                "Style: S,{fontname},{sub_fs},{col},&H000000FF,{},&H00000000,{bold},{ital},0,0,100,100,0,0,3,11,0,2,80,80,{margin_v},1",
+                look::hex_ass(&plate_hex)
+            )
+        } else {
+            // Юзер отключил подложку -> питоновская тонкая outline-ветка (BorderStyle=1).
+            let bord = ((sub_fs as f64 * 0.025).round() as i64).max(2);
+            format!(
+                "Style: S,{fontname},{sub_fs},{col},&H000000FF,&H00000000,&H00000000,{bold},{ital},0,0,100,100,0,0,1,{bord},0,2,80,80,{margin_v},1"
+            )
+        }
     } else {
         format!(
             "Style: S,{fontname},{sub_fs},{col},&H000000FF,&H00FFFFFF,&H00F2F2F2,{bold},{ital},0,0,100,100,0,0,3,10,0,2,80,80,{margin_v},1"
@@ -451,11 +504,12 @@ mod tests {
         assert!(kp.unwrap().contains("&HE0E0E0&"), "cover-плашка цвета сцены: {}", kp.unwrap());
     }
 
-    // Светлый box-less текст на ТЕКСТУРНОЙ сцене (scene_flat=false) -> НЕТ плашки, только outline
-    // (BorderStyle=1) — намеренно, как в питоне (блюр + own outline). Регресс-якорь: не рисуем плашку
-    // там, где питон не рисует, и НЕ теряем cover-плашку когда scene_flat=true (тест выше).
+    // Светлый box-less текст на ТЕКСТУРНОЙ сцене (scene_flat=false): S-style теперь дефолт-подложка
+    // (BorderStyle=3, продуктовое отклонение), НО KP cover-плашка (Layer 0, цвет сцены) — только на
+    // ПЛОСКОЙ сцене. Регресс-якорь: cover-KP не появляется на текстурной сцене (он отдельно от
+    // дефолтной S-подложки), и cover-KP появляется когда scene_flat=true (flat_scene_emits_cover_plate).
     #[test]
-    fn light_textured_scene_is_plateless_border1() {
+    fn textured_scene_has_default_plate_but_no_cover_kp() {
         let ss = SubStyle {
             color: "#FFFFFF".into(),
             background: Some("none".into()),
@@ -466,23 +520,21 @@ mod tests {
         };
         let ass = build_str(720, 1280, &ss, &subs1());
         let s = s_style_line(&ass);
-        assert!(s.contains(",1,"), "BorderStyle=1 (outline-only) ожидается: {s}");
+        assert!(s.contains(",3,11,0,2,"), "дефолтная подложка BorderStyle=3 ожидается: {s}");
         assert!(
             !ass.lines().any(|l| l.starts_with("Dialogue: 0,") && l.contains(",KP,")),
-            "на текстурной сцене cover-плашки быть не должно"
+            "на текстурной сцене cover-плашки (KP) быть не должно"
         );
     }
 
-    // ПАРИТЕТ ПЛАШЕК (task #28) — ЗОЛОТОЙ ЯКОРЬ живого greedy-чтения example_original.mp4.
-    // Живой прогон analyze_layout (greedy sub-style temp=0.0, top_k=64, top_p=0.95) на эталонном
-    // ОРИГИНАЛЕ вернул РОВНО этот sub_style: background="none", scene_flat=false, белый текст с
-    // чёрным outline (субтитр оригинала — outline-стиль, БЕЗ сплошной полосы). Источник истины
-    // captions.py, накормленный ТЕМ ЖЕ sub_style, даёт БАЙТ-в-байт ту же S-строку BorderStyle=1,
-    // Outline=2 (проверено py-прогоном py_greedy.py -> pygreedy/greedy.ass). Порт ОБЯЗАН совпадать:
-    // это фиксирует, что мы НЕ рисуем плашку там, где источник истины её не рисует (а «плашка
-    // эталона example_dub.mp4» — от УСТАРЕВШЕГО пайплайна, не от текущего greedy-vision).
+    // ПРОДУКТОВОЕ ОТКЛОНЕНИЕ (приказ юзера 2026-07-12) — ДЕФОЛТНАЯ ПОДЛОЖКА на живом greedy-входе.
+    // Живой greedy-vision example_original.mp4 отдаёт background="none", scene_flat=false. Раньше
+    // (задача #28, паритет с captions.py) это давало BorderStyle=1 outline-only (без плашки). ТЕПЕРЬ
+    // по приказу юзера дефолт продукта = сплошная ЧЁРНАЯ плашка (BorderStyle=3, Outline=11), визуально
+    // как эталон example_dub.mp4. Старый паритет с текущим питоном здесь сознательно нарушен —
+    // см. PORT-CONTRACT.md «Раунд 5 — дефолтная подложка сабов». plate=None -> дефолт ON.
     #[test]
-    fn greedy_example_original_substyle_is_border1_no_plate() {
+    fn greedy_example_original_default_black_plate() {
         let ss = SubStyle {
             color: "#FFFFFF".into(),
             background: Some("none".into()),
@@ -501,14 +553,31 @@ mod tests {
         };
         let ass = build_str(464, 824, &ss, &subs1());
         let s = s_style_line(&ass);
-        // BorderStyle=1, Outline=2, Shadow=0 — та же ветка, что и питон на greedy-входе (никакой плашки).
+        // BorderStyle=3, Outline=11, ЧЁРНАЯ плита (&H00000000) — продуктовый дефолт (эталон example_dub).
+        assert!(
+            s.contains(",3,11,0,2,") && s.contains("&H00000000,&H00000000"),
+            "дефолтная подложка -> BorderStyle=3 Outline=11 чёрная плита: {s}"
+        );
+    }
+
+    // Оверрайд юзера ОТКЛЮЧАЕТ дефолтную подложку (plate=Some(false)) -> возврат к питоновской
+    // BorderStyle=1 outline-ветке (тумблер стиля в редакторе). Тот же greedy-вход, что выше.
+    #[test]
+    fn plate_disabled_falls_back_to_border1() {
+        let ss = SubStyle {
+            color: "#FFFFFF".into(),
+            background: Some("none".into()),
+            bold: true,
+            uppercase: true,
+            font: Some("Oswald".into()),
+            plate: Some(false),
+            ..Default::default()
+        };
+        let ass = build_str(464, 824, &ss, &subs1());
+        let s = s_style_line(&ass);
         assert!(
             s.contains(",1,2,0,2,"),
-            "greedy example_original -> BorderStyle=1 Outline=2 (outline-only, паритет с captions.py): {s}"
-        );
-        assert!(
-            !ass.lines().any(|l| l.starts_with("Dialogue: 0,") && l.contains(",KP,")),
-            "на этом входе (scene_flat=false) плашки/cover быть НЕ должно — паритет с питоном"
+            "plate=false -> BorderStyle=1 Outline=2 (outline-only, питоновская ветка): {s}"
         );
     }
 

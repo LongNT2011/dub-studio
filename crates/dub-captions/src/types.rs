@@ -41,6 +41,14 @@ pub struct SubStyle {
     pub scene_color: Option<String>,
     pub scene_flat: bool,
     pub solid: bool,
+    /// Дефолтная подложка сабов (продуктовое отклонение 2026-07-12, приказ юзера): при bg=none/пусто
+    /// сабы рисуются на СПЛОШНОЙ плашке (ветка A, BorderStyle=3), как в эталоне example_dub.mp4.
+    /// None (не задано) = продуктовый дефолт ON (плашка). Some(false) = юзер отключил оверрайдом
+    /// (fall-through к питоновским outline/dark-plate веткам). Some(true) = принудительно плашка.
+    pub plate: Option<bool>,
+    /// Цвет дефолтной подложки, если vision не дал явного bg. Дефолт чёрный #000000 (эталон); если
+    /// vision дал тёмный scene_color — можно его. None -> #000000.
+    pub plate_color: Option<String>,
 }
 
 impl Default for SubStyle {
@@ -61,6 +69,8 @@ impl Default for SubStyle {
             scene_color: None,
             scene_flat: false,
             solid: false,
+            plate: None,
+            plate_color: None,
         }
     }
 }

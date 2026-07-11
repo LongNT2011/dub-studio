@@ -359,7 +359,7 @@ pub(crate) fn build_and_burn_captions(
 }
 
 /// Собрать ASS через dub-captions из Project. Порт captions.build call-site pipeline.run.
-fn build_ass(proj: &Project, out_ass: &Path, vw: i64, vh: i64, total: f64) -> Result<(), String> {
+pub(crate) fn build_ass(proj: &Project, out_ass: &Path, vw: i64, vh: i64, total: f64) -> Result<(), String> {
     let titles: Vec<CapTitle> = proj.captions.titles.iter().map(map_title).collect();
     let sub_style = proj.captions.sub_style.as_ref().map(map_sub_style);
     // sub_y дефолт vh*0.82 если не задан (как pipeline.py: не затирать edited/pinned sub_y).
@@ -489,5 +489,13 @@ fn map_sub_style(s: &CoreSubStyle) -> CapSubStyle {
         scene_color: s.scene_color.clone(),
         scene_flat: s.scene_flat,
         solid: s.extra.get("solid").and_then(|v| v.as_bool()).unwrap_or(false),
+        // Дефолтная подложка (продуктовое отклонение): plate/plate_color из extra (PATCH caption их
+        // кладёт). None -> дефолт ON (плашка); false -> юзер отключил; строка plate_color -> её цвет.
+        plate: s.extra.get("plate").and_then(|v| v.as_bool()),
+        plate_color: s
+            .extra
+            .get("plate_color")
+            .and_then(|v| v.as_str())
+            .map(|x| x.to_string()),
     }
 }

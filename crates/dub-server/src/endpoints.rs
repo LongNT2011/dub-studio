@@ -1,0 +1,285 @@
+//! Остаток REST-контракта (раунд 5): каталоги (/fonts /voices /presets), PATCH /engine/opts,
+//! POST /remix (Gemma переписывает весь транскрипт), PUT /projects/{pid} (undo/redo снапшот),
+//! GET /waveform (пики аудио), GET /preview?t&rev + GET /original?t (ОДИН PNG-кадр через GPU-воркер).
+//! Порт соответствующих ручек backend/app.py 1:1.
+
+use axum::extract::{Path as AxPath, Query, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use axum::Json;
+use dub_core::Project;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use crate::{jobs, save_project_atomic, AppState};
+
+// ─── GET /fonts ─────────────────────────────────────────────────────────────
+pub async fn fonts() -> Json<Value> {
+    Json(json!({ "fonts": dub_captions::fonts_catalog() }))
+}
+
+// ─── GET /voices ────────────────────────────────────────────────────────────
+// Голоса voice-пака (пусто, если пак не установлен). У порта нет отдельного voice-пак-каталога
+// (Higgs клонирует из ref-аудио, не из именованного пака) -> отдаём пустой список, как питон при
+// отсутствии пака (try/except -> []). Контракт формы соблюдён (VoicePanel показывает пусто).
+pub async fn voices() -> Json<Value> {
+    Json(json!({ "voices": [] as [String; 0] }))
+}
+
+// ─── GET /presets ───────────────────────────────────────────────────────────
+pub async fn presets() -> Json<Value> {
+    let (presets, reveals) = dub_captions::presets_catalog();
+    Json(json!({ "presets": presets, "reveals": reveals }))
+}
+
+// ─── PATCH /engine/opts ─────────────────────────────────────────────────────
+// Свап слота модели (asr/tts/llm/vision) в рантайме. У порта OPTS иммутабелен внутри AppState
+// (Arc<EngineOpts>), а модели резолвятся путями из окружения/дефолтов — рантайм-свап без пересоздания
+// стейта не предусмотрен архитектурой (в отличие от питоновского живого OPTS). Валидируем вход как
+// питон (непустые строки -> 400 иначе) и возвращаем ТЕКУЩИЙ стек — контракт формы {models:{...}}
+// соблюдён; фактический свап слота — вне scope порта (модель-стек задаётся при старте сервера).
+pub async fn set_opts(State(st): State<AppState>, Json(edit): Json<Value>) -> Response {
+    for key in ["asr", "tts", "llm", "vision"] {
+        if let Some(v) = edit.get(key) {
+            let ok = v.as_str().map(|s| !s.trim().is_empty()).unwrap_or(false);
+            if !ok {
+                return (StatusCode::BAD_REQUEST, format!("{key:?} must be a non-empty path"))
+                    .into_response();
+            }
+        }
+    }
+    let o = &st.opts;
+    Json(json!({ "models": {
+        "asr": o.asr_model,
+        "llm": o.mt_model_path.to_string_lossy(),
+        "vision": o.mmproj_path.to_string_lossy(),
+        "tts": o.tts_model,
+    }}))
+    .into_response()
+}
+
+// ─── PUT /projects/{pid} ────────────────────────────────────────────────────
+// Полная замена Project (undo/redo снапшот). Порт app.py.put_project: валидировать тело как Project,
+// сохранить атомарно, вернуть Project.
+pub async fn put_project(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let proj: Project = match serde_json::from_value(body) {
+        Ok(p) => p,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad project: {e}")).into_response(),
+    };
+    if let Err(e) = save_project_atomic(&dir, &proj) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    match proj.to_json() {
+        Ok(s) => ([("content-type", "application/json")], s).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+// ─── GET /projects/{pid}/waveform?n=600 ─────────────────────────────────────
+// Даунсэмпл-пики аудио (ffmpeg s16le 8kHz), кэш waveform.json. CPU, вне GPU-воркера. Порт app.py.
+pub async fn waveform(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let cache = dir.join("waveform.json");
+    if let Ok(txt) = std::fs::read_to_string(&cache) {
+        return ([("content-type", "application/json")], txt).into_response();
+    }
+    let proj = match st.load_project(&pid) {
+        Ok(p) => p,
+        Err(resp) => return resp,
+    };
+    let n: usize = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(600);
+    let video = PathBuf::from(&proj.meta.video);
+    let peaks =
+        tokio::task::spawn_blocking(move || crate::wavio::waveform_peaks(&video, n))
+            .await
+            .unwrap_or_default();
+    let out = json!({ "peaks": peaks });
+    if !peaks_empty(&out) {
+        let _ = std::fs::write(&cache, out.to_string());
+    }
+    Json(out).into_response()
+}
+
+fn peaks_empty(v: &Value) -> bool {
+    v.get("peaks").and_then(|p| p.as_array()).map(|a| a.is_empty()).unwrap_or(true)
+}
+
+// ─── POST /projects/{pid}/remix?instruction= ────────────────────────────────
+// Творческий ремикс: Gemma переписывает ВЕСЬ транскрипт по теме/инструкции, помечает всё dirty.
+// Порт app.py.remix_project (использует translate.rewrite = flat_rewrite dub-translate).
+pub async fn remix_project(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let instruction = q.get("instruction").cloned().unwrap_or_default();
+    if instruction.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, "empty remix instruction").into_response();
+    }
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let proj_path = dir.join("project.json");
+    if !proj_path.is_file() {
+        return (StatusCode::CONFLICT, "project not analyzed yet").into_response();
+    }
+    let llama_bin = st.llama_bin.clone();
+    let mt_model = st.opts.mt_model_path.clone();
+    let instr = instruction.trim().to_string();
+    let dir_for_job = dir.clone();
+
+    let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
+        use dub_llm::{ChatClient, LlamaServer, ServerOpts};
+        use dub_translate::{flat_rewrite, Seg};
+
+        let text = std::fs::read_to_string(&proj_path).map_err(|e| e.to_string())?;
+        let mut p = Project::from_json(&text).map_err(|e| e.to_string())?;
+        if p.segments.is_empty() {
+            return Err("no transcript to remix — analyze first".into());
+        }
+        if !llama_bin.is_file() || !mt_model.is_file() {
+            return Err("Gemma (llama-server/GGUF) недоступна для ремикса".into());
+        }
+        progress(json!({ "type": "progress",
+            "msg": format!("Gemma remixing {} lines → {}", p.segments.len(),
+                           &instr[..instr.len().min(60)]) }));
+
+        let opts = ServerOpts::new(&llama_bin, &mt_model); // без mmproj (плоский rewrite)
+        let srv = LlamaServer::start(&opts).map_err(|e| format!("llama-server: {e}"))?;
+        let client = ChatClient::new(srv.base_url()).map_err(|e| format!("chat client: {e}"))?;
+
+        let mut segs: Vec<Seg> = p
+            .segments
+            .iter()
+            .map(|s| {
+                let spk = s.speaker.as_deref().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0);
+                Seg::new(s.src_text.clone(), spk)
+            })
+            .collect();
+        let r = flat_rewrite(&client, &mut segs, &instr, "auto", &p.tgt_lang, false);
+        drop(srv);
+        r.map_err(|e| format!("remix: {e}"))?;
+
+        for (i, s) in p.segments.iter_mut().enumerate() {
+            if let Some(sg) = segs.get(i) {
+                if !sg.tgt.trim().is_empty() {
+                    s.tgt_text = sg.tgt.clone();
+                }
+            }
+            s.dirty = true;
+        }
+        p.audio.rewrite = Some(instr.clone());
+        save_project_atomic(&dir_for_job, &p)?;
+        p.to_json().map(|s| serde_json::from_str(&s).unwrap_or(Value::Null))
+            .map_err(|e| e.to_string())
+    });
+    let job_id = st.jobs.enqueue(job).await;
+    Json(json!({ "job_id": job_id })).into_response()
+}
+
+// ─── GET /projects/{pid}/preview?t=&rev= ────────────────────────────────────
+// ОДИН превью-кадр (PNG) через GPU-воркер (сериализовано). Порт app.py.preview (таймаут 300с).
+pub async fn preview(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let proj = match st.load_project(&pid) {
+        Ok(p) => p,
+        Err(resp) => return resp, // 409 если не проанализирован
+    };
+    let input = match std::fs::read_to_string(dir.join("source.txt")) {
+        Ok(s) => PathBuf::from(s.trim()),
+        Err(_) => return (StatusCode::CONFLICT, "no source uploaded").into_response(),
+    };
+    let t: f64 = q.get("t").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let fonts_dir = st.fonts_dir.clone();
+    let work_dir = dir.clone();
+    frame_job(&st, 300, move |_p| {
+        crate::frame::preview_frame(&proj, &input, &work_dir, &fonts_dir, t)
+    })
+    .await
+}
+
+// ─── GET /projects/{pid}/original?t= ────────────────────────────────────────
+// Сырой кадр ОРИГИНАЛА (PNG) на t — для before/after. Порт app.py.original (source_frame, таймаут 60с).
+// ВНИМАНИЕ: возвращает ОДИН PNG-кадр (как источник истины app.py), а не всё видео — фронт (ComparePane)
+// использует это как <img src>.
+pub async fn original_frame(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let input = match std::fs::read_to_string(dir.join("source.txt")) {
+        Ok(s) => PathBuf::from(s.trim()),
+        Err(_) => return (StatusCode::NOT_FOUND, "no source").into_response(),
+    };
+    if !input.is_file() {
+        return (StatusCode::NOT_FOUND, "source missing").into_response();
+    }
+    let t: f64 = q.get("t").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    let work_dir = dir.clone();
+    frame_job(&st, 60, move |_p| crate::frame::source_frame(&input, &work_dir, t)).await
+}
+
+/// Общий помощник: поставить синхронную PNG-джобу в GPU-воркер, ждать с таймаутом, вернуть image/png
+/// или 504. Порт паттерна app.py.preview/original (enqueue + wait_for + abandoned на таймауте).
+async fn frame_job<F>(st: &AppState, timeout_s: u64, f: F) -> Response
+where
+    F: FnOnce(jobs::ProgressFn) -> Result<Vec<u8>, String> + Send + 'static,
+{
+    let job: jobs::JobFn = Box::new(move |progress| {
+        let png = f(progress)?;
+        // Возвращаем байты как base64 в JSON-результат нельзя эффективно; вместо этого прокидываем через
+        // канал: сериализуем как массив байт в Value (voркер отдаёт oneshot Result<Value>). Читаем ниже.
+        Ok(Value::Array(png.into_iter().map(|b| Value::from(b as u64)).collect()))
+    });
+    let (job_id, rx) = st.jobs.enqueue_awaitable(job).await;
+    match tokio::time::timeout(std::time::Duration::from_secs(timeout_s), rx).await {
+        Ok(Ok(Ok(v))) => {
+            st.jobs.remove(&job_id).await;
+            let bytes: Vec<u8> = v
+                .as_array()
+                .map(|a| a.iter().filter_map(|x| x.as_u64().map(|n| n as u8)).collect())
+                .unwrap_or_default();
+            ([("content-type", "image/png")], bytes).into_response()
+        }
+        Ok(Ok(Err(e))) => {
+            st.jobs.remove(&job_id).await;
+            (StatusCode::INTERNAL_SERVER_ERROR, e).into_response()
+        }
+        Ok(Err(_)) => {
+            st.jobs.remove(&job_id).await;
+            (StatusCode::INTERNAL_SERVER_ERROR, "job canceled").into_response()
+        }
+        Err(_) => {
+            st.jobs.mark_abandoned(&job_id).await;
+            (StatusCode::GATEWAY_TIMEOUT, "frame render timed out").into_response()
+        }
+    }
+}

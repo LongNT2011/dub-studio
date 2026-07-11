@@ -243,3 +243,27 @@ pub fn fonts_map() -> HashMap<&'static str, &'static str> {
         ("Caveat", "casual handwritten"),
     ])
 }
+
+/// FONTS в порядке питона (dict(captions.FONTS)) — для GET /fonts. Порядок вставки сохраняем.
+pub const FONTS_ORDERED: [(&str, &str); 7] = [
+    ("Montserrat", "clean geometric sans"),
+    ("Oswald", "tall condensed sans (impact)"),
+    ("Roboto", "neutral plain sans"),
+    ("Russo One", "very heavy bold geometric display (max impact)"),
+    ("Pacifico", "flowing brush script"),
+    ("Playfair Display", "elegant high-contrast serif"),
+    ("Caveat", "casual handwritten"),
+];
+
+/// Имена TEMPLATES в порядке питона (list(captions.TEMPLATES)) — для GET /presets.
+pub const TEMPLATE_NAMES: [&str; 26] = [
+    "clean", "minimal", "boxed", "headline", "serif", "card", "hormozi", "hormozi_green",
+    "mrbeast", "impact", "pop", "karaoke", "karaoke_gold", "karaoke_neon", "bubble", "bubble_pop",
+    "candy", "neon", "neon_pink", "cyber", "fresh", "fresh_bold", "fresh_pop", "fresh_karaoke",
+    "fresh_hormozi", "fresh_soft",
+];
+
+/// True если у пресета НЕТ ключа plate_c в питоне (fresh-семейство): dict без plate_c.
+pub fn template_omits_plate_c(name: &str) -> bool {
+    name.starts_with("fresh")
+}
