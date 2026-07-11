@@ -35,10 +35,10 @@ data: {"type":"error", "error": "..."}
 | GET | `/voices` | todo | Голоса voice-пака для VoicePanel (пусто если пак не установлен) |
 | GET | `/presets` | todo | Пресеты вида субтитров (TEMPLATES) + список REVEALS |
 | POST | `/projects` | **done** | multipart-загрузка видео → `workspace/<pid>/source.<ext>` + `source.txt`; вернуть {project_id, filename} |
-| POST | `/projects/{pid}/analyze` | **part** | Query: tgt_lang, mode, src_lang, subs, rewrite. Джоба: analyze()→project.json. Вернуть {job_id}. **Раунд 2 покрывает ASR+диаризацию (транскрипт-стадию): ffmpeg extract 16k mono → Sortformer turns (при <2 спикеров штатная single-speaker ветка) → TDT int8 словные таймстемпы → Project (src_text, words в extra, speaker, mode/subs-дефолты; tgt_text пуст). Перевод/vision/OCR/captions/render — раунд 3.** SSE-фазы: probe/extract_audio/diarize/asr |
+| POST | `/projects/{pid}/analyze` | **part** | Query: tgt_lang, mode, src_lang, subs, rewrite. Джоба: analyze()→project.json. Вернуть {job_id}. **Раунд 2: ASR+диаризация (транскрипт-стадия): ffmpeg extract 16k mono → Sortformer turns (при <2 спикеров штатная single-speaker ветка) → TDT int8 словные таймстемпы → Project (src_text, words в extra, speaker, mode/subs-дефолты). Раунд 3: стадии translate+vision через сайдкар Gemma (llama-server + mmproj) — ctx-проход vision layout/scene + audio-контекст + перевод всего транскрипта → tgt_text, captions.titles(+tgt)/sub_style/sub_y/brands, raw_ctx. Fail-safe: сбой перевода не валит транскрипт-стадию. OCR/captions/render — раунд 4.** SSE-фазы: probe/extract_audio/diarize/asr/vision/translate |
 | POST | `/projects/{pid}/remix` | todo | Query: instruction. Джоба: Gemma переписывает весь транскрипт, помечает все dirty. Вернуть {job_id} |
 | GET | `/projects/{pid}` | **done** | Тело Project (JSON) или 404/409 |
-| PATCH | `/projects/{pid}` | **part** | Синхронная правка Project (без GPU), `{op: ...}` — см. таблицу ниже. **Раунд 2: segment/subpos/mode (атомарно tmp+rename); прочие op → 400.** |
+| PATCH | `/projects/{pid}` | **part** | Синхронная правка Project (без GPU), `{op: ...}` — см. таблицу ниже. **Раунд 2: segment/subpos/mode (атомарно tmp+rename). Раунд 3: translate (смена tgt_lang + subs=translate, funny→rewrite, все dirty), rewrite (инструкция ре-дубляжа, mode=dub, все dirty). Прочие op → 400.** |
 | PUT | `/projects/{pid}` | todo | Полная замена Project (undo/redo снапшот) |
 | GET | `/projects/{pid}/waveform?n=600` | todo | Даунсэмпл-пики аудио (ffmpeg → s16le 8kHz), кэш в waveform.json. CPU, вне GPU-воркера |
 | GET | `/projects/{pid}/preview?t=&rev=` | todo | Джоба preview_frame → PNG. Синхронное ожидание (timeout 300с), abandoned при таймауте |
@@ -75,8 +75,8 @@ data: {"type":"error", "error": "..."}
 | `title_add` | text,x,y,w,h,t0?,t1?,italic?,font?,color? | add_title |
 | `subpos` ✅ | sub_y | перетащить полосу субтитров; ставит sub_y_locked=true (раунд 2) |
 | `mode` ✅ | value | set_mode (subtitles/dub/funny → nodub/dub/dub+rewrite); неизвестное → 400 (раунд 2) |
-| `translate` | lang?, mode? | translate (Gemma; плейн/творческий) |
-| `rewrite` | instruction | rewrite (творческий ремикс сегментов) |
+| `translate` ✅ | lang?, mode? | translate: tgt_lang=lang, subs=translate, funny→rewrite; все dirty (раунд 3) |
+| `rewrite` ✅ | instruction | rewrite: audio.rewrite=instruction, mode=dub; пустая→400; все dirty (раунд 3) |
 | `recast` | voice_mode?, voice_name? | recast (сменить режим/голос дубляжа) |
 | `regen` | id | пометить сегмент dirty → ре-TTS только его на /render |
 | `regen_all` | — | пометить все dirty → ре-TTS всего дубляжа |
