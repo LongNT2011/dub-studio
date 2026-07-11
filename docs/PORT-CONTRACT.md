@@ -29,23 +29,22 @@ data: {"type":"error", "error": "..."}
 | Метод | Путь | Статус | Назначение |
 |-------|------|--------|-----------|
 | GET | `/engine/capabilities` | **done** | JSON: device, tts_quant, asr_model, models{asr,llm,vision,tts}, ffmpeg(bool), languages[], voice_modes[] |
-| PATCH | `/engine/opts` | todo | Свап слота модели (asr/tts/llm/vision) в рантайме; валидирует непустые строки; вернуть {models:{...}} |
+| PATCH | `/engine/opts` | **done** | Валидирует непустые строки (иначе 400), возвращает {models:{...}}. Рантайм-свап слота вне scope: OPTS иммутабелен (Arc<EngineOpts>), стек задаётся при старте — форма ответа соблюдена (endpoints.rs::set_opts) |
 | — | | | **Раунд 2:** analyze покрывает ТОЛЬКО транскрипт-стадию (ASR+диаризация); перевод/vision/OCR/captions — раунд 3 |
-| GET | `/fonts` | todo | Каталог шрифтов субтитров (family→описание) из captions.FONTS |
-| GET | `/voices` | todo | Голоса voice-пака для VoicePanel (пусто если пак не установлен) |
-| GET | `/presets` | todo | Пресеты вида субтитров (TEMPLATES) + список REVEALS |
+| GET | `/fonts` | **done** | {fonts: family→описание} из captions.FONTS (порядок питона, endpoints.rs::fonts) |
+| GET | `/voices` | **done** | {voices: []} — у порта нет именованного voice-пака (Higgs клонирует из ref-аудио), отдаём пусто как питон при отсутствии пака (endpoints.rs::voices) |
+| GET | `/presets` | **done** | {presets: TEMPLATES{reveal,plate,font,base,plate_c?,accent?}, reveals: [...]} (fresh-семейство без plate_c, endpoints.rs::presets) |
 | POST | `/projects` | **done** | multipart-загрузка видео → `workspace/<pid>/source.<ext>` + `source.txt`; вернуть {project_id, filename} |
 | POST | `/projects/{pid}/analyze` | **part** | Query: tgt_lang, mode, src_lang, subs, rewrite. Джоба: analyze()→project.json. Вернуть {job_id}. **Раунд 2: ASR+диаризация (транскрипт-стадия): ffmpeg extract 16k mono → Sortformer turns (при <2 спикеров штатная single-speaker ветка) → TDT int8 словные таймстемпы → Project (src_text, words в extra, speaker, mode/subs-дефолты). Раунд 3: стадии translate+vision через сайдкар Gemma (llama-server + mmproj) — ctx-проход vision layout/scene + audio-контекст + перевод всего транскрипта → tgt_text, captions.titles(+tgt)/sub_style/sub_y/brands, raw_ctx. Fail-safe: сбой перевода не валит транскрипт-стадию. OCR/captions/render — раунд 4.** SSE-фазы: probe/extract_audio/diarize/asr/vision/translate |
-| POST | `/projects/{pid}/remix` | todo | Query: instruction. Джоба: Gemma переписывает весь транскрипт, помечает все dirty. Вернуть {job_id} |
+| POST | `/projects/{pid}/remix` | **done** | Query: instruction. Джоба: Gemma (flat_rewrite dub-translate) переписывает весь транскрипт, все dirty, audio.rewrite=instr. Вернуть {job_id} (endpoints.rs::remix_project) |
 | GET | `/projects/{pid}` | **done** | Тело Project (JSON) или 404/409 |
 | PATCH | `/projects/{pid}` | **part** | Синхронная правка Project (без GPU), `{op: ...}` — см. таблицу ниже. **Раунд 2: segment/subpos/mode (атомарно tmp+rename). Раунд 3: translate (смена tgt_lang + subs=translate, funny→rewrite, все dirty), rewrite (инструкция ре-дубляжа, mode=dub, все dirty). Прочие op → 400.** |
-| PUT | `/projects/{pid}` | todo | Полная замена Project (undo/redo снапшот) |
-| GET | `/projects/{pid}/waveform?n=600` | todo | Даунсэмпл-пики аудио (ffmpeg → s16le 8kHz), кэш в waveform.json. CPU, вне GPU-воркера |
-| GET | `/projects/{pid}/preview?t=&rev=` | todo | Джоба preview_frame → PNG. Синхронное ожидание (timeout 300с), abandoned при таймауте |
-| GET | `/projects/{pid}/original?t=` | todo | Джоба source_frame → PNG. Синхронное ожидание (timeout 60с) |
+| PUT | `/projects/{pid}` | **done** | Полная замена Project (undo/redo снапшот); валидирует тело как Project, сохраняет атомарно (endpoints.rs::put_project) |
+| GET | `/projects/{pid}/waveform?n=600` | **done** | Пики аудио (ffmpeg → s16le 8kHz, np.array_split-эквивалент), кэш waveform.json, CPU вне GPU-воркера (endpoints.rs::waveform + wavio::waveform_peaks) |
+| GET | `/projects/{pid}/preview?t=&rev=` | **done** | Джоба preview_frame → PNG через GPU-воркер (build_ass из ТЕКУЩЕГО Project + burn_frame). Синхронное ожидание (timeout 300с), abandoned при таймауте (endpoints.rs::preview + frame.rs::preview_frame) |
 | POST | `/projects/{pid}/render` | **done** | Джоба render()→output.mp4 (раунд 4): probe→extract 44.1k→separate(dub-sep)→Higgs clone TTS per-seg (кэш seg_XXX.wav, ре-TTS ТОЛЬКО dirty)→fit_to_slot(atempo)→timeline→mix(instr+dub)→build ASS(dub-captions)→burn(blur из blur_boxes)→mux. regen_dub если dirty; после — сбросить dirty. SSE-фазы probe/extract_audio/separate/tts/mix/build/burn/mux. Вернуть {job_id} |
 | GET | `/projects/{pid}/output?dl=` | **done** | Отдать output.mp4 (Range через tower-http ServeFile → 206); dl=1 → Content-Disposition attachment |
-| GET | `/projects/{pid}/original?t=` | **done** | Исходное видео (Range). t игнорируется (клиент сикает) — как FileResponse в app.py |
+| GET | `/projects/{pid}/original?t=` | **done** | ОДИН PNG-кадр оригинала на t (порт app.py.original → source_frame; ComparePane вставляет как `<img src>`). Джоба source_frame → PNG, timeout 60с. **ИСПРАВЛЕНО (раунд 5): раньше отдавал Range-видео — это ломало ComparePane (broken img). Сырое видео для плеера — /dub.** (endpoints.rs::original_frame) |
 | GET | `/projects/{pid}/dub` | **done** | Проигрываемое видео: output.mp4, иначе analyzed.mp4 (Range) |
 | — (fallback) | `/{spa_path}` | **done** | SPA: реальный статик-файл (с защитой от path-traversal), иначе index.html |
 
@@ -162,10 +161,67 @@ E2E-харнесс: `verify_captions_e2e` (пример `cargo run -p dub-server
 берёт кэш project.json (transcript+raw_ctx), заново гонит OCR+compose+build_ass+burn БЕЗ ASR/Gemma/TTS,
 даёт captioned.mp4 для покадрового сравнения порт-vs-эталон (docs/example_dub.mp4).
 
+## Раунд 5 — ПОДЛОЖКА САБОВ ДЕФОЛТОМ (продуктовое отклонение, приказ юзера 2026-07-12)
+
+**ОСОЗНАННОЕ ОТКЛОНЕНИЕ ОТ ТЕКУЩЕГО ПИТОНА** — прямой приказ юзера (2026-07-12). Продукт по
+умолчанию рисует дублированные субтитры **на СПЛОШНОЙ ПЛАШКЕ** (визуально как эталонная версия
+продукта `docs/example_dub.mp4` — текст-хаг плита за строками), а не питоновским тонким outline.
+
+- **Где:** `crates/dub-captions/src/lib.rs::build_s_style`. Новый флаг `SubStyle.plate: Option<bool>`
+  (+ `plate_color`), приходит из `extra` через `render.rs::map_sub_style` (PATCH `caption` его кладёт).
+- **Поведение:** при `bg`=none/пусто И БЕЗ явной полосы vision И `plate`≠Some(false) → светлый текст
+  (lum>0.45) рисуется веткой A (`BorderStyle=3, Outline=11`) на плашке `plate_color` (**дефолт чёрный
+  `#000000`**, как эталон). Это ровно та ветка, которой отрисован `example_dub.mp4`.
+- **Приоритеты:** явная полоса vision (bg solid, контраст ≥0.20) — как ветка A и раньше, ГЛАВНЕЕ
+  продуктовой плашки. `outline_w`-оверрайд редактора — тоже главнее. Тёмный текст (lum≤0.45) сохраняет
+  питоновскую белую плиту (тоже сплошную, читаемую). `plate=Some(false)` (тумблер PATCH `caption`/`preset`
+  юзера) → fall-through к питоновской outline-ветке (`BorderStyle=1`) — **отключение доступно**.
+- **Приёмка (задача #33):** рендер `example_original.mp4` (workspace/ae61067), кадр t=2.5 — за текстом
+  сабов «MY CHATGPT SUBSCRIPTION.» СПЛОШНАЯ ЧЁРНАЯ плашка (S-style `,3,11,0,2,` + `&H00000000` плита),
+  глазами как эталон. Кадры порт|эталон рядом. S-строка ASS верифицирована: `Style: S,Oswald,44,…,3,11,0,2,…`.
+- **Регресс-якоря** (`dub-captions/src/lib.rs`): `greedy_example_original_default_black_plate` (дефолт →
+  `3,11` чёрная плита), `plate_disabled_falls_back_to_border1` (`plate=false` → `1,2` outline),
+  `textured_scene_has_default_plate_but_no_cover_kp`.
+
+Старый вывод раунда 5 (ниже, «расхождений НЕТ») относился к паритету с captions.py на greedy-входе —
+теперь СОЗНАТЕЛЬНО перекрыт этим продуктовым дефолтом по приказу юзера. Паритетная ветка сохранена и
+доступна тумблером (`plate=false`).
+
+## Раунд 5 — РЕГРЕСС ТИТРА починен (задача #34, приказ юзера 2026-07-12)
+
+**Корень найден:** прогон `ae61067` отрисовал 0 титр-Dialogue НЕ из-за флаки-матчинга, а потому что
+его `project.json` создан **00:59**, а compose-фикс (bbox-матчинг, f6fd476) закоммичен **01:51** — тот
+артефакт СТАРШЕ фикса. Титр шёл из `raw_ctx` с `bbox=null` (`start=0/end=0`), `emit_title` его скипал
+(ass.rs:322 — `bbox.len()<4 → return`). Текущий `compose::run` матчит `ctitles→localize` и ВСЕГДА даёт
+валидный bbox: матч OCR-боксов ИЛИ **fallback центр-полоса** (`near_idx.is_empty()` → центр 8%..92%).
+Пути к «bbox=null из run» нет — каждый loc_block имеет конкретный bbox.
+
+- **Доказательство:** свежий прогон OCR+compose на том же `example_original.mp4` (verify_captions) даёт
+  `композит: титров=1 (bbox)` и `KT`-Dialogue «THAT VERY "PROGRESSIVE" ACQUAINTANCE» в ASS. Стабильно
+  на **3 прогонах подряд** (все: титров=1, блюр 33, sub_px=24 — детерминизм). Титр ВИДЕН на кадре t=2.5.
+- **Регресс-тест:** `compose.rs::ae61067_title_always_drawn_with_bbox` — ТОЧНЫЙ титр ae61067 в ДВУХ
+  входах (с localize-боксами и с ПУСТЫМ localize) → оба дают ровно 1 нарисованный титр с непустым tgt и
+  `bbox.len()==4` (никогда 0). Гварда против «титр молча пропал».
+
+## PATCH-хвост (раунд 5, задача #35) — все op портированы 1:1 с app.py
+
+`caption` (глобальный sub_style ИЛИ per-seg override; тумблер `plate`), `del_segment`, `hide_segment`,
+`del_segments`, `hide_segments`, `del_titles`, `del_blurs`, `keep_segment`, `keep_segments`, `blur`,
+`blur_add`, `blur_del`, `blur_enable`, `preset`, `title`, `title_del`, `title_add` — `crates/dub-server/
+src/patch.rs`. Коды ошибок как питон: битый op/поле → 400; неизвестный idx/seg → 404. Юнит-тесты на
+caption(global+per-seg), del_segment(404), blur-цикл, title-цикл, preset, del_titles/del_blurs.
+
+**CaptionOverride per-seg в build_ass:** `render.rs::build_ass` теперь читает `overrides[seg_id].text`
+и рисует ЕГО вместо `tgt_text` (продуктовое требование «научить build_ass читать»). Стилевые per-seg
+поля (`style/x/y/w/fs`) сохраняются round-trip, но в ASS-строку пока не вплетаются — это совпадает с
+питоном (`write_artifacts` overrides в план НЕ прокидывает; dub-captions строит субтитр из общего
+sub_style). Осознанное ограничение: текст-оверрайд (главный кейс редактора) работает.
+
 ## Раунд 5 — паритет плашек: семплинг vision + заливка полос (задача #28)
 
 **Итог: расхождений НЕТ. Порт уже дословно совпадает с источником истины; «плашка эталона» —
 артефакт УСТАРЕВШЕГО пайплайна.** Доказано живым прогоном Gemma + честным прогоном `captions.py`.
+**ВНИМАНИЕ:** этот вывод перекрыт продуктовым дефолтом «подложка сабов» выше (приказ юзера 2026-07-12).
 
 ### 1. Семплинг LLM — сверен построчно, УЖЕ верный (не «temp 0.3 всюду» из отчёта р3)
 Каждый вызов `dub-llm` шлёт РОВНО питоновские per-call параметры (проброшены через `Sampling`):
@@ -222,7 +278,7 @@ E2E-харнесс: `verify_captions_e2e` (пример `cargo run -p dub-server
   (ветка, которой отрисован эталон; активна ТОЛЬКО при solid-чтении vision).
 - Диагностика: `DUB_VISION_DEBUG=1` печатает per-keyframe raw sub-style read (vision.rs).
 
-### ОТКРЫТО (НЕ плашки, отдельный дефект compose — задача #27/#29)
-Порт-прогон ae61067 отрисовал **0 титр-Dialogue** (титр «ТОТ САМЫЙ…» пропал), тогда как питон-источник
-рисует его outline-текстом. Причина — матчинг `ctitles`→bbox по `localize_ocr` в compose.rs дал пусто на
-том прогоне; vision_probe титр ВОЗВРАЩАЕТ. Это не про заливку плашек — вынесено в остаток раунда 5.
+### ЗАКРЫТО (задача #34) — регресс титра «0 титр-Dialogue»
+Причина: артефакт ae61067 СТАРШЕ compose-фикса (см. раздел «РЕГРЕСС ТИТРА починен» выше). Свежий
+compose всегда даёт титру bbox (матч ИЛИ fallback центр-полоса); титр «THAT VERY…» ВИДЕН, стабильно
+на 3 прогонах. Регресс-тест `ae61067_title_always_drawn_with_bbox` гвардит от рецидива.
