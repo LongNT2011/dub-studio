@@ -334,18 +334,53 @@ fn timeline(placed: &[(f64, PathBuf)], total_dur: f64, out_wav: &Path) -> Result
 fn build_ass(proj: &Project, out_ass: &Path, vw: i64, vh: i64, total: f64) -> Result<(), String> {
     let titles: Vec<CapTitle> = proj.captions.titles.iter().map(map_title).collect();
     let sub_style = proj.captions.sub_style.as_ref().map(map_sub_style);
-    // sub_y: per-segment y (пока — общий sub_y; per-line ride оригинальной полосы делает OCR-стадия
-    // через caption_boxes, которых в раунде до OCR нет). Дефолт vh*0.82 если не задан.
+    // sub_y дефолт vh*0.82 если не задан (как pipeline.py: не затирать edited/pinned sub_y).
     let sub_y = proj.captions.sub_y.unwrap_or((vh as f64 * 0.82) as i64);
+    // PER-SEGMENT Y-RIDE (порт pipeline.py 616-631). Каждую дублированную строку кладём на y, где в этот
+    // момент была ОРИГИНАЛЬНАЯ полоса сабов, чтобы наш текст/плашка НАКРЫЛИ заблюренный оригинал (а не
+    // висели на одной фикс-линии, пока блюр другой строки просвечивает — репорт юзера). Источник полосы —
+    // persisted blur_boxes (это и есть покадровые caption_boxes: pipeline.py band_blur -> blur_boxes;
+    // caption_boxes отдельно не сохраняются, их считает off-limits OCR-стадия). Fallback: fixed sub_y.
+    let band: Vec<&dub_core::BlurBox> = proj.captions.blur_boxes.iter().filter(|b| !b.hidden).collect();
+    let no_band = band.len() < 3; // нет повторяющейся ОРИГИНАЛЬНОЙ полосы -> не на что ехать
+    let cap_lo = 0.40 * vw as f64;
+    let cap_hi = 0.60 * vw as f64;
+    let seg_y = |st: f64, en: f64| -> i64 {
+        if proj.captions.sub_y_locked || no_band {
+            return sub_y; // editor-pinned или полосы нет -> выбранная band
+        }
+        // медиана y-центров band-боксов, перекрывающих сегмент по времени, центрированных по X,
+        // в нижней половине кадра (ехать на нижнюю оригинальную полосу, не на верхний оверлей).
+        let mut ys: Vec<f64> = band
+            .iter()
+            .filter(|b| {
+                let cyb = b.y as f64 + b.h as f64 / 2.0;
+                (b.t0 as f64) < en + 0.3
+                    && (b.t1 as f64) > st - 0.3
+                    && (b.x as f64) < cap_hi
+                    && (b.x as f64 + b.w as f64) > cap_lo
+                    && cyb >= 0.45 * vh as f64
+            })
+            .map(|b| b.y as f64 + b.h as f64 / 2.0)
+            .collect();
+        if ys.is_empty() {
+            return (vh as f64 * 0.82) as i64;
+        }
+        ys.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        ys[ys.len() / 2] as i64
+    };
     let subs: Vec<Sub> = proj
         .segments
         .iter()
         .filter(|s| !s.tgt_text.trim().is_empty())
-        .map(|s| Sub {
-            start: s.start,
-            end: if s.end > 0.0 { s.end } else { total },
-            tgt: s.tgt_text.clone(),
-            y: Some(sub_y),
+        .map(|s| {
+            let end = if s.end > 0.0 { s.end } else { total };
+            Sub {
+                start: s.start,
+                end,
+                tgt: s.tgt_text.clone(),
+                y: Some(seg_y(s.start, end)),
+            }
         })
         .collect();
 

@@ -359,3 +359,116 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\
         back = p.back,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn build_str(w: i64, h: i64, ss: &SubStyle, subs: &[Sub]) -> String {
+        // уникальное имя на вызов: тесты идут параллельно, общий файл -> гонка/склейка выводов.
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let uniq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir()
+            .join(format!("dubcap_test_{}_{}.ass", std::process::id(), uniq));
+        let args = BuildArgs {
+            subs,
+            sub_style: Some(ss),
+            sub_y: Some((h as f64 * 0.82) as i64),
+            ..Default::default()
+        };
+        build(w, h, &dir, args).unwrap();
+        let s = std::fs::read_to_string(&dir).unwrap();
+        let _ = std::fs::remove_file(&dir);
+        s
+    }
+
+    fn s_style_line(ass: &str) -> String {
+        ass.lines().find(|l| l.starts_with("Style: S,")).unwrap().to_string()
+    }
+
+    fn subs1() -> Vec<Sub> {
+        vec![Sub { start: 1.0, end: 3.0, tgt: "привет мир".into(), y: Some(600) }]
+    }
+
+    // Реальная контрастная полоса (vision.background=hex) -> BorderStyle=3, Outline=11 = НЕПРОЗРАЧНАЯ
+    // плашка цвета полосы (прячет блюр). Порт elif-ветки captions.py 507-510.
+    #[test]
+    fn vision_band_gives_border3_plate() {
+        let ss = SubStyle {
+            color: "#FFFFFF".into(),
+            background: Some("#101010".into()), // тёмная полоса под белым текстом (контраст >=0.20)
+            bold: true,
+            ..Default::default()
+        };
+        let ass = build_str(720, 1280, &ss, &subs1());
+        let s = s_style_line(&ass);
+        // OutlineColour слот = цвет полосы (BBGGRR of #101010), BorderStyle=3, Outline=11.
+        assert!(s.contains("&H00101010"), "плашка должна нести цвет полосы: {s}");
+        assert!(
+            s.contains(",3,11,0,2,"),
+            "BorderStyle=3 (boxed plate) Outline=11 ожидается: {s}"
+        );
+    }
+
+    // Тёмный текст без полосы -> BorderStyle=3 с почти-белой плашкой (тёмные буквы читаются). Порт
+    // else-ветки captions.py 516-518. Тоже НЕПРОЗРАЧНАЯ плашка -> блюр накрыт.
+    #[test]
+    fn dark_text_no_bg_gives_white_plate() {
+        let ss = SubStyle {
+            color: "#101010".into(),
+            background: Some("none".into()),
+            ..Default::default()
+        };
+        let ass = build_str(720, 1280, &ss, &subs1());
+        let s = s_style_line(&ass);
+        assert!(
+            s.contains(",3,10,0,2,"),
+            "тёмный текст -> BorderStyle=3 Outline=10 (белая плашка): {s}"
+        );
+        assert!(s.contains("&H00FFFFFF,&H00F2F2F2"), "OutlineColour белый + BackColour: {s}");
+    }
+
+    // Светлый box-less текст + FLAT сцена (scene_flat) -> инвизибл cover-плашка цвета сцены под текстом
+    // (KP-событие Layer 0), которая прячет блюр оригинала. Порт cover_c captions.py 566-603.
+    #[test]
+    fn flat_scene_emits_cover_plate_kp_event() {
+        let ss = SubStyle {
+            color: "#FFFFFF".into(),
+            background: Some("none".into()),
+            scene_color: Some("#E0E0E0".into()),
+            scene_flat: true,
+            bold: true,
+            ..Default::default()
+        };
+        let ass = build_str(720, 1280, &ss, &subs1());
+        // должна быть хотя бы одна плашка-плитка на Layer 0 стиля KP, цвета сцены (#E0E0E0 -> E0E0E0).
+        let kp = ass
+            .lines()
+            .find(|l| l.starts_with("Dialogue: 0,") && l.contains(",KP,") && l.contains("\\p1"));
+        assert!(kp.is_some(), "ожидалась cover-плашка KP при scene_flat: \n{ass}");
+        assert!(kp.unwrap().contains("&HE0E0E0&"), "cover-плашка цвета сцены: {}", kp.unwrap());
+    }
+
+    // Светлый box-less текст на ТЕКСТУРНОЙ сцене (scene_flat=false) -> НЕТ плашки, только outline
+    // (BorderStyle=1) — намеренно, как в питоне (блюр + own outline). Регресс-якорь: не рисуем плашку
+    // там, где питон не рисует, и НЕ теряем cover-плашку когда scene_flat=true (тест выше).
+    #[test]
+    fn light_textured_scene_is_plateless_border1() {
+        let ss = SubStyle {
+            color: "#FFFFFF".into(),
+            background: Some("none".into()),
+            scene_color: Some("#E0E0E0".into()),
+            scene_flat: false,
+            bold: true,
+            ..Default::default()
+        };
+        let ass = build_str(720, 1280, &ss, &subs1());
+        let s = s_style_line(&ass);
+        assert!(s.contains(",1,"), "BorderStyle=1 (outline-only) ожидается: {s}");
+        assert!(
+            !ass.lines().any(|l| l.starts_with("Dialogue: 0,") && l.contains(",KP,")),
+            "на текстурной сцене cover-плашки быть не должно"
+        );
+    }
+}
