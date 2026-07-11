@@ -28,9 +28,16 @@ cargo build --workspace --examples
 ## Модели и рантайм (не коммитятся, лежат в `models/`)
 
 - **onnxruntime.dll** — `dub-asr` собран с `ort/load-dynamic`: onnxruntime грузится в рантайме.
-  Указывается через `ORT_DYLIB_PATH=<...>\onnxruntime.dll` (ort >= 1.22 / rc.12-совместимый).
-- **Parakeet-TDT-0.6b-v3 (ONNX)** — HF `istupakov/parakeet-tdt-0.6b-v3-onnx`, int8-вариант:
-  `encoder-model.int8.onnx`, `decoder_joint-model.int8.onnx`, `vocab.txt` → каталог `models/tdt/`.
+  Указывается через `ORT_DYLIB_PATH=<...>\onnxruntime.dll`. **КРИТИЧНО: строго onnxruntime 1.24.x**
+  (ort 2.0-rc.12 собран под 1.24.2). DLL версий 1.22/1.23 вызывают ДЕДЛОК в `commit_from_file`
+  (рассинхрон OrtApi, поток блокируется наглухо, без ошибки). Официальный билд:
+  github.com/microsoft/onnxruntime releases → `onnxruntime-win-x64-1.24.2.zip` → `lib/onnxruntime.dll`.
+- **Parakeet-TDT-0.6b-v3 (ONNX)** — HF `istupakov/parakeet-tdt-0.6b-v3-onnx`. Два варианта:
+  - fp32 (для CPU): `encoder-model.onnx` + `encoder-model.onnx.data` (2.4ГБ), `decoder_joint-model.onnx`, `vocab.txt`.
+  - int8 (для GPU): `encoder-model.int8.onnx`, `decoder_joint-model.int8.onnx`, `vocab.txt`.
+  parakeet-rs автоопределяет имена. **На CPU берите fp32:** int8 использует динамический квант
+  (DynamicQuantizeLinear/MatMulInteger) без быстрых CPU-ядер и работает минутами. int8 предназначен
+  под GPU-провайдер (`--features cuda`), как в Python-референсе.
 - **Sortformer v2** — HF `altunenes/parakeet-rs`, `diar_streaming_sortformer_4spk-v2.onnx` → `models/sortformer/`.
 - **Higgs Audio v3 веса** — каталог модели для `audiocpp` (`--model-root`); DLL из
   `Higgs-Ultimate/.../resources/engine/audiocpp_engine.dll`.

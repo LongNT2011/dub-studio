@@ -10,9 +10,12 @@ description = "ASR + диаризация над parakeet-rs (Parakeet-TDT + Sor
 # Это обходит рассинхрон MSVC STL (статическая libort_sys собрана новее локального тулчейна) и заодно
 # делает движок портативным (DLL кладётся рядом с бинарём / ищется по ORT_DYLIB_PATH).
 parakeet-rs = { version = "0.3.6", features = ["sortformer", "load-dynamic"] }
-# ort нужен напрямую, чтобы через ExecutionConfig::with_custom_configure понизить уровень оптимизации
-# графа: int8-квант-модель Parakeet на дефолтном Level3 виснет на CPU при создании сессии минутами.
-ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic"] }
+# ort через load-dynamic + download-binaries: статическая libort_sys собрана новее локального MSVC STL
+# (14.42) и не линкуется; load-dynamic грузит onnxruntime.dll в рантайме. download-binaries скачивает
+# ТОЧНО ту версию onnxruntime (1.24.2), под которую собран ort rc.12 — чужие 1.22/1.23 DLL вызывают
+# дедлок при commit_from_file из-за рассинхрона OrtApi. Прямая зависимость ort нужна для
+# ExecutionConfig::with_custom_configure (уровень оптимизации графа).
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["load-dynamic", "download-binaries"] }
 hound = "3.5"
 serde = { workspace = true }
 serde_json = { workspace = true }
