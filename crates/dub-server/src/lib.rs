@@ -6,10 +6,13 @@
 //! GET /jobs/{id}/events. GPU-эндпоинты (analyze/render/preview/patch и т.д.) — каркас на следующие
 //! раунды; их карта в docs/PORT-CONTRACT.md.
 
+mod analyze;
 mod jobs;
+mod media;
+mod patch;
 mod spa;
 
-use axum::extract::{Multipart, Path as AxPath, State};
+use axum::extract::{Multipart, Path as AxPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
@@ -18,6 +21,7 @@ use axum::{Json, Router};
 use dub_core::{EngineOpts, Project};
 use futures_util::stream::Stream;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -31,6 +35,17 @@ pub struct AppState {
     pub web_root: Option<PathBuf>,
     pub opts: Arc<EngineOpts>,
     pub jobs: JobQueue,
+    /// Каталог TDT-модели ASR (analyze). Env DUB_STUDIO_TDT, иначе <models_root>/tdt.
+    pub tdt_dir: PathBuf,
+    /// Путь к Sortformer .onnx (диаризация). Env DUB_STUDIO_SORTFORMER, иначе <models_root>/sortformer/…v2.onnx.
+    pub sortformer_onnx: PathBuf,
+}
+
+/// Корень моделей: env DUBENGINE_MODELS_ROOT, иначе <repo_root>/models.
+fn models_root(repo_root: &Path) -> PathBuf {
+    std::env::var("DUBENGINE_MODELS_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| repo_root.join("models"))
 }
 
 impl AppState {
@@ -39,12 +54,25 @@ impl AppState {
         let workspace = repo_root.join("workspace");
         let _ = std::fs::create_dir_all(&workspace);
         let web_root = spa::find_web_root(&repo_root);
+        let mroot = models_root(&repo_root);
+        let tdt_dir = std::env::var("DUB_STUDIO_TDT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| mroot.join("tdt"));
+        let sortformer_onnx = std::env::var("DUB_STUDIO_SORTFORMER")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                mroot
+                    .join("sortformer")
+                    .join("diar_streaming_sortformer_4spk-v2.onnx")
+            });
         AppState {
             repo_root,
             workspace,
             web_root,
             opts: Arc::new(EngineOpts::default()),
             jobs: JobQueue::new(),
+            tdt_dir,
+            sortformer_onnx,
         }
     }
 
@@ -73,6 +101,18 @@ impl AppState {
     }
 }
 
+/// Атомарная запись project.json: сериализуем в tmp рядом, затем rename (tmp+rename — как в
+/// проверенных питон-паттернах; частичного файла при падении не будет).
+fn save_project_atomic(dir: &Path, proj: &Project) -> Result<(), String> {
+    let json = proj
+        .to_json_pretty()
+        .map_err(|e| format!("сериализация project.json: {e}"))?;
+    let tmp = dir.join("project.json.tmp");
+    std::fs::write(&tmp, json.as_bytes()).map_err(|e| format!("запись tmp: {e}"))?;
+    std::fs::rename(&tmp, dir.join("project.json")).map_err(|e| format!("rename: {e}"))?;
+    Ok(())
+}
+
 pub fn build_router(state: AppState) -> Router {
     use tower_http::cors::{Any, CorsLayer};
     let cors = CorsLayer::new()
@@ -83,7 +123,8 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/engine/capabilities", get(capabilities))
         .route("/projects", post(create_project))
-        .route("/projects/{pid}", get(get_project))
+        .route("/projects/{pid}", get(get_project).patch(patch_project))
+        .route("/projects/{pid}/analyze", post(analyze_project))
         .route("/jobs/{job_id}/events", get(job_events))
         // SPA fallback — монтируется последним, чтобы не затенять API.
         .fallback(spa_fallback)
@@ -170,6 +211,86 @@ async fn get_project(State(st): State<AppState>, AxPath(pid): AxPath<String>) ->
             Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
         },
         Err(resp) => resp,
+    }
+}
+
+// ─── POST /projects/{pid}/analyze ───────────────────────────────────────────
+
+async fn analyze_project(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    // Исходный путь видео из source.txt (как в app.py). Fallback — source.* в каталоге.
+    let src_txt = dir.join("source.txt");
+    let input = match std::fs::read_to_string(&src_txt) {
+        Ok(s) => PathBuf::from(s.trim()),
+        Err(_) => {
+            return (StatusCode::CONFLICT, "no source uploaded").into_response();
+        }
+    };
+    if !input.is_file() {
+        return (StatusCode::CONFLICT, "source video missing").into_response();
+    }
+
+    // Параметры analyze из query (дефолты как в app.py.analyze_project).
+    let qget = |k: &str, d: &str| q.get(k).cloned().unwrap_or_else(|| d.to_string());
+    let args = analyze::AnalyzeArgs {
+        tgt_lang: qget("tgt_lang", "en"),
+        mode: qget("mode", "auto"),
+        src_lang: qget("src_lang", "auto"),
+        subs: qget("subs", "auto"),
+        rewrite: qget("rewrite", ""),
+    };
+    let paths = analyze::AnalyzePaths {
+        input,
+        work_dir: dir.clone(),
+        tdt_dir: st.tdt_dir.clone(),
+        sortformer_onnx: st.sortformer_onnx.clone(),
+    };
+
+    // Тело джобы: analyze -> project.json (атомарно). Прогресс -> SSE.
+    let dir_for_save = dir.clone();
+    let pid_for_result = pid.clone();
+    let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
+        let cb = |ev: Value| progress(ev);
+        let proj = analyze::run(&args, &paths, &cb)?;
+        save_project_atomic(&dir_for_save, &proj)?;
+        Ok(json!({ "project_id": pid_for_result, "output": dir_for_save.join("project.json").to_string_lossy() }))
+    });
+    let job_id = st.jobs.enqueue(job).await;
+    Json(json!({ "job_id": job_id })).into_response()
+}
+
+// ─── PATCH /projects/{pid} ──────────────────────────────────────────────────
+
+async fn patch_project(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Json(edit): Json<Value>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let mut proj = match st.load_project(&pid) {
+        Ok(p) => p,
+        Err(resp) => return resp,
+    };
+    if let Err((code, msg)) = patch::apply(&mut proj, &edit) {
+        let status = StatusCode::from_u16(code).unwrap_or(StatusCode::BAD_REQUEST);
+        return (status, msg).into_response();
+    }
+    if let Err(e) = save_project_atomic(&dir, &proj) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    match proj.to_json() {
+        Ok(s) => ([("content-type", "application/json")], s).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
