@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
-import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music } from "lucide-react";
+import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2 } from "lucide-react";
+import { createPortal } from "react-dom";
+import { useFloatable, dockSlot } from "./lib/useFloatable";
 import { api, type Project, type Capabilities, type ModelStack, type SetupStatus, type SetupComponent } from "./lib/api";
 import { LANGS, setLang, type Lang } from "./lib/i18n";
 import { useStore } from "./store";
@@ -1199,16 +1201,36 @@ function Editor() {
 function FilesPanel() {
   const { t } = useTranslation();
   const exports = useStore((s) => s.exports);
-  const [open, setOpen] = useState(true);
+  const [, force] = useState(0);
+  const fl = useFloatable("files", { x: window.innerWidth - 360, y: 64 });
+  useEffect(() => { force((n) => n + 1); }, []); // дождаться #dock-slot
   if (!exports.length) return null;
   const active = exports.filter((e) => e.status === "rendering").length;
+
+  // докнутый чип в шапке
+  if (!fl.floating) {
+    const slot = dockSlot();
+    if (!slot) return null;
+    return createPortal(
+      <button onClick={fl.pop} title={t("files.title")}
+        className="inline-flex items-center gap-2 px-2.5 h-8 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)] transition-colors">
+        {active ? <Loader2 size={14} className="animate-spin text-[var(--color-accent)]" /> : <FolderDown size={14} className="text-[var(--color-accent)]" />}
+        <span className="text-[12px] font-medium hidden sm:inline">{t("files.title")}</span>
+        <span className="mono text-[11px] text-[var(--color-muted)]">{exports.length}</span>
+      </button>,
+      slot,
+    );
+  }
+
+  // оторванная драг-панель
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-[min(90vw,340px)] flex flex-col items-end">
-      {open && (
-        <div className="mb-2 w-full rounded-xl glass-panel anim-pop overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--color-border)]">
-            <span className="mono text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)]">{t("files.title")}</span>
-            <button onClick={() => setOpen(false)} className="text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={14} /></button>
+    <div className="fixed z-50 w-[min(90vw,340px)]" style={{ left: fl.pos.x, top: fl.pos.y }}>
+      {(
+        <div className="w-full rounded-xl glass-panel anim-pop overflow-hidden">
+          <div onPointerDown={fl.onDragStart}
+            className={`flex items-center justify-between px-3 py-2 border-b border-[var(--color-border)] ${fl.dragging ? "cursor-grabbing" : "cursor-grab"}`}>
+            <span className="flex items-center gap-1.5 mono text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)]"><Move size={12} />{t("files.title")}</span>
+            <button onClick={fl.dock} title="Вернуть в шапку" className="text-[var(--color-muted)] hover:text-[var(--color-text)]"><Minimize2 size={14} /></button>
           </div>
           <div className="max-h-[52vh] overflow-y-auto p-2 space-y-1.5">
             {exports.map((e) => (
@@ -1237,11 +1259,6 @@ function FilesPanel() {
           </div>
         </div>
       )}
-      <button onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 px-3.5 py-2 rounded-full bg-[var(--color-overlay)] border border-[var(--color-border)] shadow-lg text-[13px] hover:border-[#3a414c] transition-colors">
-        {active ? <Loader2 size={15} className="animate-spin text-[var(--color-accent)]" /> : <FolderDown size={15} className="text-[var(--color-accent)]" />}
-        {t("files.title")} <span className="mono text-[11px] text-[var(--color-muted)]">{exports.length}</span>
-      </button>
     </div>
   );
 }
