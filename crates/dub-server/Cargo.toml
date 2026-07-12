@@ -32,3 +32,8 @@ mime_guess = "2"
 # setup-автозакачка: HTTPS-загрузка компонентов (rustls, без системного OpenSSL) + распаковка zip/wheel.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 zip = { version = "3", default-features = false, features = ["deflate"] }
+# монитор ресурсов: GPU через NVML, RAM/CPU через sysinfo.
+nvml-wrapper = "0.10"
+sysinfo = "0.32"
+# запись голоса с микрофона (нативный cpal + hound-WAV).
+cpal = "0.15"

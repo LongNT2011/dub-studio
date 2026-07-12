@@ -6,6 +6,7 @@ import { api, type Project, type Capabilities, type ModelStack, type SetupStatus
 import { LANGS, setLang, type Lang } from "./lib/i18n";
 import { useStore } from "./store";
 import PreviewCanvas from "./components/PreviewCanvas";
+import ResourceMonitor from "./components/ResourceMonitor";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -1293,6 +1294,7 @@ export default function App() {
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)]" />{cap}
       </footer>
       <FilesPanel />
+      {(stage === "editor" || stage === "analyzing") && <ResourceMonitor />}
     </div>
   );
 }

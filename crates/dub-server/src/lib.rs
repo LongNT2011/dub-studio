@@ -10,6 +10,7 @@ mod analyze;
 mod compose;
 mod endpoints;
 mod frame;
+mod hw;
 mod jobs;
 mod media;
 mod ocr;
@@ -266,6 +267,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/setup/status", get(setup_status))
         .route("/setup/download", post(setup_download))
         .route("/setup/cancel", post(setup_cancel))
+        .route("/hw/snapshot", get(hw_snapshot))
         .route("/fonts", get(endpoints::fonts))
         .route("/voices", get(endpoints::voices))
         .route("/presets", get(endpoints::presets))
@@ -369,6 +371,11 @@ async fn setup_download(State(st): State<AppState>, Json(body): Json<Value>) -> 
 async fn setup_cancel(State(st): State<AppState>) -> Json<Value> {
     st.setup_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
     Json(json!({ "cancelled": true }))
+}
+
+/// GET /hw/snapshot — снимок GPU/VRAM/темп/мощность + RAM для монитора ресурсов.
+async fn hw_snapshot() -> Json<hw::HardwareSnapshot> {
+    Json(tokio::task::spawn_blocking(hw::snapshot).await.unwrap_or_default())
 }
 
 // ─── POST /projects (multipart video upload) ────────────────────────────────

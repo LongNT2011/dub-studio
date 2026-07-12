@@ -52,6 +52,12 @@ export type SetupStatus = {
   downloadPending: number; driverOk: boolean; llamaBuild: string;
 };
 
+export type HwSnapshot = {
+  gpuName: string; totalVram: number; usedVram: number; freeVram: number;
+  gpuUtilization: number; temperature: number; powerDraw: number; powerLimit: number;
+  processRam: number; totalRam: number; usedRam: number; message: string;
+};
+
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
   return r.json() as Promise<T>;
@@ -68,6 +74,7 @@ export const api = {
   setupDownload: (ids: string[]) =>
     fetch(`${BASE}/setup/download`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }).then(j<{ job_id: string }>),
   setupCancel: () => fetch(`${BASE}/setup/cancel`, { method: "POST" }).then(j<{ cancelled: boolean }>),
+  hwSnapshot: () => fetch(`${BASE}/hw/snapshot`).then(j<HwSnapshot>),
   fonts: () => fetch(`${BASE}/fonts`).then(j<{ fonts: Record<string, string> }>),
   setOpts: (edit: Partial<ModelStack>) =>
     fetch(`${BASE}/engine/opts`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit) }).then(j<{ models: ModelStack }>),
