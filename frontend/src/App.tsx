@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
 import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music } from "lucide-react";
-import { api, type Project, type Capabilities, type ModelStack } from "./lib/api";
+import { api, type Project, type Capabilities, type ModelStack, type SetupStatus, type SetupComponent } from "./lib/api";
 import { LANGS, setLang, type Lang } from "./lib/i18n";
 import { useStore } from "./store";
 import PreviewCanvas from "./components/PreviewCanvas";
@@ -1123,6 +1123,149 @@ function FilesPanel() {
   );
 }
 
+// human byte size (GB/MB) for the setup component list
+function fmtBytes(n: number) {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(0)} MB`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)} KB`;
+  return `${n} B`;
+}
+
+// ── «Первый запуск»: панель автозакачки компонентов (модели/движки/системные библиотеки) ──
+function FirstRun() {
+  const { t } = useTranslation();
+  const setStage = useStore((s) => s.setStage);
+  const [status, setStatus] = useState<SetupStatus | null>(null);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [prog, setProg] = useState<{ id: string; pct: number; msg: string } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const refresh = async () => {
+    const s = await api.setupStatus();
+    setStatus(s);
+    // preselect every missing downloadable component
+    setSel(new Set(s.components.filter((c) => c.delivery === "download" && !c.installed).map((c) => c.id)));
+    return s;
+  };
+  useEffect(() => { refresh().catch((e) => setErr(String(e))); }, []);
+
+  async function download(ids: string[]) {
+    if (ids.length === 0 || busy) return;
+    setBusy(true); setErr(null); setProg({ id: ids[0], pct: 0, msg: "" });
+    try {
+      const { job_id } = await api.setupDownload(ids);
+      await api.watchJob(job_id, (e) => {
+        if (e.type === "progress") setProg({ id: e.component || "", pct: e.pct ?? 0, msg: e.msg || "" });
+      });
+      const s = await refresh();
+      if (s.ready) { /* stay — user clicks Continue */ }
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false); setProg(null);
+    }
+  }
+
+  const toggle = (id: string) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const selectedBytes = status ? status.components.filter((c) => sel.has(c.id)).reduce((a, c) => a + Math.max(0, c.size - c.bytesOnDisk), 0) : 0;
+
+  const reqLabel = (r: string) => (r === "required" ? t("setup.required") : t("setup.recommended"));
+  const deliveryNote = (c: SetupComponent) =>
+    c.delivery === "bundled" ? t("setup.reinstallHint") : c.delivery === "external" ? t("setup.external") : "";
+
+  return (
+    <div className="flex-1 min-h-0 overflow-y-auto grid place-items-center px-6 py-10">
+      <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, ease: EASE }}
+        className="w-full max-w-2xl">
+        <div className="mono text-[11px] tracking-[0.2em] text-[var(--color-muted)] flex items-center gap-2">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] shadow-[0_0_8px_var(--color-accent)]" />{t("setup.title")}
+        </div>
+        <h1 className="mt-4 text-2xl lg:text-[28px] leading-tight font-extrabold tracking-tight">{t("setup.title")}</h1>
+        <p className="mt-3 text-[14px] leading-relaxed text-[var(--color-muted)]">{t("setup.subtitle")}</p>
+
+        {err && (
+          <div className="mt-4 rounded-lg border border-[var(--color-warn)]/40 bg-[color-mix(in_oklab,var(--color-warn)_10%,transparent)] px-3 py-2 text-[13px] text-[var(--color-warn)]">
+            <span className="font-semibold">{t("setup.error")}</span> · <span className="mono text-[11px] break-words">{err}</span>
+          </div>
+        )}
+
+        <div className="mt-6 space-y-2">
+          {status?.components.map((c) => {
+            const active = prog && prog.id === c.id;
+            const canPick = c.delivery === "download" && !c.installed;
+            return (
+              <div key={c.id} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3">
+                <div className="flex items-center gap-3">
+                  {canPick ? (
+                    <input type="checkbox" checked={sel.has(c.id)} onChange={() => toggle(c.id)} disabled={busy}
+                      className="w-4 h-4 accent-[var(--color-accent)] shrink-0" />
+                  ) : (
+                    <span className={`w-4 h-4 shrink-0 grid place-items-center rounded ${c.installed ? "text-[var(--color-accent)]" : "text-[var(--color-muted)]"}`}>
+                      {c.installed ? <Check size={16} strokeWidth={3} /> : <X size={14} />}
+                    </span>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-[14px] truncate">{c.name}</span>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide ${c.requirement === "required" ? "bg-[color-mix(in_oklab,var(--color-accent)_16%,transparent)] text-[var(--color-accent)]" : "bg-[var(--color-surface-2)] text-[var(--color-muted)]"}`}>{reqLabel(c.requirement)}</span>
+                    </div>
+                    <div className="text-[12px] text-[var(--color-muted)] truncate">{c.purpose}</div>
+                    {active && (
+                      <div className="mt-1.5 h-1.5 rounded-full bg-[var(--color-surface-2)] overflow-hidden">
+                        <div className="h-full bg-[var(--color-accent)] transition-[width] duration-200" style={{ width: `${prog!.pct}%` }} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    {c.delivery === "external" ? (
+                      c.installed ? <span className="text-[12px] text-[var(--color-accent)]">{t("setup.installed")}</span>
+                        : <button onClick={() => c.externalUrl && window.open(c.externalUrl, "_blank")}
+                            className="inline-flex items-center gap-1 text-[12px] text-[var(--color-accent-2)] hover:underline"><ExternalLink size={13} />{t("setup.openDriver")}</button>
+                    ) : c.installed ? (
+                      <span className="text-[12px] text-[var(--color-accent)]">{t("setup.installed")}</span>
+                    ) : c.delivery === "bundled" ? (
+                      <span className="text-[11px] text-[var(--color-muted)] max-w-[120px] inline-block leading-tight">{deliveryNote(c)}</span>
+                    ) : (
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="mono text-[11px] text-[var(--color-muted)]">{fmtBytes(c.size)}</span>
+                        <button onClick={() => download([c.id])} disabled={busy}
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] text-[11px] hover:border-[var(--color-accent)] disabled:opacity-40">
+                          <Download size={12} />{t("setup.downloadOne")}</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-6 flex items-center gap-3">
+          {status && !status.ready && (
+            <button onClick={() => download([...sel])} disabled={busy || sel.size === 0}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-40 hover:brightness-105">
+              {busy ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              {t("setup.download")} {selectedBytes > 0 && <span className="opacity-80">· {fmtBytes(selectedBytes)}</span>}
+            </button>
+          )}
+          {busy && (
+            <button onClick={() => api.setupCancel().catch(() => {})}
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg border border-[var(--color-border)] text-sm text-[var(--color-muted)] hover:text-[var(--color-text)]">
+              <Square size={14} />{t("setup.cancel")}</button>
+          )}
+          {status?.ready && !busy && (
+            <button onClick={() => setStage("empty")}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold hover:brightness-105">
+              <Check size={16} />{t("setup.continue")}</button>
+          )}
+          {busy && prog && <span className="mono text-[11px] text-[var(--color-muted)] truncate">{prog.msg} · {prog.pct.toFixed(0)}%</span>}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 export default function App() {
   const stage = useStore((s) => s.stage);                 // only re-route on stage change (not on every store write)
   const setPid = useStore((s) => s.setPid);
@@ -1130,14 +1273,19 @@ export default function App() {
   const setStage = useStore((s) => s.setStage);
   const [cap, setCap] = useState("");
   useEffect(() => { api.capabilities().then((c) => setCap(`${c.device} · ${c.asr_model}`)).catch(() => setCap("backend offline")); }, []);
-  // open an existing project directly via ?pid=... (resume / dev)
+  // boot: resume ?pid=… project, else gate on /setup/status — missing required components -> «first run».
   useEffect(() => {
     const pid = new URLSearchParams(location.search).get("pid");
-    if (pid) api.getProject(pid).then((p) => { setPid(pid); setProject(p); setStage("editor"); }).catch(() => {});
+    if (pid) { api.getProject(pid).then((p) => { setPid(pid); setProject(p); setStage("editor"); }).catch(() => setStage("empty")); return; }
+    api.setupStatus()
+      .then((s) => setStage(s.ready ? "empty" : "setup"))
+      .catch(() => setStage("empty"));   // backend offline / older server without /setup -> fall through to hero
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="h-full flex flex-col">
       <TopBar />
+      {stage === "boot" && <div className="flex-1 grid place-items-center"><Loader2 size={22} className="animate-spin text-[var(--color-muted)]" /></div>}
+      {stage === "setup" && <FirstRun />}
       {stage === "empty" && <DropZone />}
       {stage === "analyzing" && <AnalyzeProgress />}
       {stage === "editor" && <Editor />}

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Project } from "./lib/api";
 
-type Stage = "empty" | "analyzing" | "editor";
+type Stage = "boot" | "setup" | "empty" | "analyzing" | "editor";
 export type ExportItem = { id: string; name: string; status: "rendering" | "done" | "error"; msg: string; url?: string };
 
 type State = {
@@ -32,7 +32,7 @@ type State = {
 };
 
 export const useStore = create<State>((set, get) => ({
-  stage: "empty",
+  stage: "boot",   // при загрузке SPA сперва проверяем /setup/status; если чего-то обязательного нет -> "setup"
   pid: null,
   project: null,
   progress: { stage: "", msg: "", pct: null },

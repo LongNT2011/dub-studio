@@ -1,6 +1,17 @@
 {
-  "app": { "name": "Dub Studio", "tagline": "Dobla y traduce cualquier video corto — en local." },
-  "drop": { "title": "Suelta un video para doblar", "hint": "MP4 o MOV — todo se ejecuta en tu equipo", "start": "Iniciar procesamiento", "change": "clic para cambiar", "browse": "Examinar", "recent": "Recientes", "demo": "Probar demo" },
+  "app": {
+    "name": "Dub Studio",
+    "tagline": "Dobla y traduce cualquier video corto — en local."
+  },
+  "drop": {
+    "title": "Suelta un video para doblar",
+    "hint": "MP4 o MOV — todo se ejecuta en tu equipo",
+    "start": "Iniciar procesamiento",
+    "change": "clic para cambiar",
+    "browse": "Examinar",
+    "recent": "Recientes",
+    "demo": "Probar demo"
+  },
   "hero": {
     "eyebrow": "LOCAL · SIN CONEXIÓN · 6 IDIOMAS",
     "headline": "Dobla cualquier vídeo corto como si se hubiera grabado así.",
@@ -12,35 +23,157 @@
   },
   "analyze": {
     "title": "Analizando tu video",
-    "download": "Descargando modelos", "firstRunNote": "Primera vez: los modelos se descargan una vez (varios GB) — luego es rápido", "separating": "Separando audio", "recognizing": "Reconociendo voz", "diarizing": "Identificando hablantes",
-    "translating": "Traduciendo", "voicing": "Generando la voz", "style": "Detectando estilo de subtítulos", "locating": "Localizando texto en pantalla",
+    "download": "Descargando modelos",
+    "firstRunNote": "Primera vez: los modelos se descargan una vez (varios GB) — luego es rápido",
+    "separating": "Separando audio",
+    "recognizing": "Reconociendo voz",
+    "diarizing": "Identificando hablantes",
+    "translating": "Traduciendo",
+    "voicing": "Generando la voz",
+    "style": "Detectando estilo de subtítulos",
+    "locating": "Localizando texto en pantalla",
     "cancel": "Cancelar"
   },
-  "editor": { "transcript": "Transcripción", "style": "Estilo", "voice": "Voz", "preview": "Vista previa", "timeline": "Línea de tiempo" },
-  "mode": { "subtitles": "Subtítulos", "dub": "Doblaje", "funny": "Divertido", "subtitles_desc": "Audio original + subtítulos traducidos", "dub_desc": "Redoblado al idioma de destino", "funny_desc": "Gemma reescribe el guion y vuelve a doblar" },
-  "actions": { "translate": "Traducir", "dub": "Doblaje completo", "funny": "Remix divertido", "dubFile": "Doblar archivo" },
-  "style": { "font": "Fuente", "size": "Tamaño", "color": "Color", "outline": "Contorno", "shadow": "Sombra", "outlineW": "borde", "outlineWFull": "Grosor del contorno (px), 0 = ninguno", "bold": "Negrita", "italic": "Cursiva", "caps": "MAYÚSCULAS", "plate": "Placa", "resetAuto": "Restablecer a auto", "resetGlobal": "Restablecer a global" },
-  "voice": { "clone": "Clonar original", "autocast": "Auto-reparto por hablante", "pack": "Voz del paquete", "funny": "Voz divertida", "fixed": "Duración fija", "dynamic": "Duración natural", "regenAll": "Regenerar toda la voz" },
-  "remix": { "title": "Remix", "placeholder": "Tema \u2014 p. ej. \u00abtema pirata\u00bb, \u00abcomo noticias\u00bb, \u00absarc\u00e1stico\u00bb", "apply": "Aplicar remix", "hint": "Gemma reescribe todo el gui\u00f3n seg\u00fan tu tema, manteniendo el tiempo. La exportaci\u00f3n lo redobla." },
-  "export": { "title": "Exportar", "summary": "{{segments}} segmentos · {{speakers}} hablantes · subtítulos {{lang}}", "proceed": "Exportar", "tweak": "Seguir editando", "beforeAfter": "Original ↔ Doblado" },
-  "blur": { "title": "Máscara", "on": "Cubrir texto original", "add": "Añadir zona", "frame": "En este fotograma", "all": "Todas", "show": "Mostrar máscara", "hide": "Ocultar máscara", "off": "off", "modeBlur": "Desenfoque (clic → relleno)", "modeFill": "Relleno sólido (clic → desenfoque)", "fillColor": "Color de relleno" },
-  "compare": { "toggle": "Comparar", "original": "Original", "result": "Doblado" },
-  "titles": { "tab": "Títulos", "add": "Título propio" },
-  "preset": { "title": "Preajuste", "original": "Como el original" },
-  "files": { "title": "Archivos", "download": "Descargar", "open": "Abrir" },
-  "nav": { "new": "Nuevo", "newHint": "Empezar con un vídeo nuevo" },
-  "play": { "dub": "Reproducir el doblaje (vídeo + voz)" },
-  "seg": { "regen": "Regenerar la voz de esta frase", "play": "Reproducir la voz de esta frase", "keep": "Mantener original", "unkeep": "Volver a doblar", "hide": "Ocultar línea", "show": "Mostrar línea", "del": "Eliminar línea", "refresh": "Actualizar", "refreshHint": "Forzar el refresco de la vista previa / subtítulos" },
-  "settings": { "title": "Modelos", "asr": "Reconocimiento de voz", "llm": "Traducción", "vision": "Visión", "tts": "Síntesis de voz" },
+  "editor": {
+    "transcript": "Transcripción",
+    "style": "Estilo",
+    "voice": "Voz",
+    "preview": "Vista previa",
+    "timeline": "Línea de tiempo"
+  },
+  "mode": {
+    "subtitles": "Subtítulos",
+    "dub": "Doblaje",
+    "funny": "Divertido",
+    "subtitles_desc": "Audio original + subtítulos traducidos",
+    "dub_desc": "Redoblado al idioma de destino",
+    "funny_desc": "Gemma reescribe el guion y vuelve a doblar"
+  },
+  "actions": {
+    "translate": "Traducir",
+    "dub": "Doblaje completo",
+    "funny": "Remix divertido",
+    "dubFile": "Doblar archivo"
+  },
+  "style": {
+    "font": "Fuente",
+    "size": "Tamaño",
+    "color": "Color",
+    "outline": "Contorno",
+    "shadow": "Sombra",
+    "outlineW": "borde",
+    "outlineWFull": "Grosor del contorno (px), 0 = ninguno",
+    "bold": "Negrita",
+    "italic": "Cursiva",
+    "caps": "MAYÚSCULAS",
+    "plate": "Placa",
+    "resetAuto": "Restablecer a auto",
+    "resetGlobal": "Restablecer a global"
+  },
+  "voice": {
+    "clone": "Clonar original",
+    "autocast": "Auto-reparto por hablante",
+    "pack": "Voz del paquete",
+    "funny": "Voz divertida",
+    "fixed": "Duración fija",
+    "dynamic": "Duración natural",
+    "regenAll": "Regenerar toda la voz"
+  },
+  "remix": {
+    "title": "Remix",
+    "placeholder": "Tema — p. ej. «tema pirata», «como noticias», «sarcástico»",
+    "apply": "Aplicar remix",
+    "hint": "Gemma reescribe todo el guión según tu tema, manteniendo el tiempo. La exportación lo redobla."
+  },
+  "export": {
+    "title": "Exportar",
+    "summary": "{{segments}} segmentos · {{speakers}} hablantes · subtítulos {{lang}}",
+    "proceed": "Exportar",
+    "tweak": "Seguir editando",
+    "beforeAfter": "Original ↔ Doblado"
+  },
+  "blur": {
+    "title": "Máscara",
+    "on": "Cubrir texto original",
+    "add": "Añadir zona",
+    "frame": "En este fotograma",
+    "all": "Todas",
+    "show": "Mostrar máscara",
+    "hide": "Ocultar máscara",
+    "off": "off",
+    "modeBlur": "Desenfoque (clic → relleno)",
+    "modeFill": "Relleno sólido (clic → desenfoque)",
+    "fillColor": "Color de relleno"
+  },
+  "compare": {
+    "toggle": "Comparar",
+    "original": "Original",
+    "result": "Doblado"
+  },
+  "titles": {
+    "tab": "Títulos",
+    "add": "Título propio"
+  },
+  "preset": {
+    "title": "Preajuste",
+    "original": "Como el original"
+  },
+  "files": {
+    "title": "Archivos",
+    "download": "Descargar",
+    "open": "Abrir"
+  },
+  "nav": {
+    "new": "Nuevo",
+    "newHint": "Empezar con un vídeo nuevo"
+  },
+  "play": {
+    "dub": "Reproducir el doblaje (vídeo + voz)"
+  },
+  "seg": {
+    "regen": "Regenerar la voz de esta frase",
+    "play": "Reproducir la voz de esta frase",
+    "keep": "Mantener original",
+    "unkeep": "Volver a doblar",
+    "hide": "Ocultar línea",
+    "show": "Mostrar línea",
+    "del": "Eliminar línea",
+    "refresh": "Actualizar",
+    "refreshHint": "Forzar el refresco de la vista previa / subtítulos"
+  },
+  "settings": {
+    "title": "Modelos",
+    "asr": "Reconocimiento de voz",
+    "llm": "Traducción",
+    "vision": "Visión",
+    "tts": "Síntesis de voz"
+  },
   "help": {
     "title": "Acerca de Dub Studio",
     "intro": "Dub Studio dobla y traduce cualquier vídeo corto íntegramente en tu equipo — nada sale de tu ordenador. Suelta un clip: lo analiza una vez y luego ajustas cada detalle con vista previa en vivo.",
     "howTitle": "Cómo funciona",
-    "how": ["Suelta un MP4/MOV — separa el audio, reconoce el habla, distingue a los hablantes, traduce y lee el texto en pantalla.", "Elige un modo: subtítulos, doblaje completo o un remix divertido.", "Edita lo que quieras — transcripción, voces, estilo de subtítulos, máscaras — con vista previa instantánea.", "Exporta el vídeo terminado. Todo se ejecuta localmente en tu GPU."],
+    "how": [
+      "Suelta un MP4/MOV — separa el audio, reconoce el habla, distingue a los hablantes, traduce y lee el texto en pantalla.",
+      "Elige un modo: subtítulos, doblaje completo o un remix divertido.",
+      "Edita lo que quieras — transcripción, voces, estilo de subtítulos, máscaras — con vista previa instantánea.",
+      "Exporta el vídeo terminado. Todo se ejecuta localmente en tu GPU."
+    ],
     "featuresTitle": "Funciones",
-    "features": ["Clonación de voz, reparto automático por hablante o un pack de voces", "Texto en pantalla localizado en su sitio", "Reescribe el guion y vuelve a doblar (modo divertido)", "Estilo de subtítulos: fuente, color, contorno, sombra, placa", "Máscaras: desenfoque o un rectángulo sólido sobre el original", "6 idiomas, totalmente sin conexión, hasta 4K"],
+    "features": [
+      "Clonación de voz, reparto automático por hablante o un pack de voces",
+      "Texto en pantalla localizado en su sitio",
+      "Reescribe el guion y vuelve a doblar (modo divertido)",
+      "Estilo de subtítulos: fuente, color, contorno, sombra, placa",
+      "Máscaras: desenfoque o un rectángulo sólido sobre el original",
+      "6 idiomas, totalmente sin conexión, hasta 4K"
+    ],
     "sectionsTitle": "Secciones",
-    "sections": ["Transcripción — edita cada línea y su traducción", "Voz — elige cómo se dobla y regenera", "Estilo y Máscara — subtítulos, títulos, cubiertas", "Ajustes (⚙) — el conjunto de modelos (ASR / LLM / Vision / TTS)"],
+    "sections": [
+      "Transcripción — edita cada línea y su traducción",
+      "Voz — elige cómo se dobla y regenera",
+      "Estilo y Máscara — subtítulos, títulos, cubiertas",
+      "Ajustes (⚙) — el conjunto de modelos (ASR / LLM / Vision / TTS)"
+    ],
     "donateTitle": "Apoya al autor",
     "donateIntro": "Creo herramientas de IA locales gratis — sin nube ni suscripciones. Las donaciones me ayudan a mejorarlas y crear nuevas. ¡Gracias! 🙏",
     "card": "Tarjeta / PayPal",
@@ -49,6 +182,44 @@
     "madeBy": "Hecho por",
     "founder": "fundador de"
   },
-  "sel": { "pick": "Seleccionar:", "all": "Todos", "count": "seleccionados", "keep": "Original", "hide": "Ocultar", "del": "Eliminar" },
-  "common": { "undo": "Deshacer", "redo": "Rehacer", "cancel": "Cancelar", "language": "Idioma", "theme": "Tema", "rendering": "Renderizando", "done": "Listo", "error": "Error" }
+  "sel": {
+    "pick": "Seleccionar:",
+    "all": "Todos",
+    "count": "seleccionados",
+    "keep": "Original",
+    "hide": "Ocultar",
+    "del": "Eliminar"
+  },
+  "common": {
+    "undo": "Deshacer",
+    "redo": "Rehacer",
+    "cancel": "Cancelar",
+    "language": "Idioma",
+    "theme": "Tema",
+    "rendering": "Renderizando",
+    "done": "Listo",
+    "error": "Error"
+  },
+  "setup": {
+    "title": "First run",
+    "subtitle": "Dub Studio needs a few components before the first dub. Pick what to download — it runs in the background.",
+    "download": "Download all",
+    "downloadOne": "Download",
+    "cancel": "Cancel",
+    "installed": "Installed",
+    "missing": "Missing",
+    "downloading": "Downloading…",
+    "required": "Required",
+    "recommended": "Recommended",
+    "bundled": "Bundled with app",
+    "external": "System",
+    "driverMissing": "NVIDIA driver not detected",
+    "openDriver": "Open NVIDIA driver site",
+    "ready": "Everything is ready",
+    "continue": "Continue",
+    "totalToDownload": "To download",
+    "reinstallHint": "Ships with the app — reinstall if missing",
+    "done": "Done",
+    "error": "Error"
+  }
 }

@@ -37,7 +37,20 @@ export type Capabilities = {
   device: string; tts_quant: string; asr_model: string; ffmpeg: boolean;
   languages: string[]; voice_modes: string[]; models?: ModelStack;
 };
-export type JobEvent = { type: "progress" | "done" | "error"; stage?: string; pct?: number; msg?: string; result?: unknown; error?: string };
+export type JobEvent = { type: "progress" | "done" | "error"; stage?: string; pct?: number; msg?: string; result?: unknown; error?: string; component?: string; downloaded?: number; total?: number };
+
+// «Первый запуск»: статус внешних компонентов (модели/движки/системные библиотеки) + автозакачка.
+export type SetupComponent = {
+  id: string; name: string; purpose: string;
+  requirement: "required" | "recommended";
+  delivery: "download" | "bundled" | "external";
+  size: number; installed: boolean; bytesOnDisk: number;
+  missing: string[]; detail?: string | null; externalUrl?: string | null;
+};
+export type SetupStatus = {
+  components: SetupComponent[]; ready: boolean;
+  downloadPending: number; driverOk: boolean; llamaBuild: string;
+};
 
 async function j<T>(r: Response): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
@@ -51,6 +64,10 @@ let _patchChain: Promise<unknown> = Promise.resolve();
 
 export const api = {
   capabilities: () => fetch(`${BASE}/engine/capabilities`).then(j<Capabilities>),
+  setupStatus: () => fetch(`${BASE}/setup/status`).then(j<SetupStatus>),
+  setupDownload: (ids: string[]) =>
+    fetch(`${BASE}/setup/download`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }).then(j<{ job_id: string }>),
+  setupCancel: () => fetch(`${BASE}/setup/cancel`, { method: "POST" }).then(j<{ cancelled: boolean }>),
   fonts: () => fetch(`${BASE}/fonts`).then(j<{ fonts: Record<string, string> }>),
   setOpts: (edit: Partial<ModelStack>) =>
     fetch(`${BASE}/engine/opts`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit) }).then(j<{ models: ModelStack }>),

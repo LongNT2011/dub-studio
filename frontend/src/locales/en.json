@@ -1,6 +1,17 @@
 {
-  "app": { "name": "Dub Studio", "tagline": "Dub & translate any short video — locally." },
-  "drop": { "title": "Drop a video to dub", "hint": "MP4 or MOV — everything runs on your machine", "start": "Start processing", "change": "click to change", "browse": "Browse", "recent": "Recent", "demo": "Try a demo" },
+  "app": {
+    "name": "Dub Studio",
+    "tagline": "Dub & translate any short video — locally."
+  },
+  "drop": {
+    "title": "Drop a video to dub",
+    "hint": "MP4 or MOV — everything runs on your machine",
+    "start": "Start processing",
+    "change": "click to change",
+    "browse": "Browse",
+    "recent": "Recent",
+    "demo": "Try a demo"
+  },
   "hero": {
     "eyebrow": "LOCAL · OFFLINE · 6 LANGUAGES",
     "headline": "Dub any short video like it was made that way.",
@@ -12,35 +23,157 @@
   },
   "analyze": {
     "title": "Analyzing your video",
-    "download": "Downloading models", "firstRunNote": "First run: models download once (several GB) — fast after that", "separating": "Separating audio", "recognizing": "Recognizing speech", "diarizing": "Diarizing speakers",
-    "translating": "Translating", "voicing": "Generating voiceover", "style": "Detecting caption style", "locating": "Locating on-screen text",
+    "download": "Downloading models",
+    "firstRunNote": "First run: models download once (several GB) — fast after that",
+    "separating": "Separating audio",
+    "recognizing": "Recognizing speech",
+    "diarizing": "Diarizing speakers",
+    "translating": "Translating",
+    "voicing": "Generating voiceover",
+    "style": "Detecting caption style",
+    "locating": "Locating on-screen text",
     "cancel": "Cancel"
   },
-  "editor": { "transcript": "Transcript", "style": "Style", "voice": "Voice", "preview": "Preview", "timeline": "Timeline" },
-  "mode": { "subtitles": "Subtitles", "dub": "Dub", "funny": "Funny", "subtitles_desc": "Original audio + translated subtitles", "dub_desc": "Re-voiced into the target language", "funny_desc": "Gemma rewrites the script, then re-dubs" },
-  "actions": { "translate": "Translate", "dub": "Full dub", "funny": "Funny remix", "dubFile": "Dub any file" },
-  "style": { "font": "Font", "size": "Size", "color": "Color", "outline": "Outline", "shadow": "Shadow", "outlineW": "out", "outlineWFull": "Outline width (px), 0 = none", "bold": "Bold", "italic": "Italic", "caps": "UPPERCASE", "plate": "Plate", "resetAuto": "Reset to auto", "resetGlobal": "Reset to global" },
-  "voice": { "clone": "Clone original", "autocast": "Auto-cast by speaker", "pack": "Pack voice", "funny": "Funny voice", "fixed": "Fixed duration", "dynamic": "Natural length", "regenAll": "Regenerate all voiceover" },
-  "remix": { "title": "Remix", "placeholder": "Theme — e.g. \u2018pirate theme\u2019, \u2018as a news report\u2019, \u2018sarcastic\u2019", "apply": "Apply remix", "hint": "Gemma rewrites the whole script on your theme, keeping the timing. Export then re-dubs it." },
-  "export": { "title": "Export", "summary": "{{segments}} segments · {{speakers}} speakers · {{lang}} captions", "proceed": "Export", "tweak": "Keep editing", "beforeAfter": "Original ↔ Dubbed" },
-  "blur": { "title": "Mask", "on": "Cover original text", "add": "Add box", "frame": "On this frame", "all": "All zones", "show": "Show mask", "hide": "Hide mask", "off": "off", "modeBlur": "Blur (click → solid fill)", "modeFill": "Solid fill (click → blur)", "fillColor": "Fill colour" },
-  "compare": { "toggle": "Compare", "original": "Original", "result": "Dubbed" },
-  "titles": { "tab": "Titles", "add": "Custom title" },
-  "preset": { "title": "Preset", "original": "Match original" },
-  "files": { "title": "Files", "download": "Download", "open": "Open" },
-  "nav": { "new": "New", "newHint": "Start with a new video" },
-  "play": { "dub": "Play the dub (video + voiceover)" },
-  "seg": { "regen": "Regenerate this line's voiceover", "play": "Play this line's voiceover", "keep": "Keep original", "unkeep": "Re-dub", "hide": "Hide line", "show": "Show line", "del": "Delete line", "refresh": "Refresh", "refreshHint": "Force-refresh the preview / subtitles (if it lags or hangs)" },
-  "settings": { "title": "Models", "asr": "Speech recognition", "llm": "Translation", "vision": "Vision", "tts": "Voice synthesis" },
+  "editor": {
+    "transcript": "Transcript",
+    "style": "Style",
+    "voice": "Voice",
+    "preview": "Preview",
+    "timeline": "Timeline"
+  },
+  "mode": {
+    "subtitles": "Subtitles",
+    "dub": "Dub",
+    "funny": "Funny",
+    "subtitles_desc": "Original audio + translated subtitles",
+    "dub_desc": "Re-voiced into the target language",
+    "funny_desc": "Gemma rewrites the script, then re-dubs"
+  },
+  "actions": {
+    "translate": "Translate",
+    "dub": "Full dub",
+    "funny": "Funny remix",
+    "dubFile": "Dub any file"
+  },
+  "style": {
+    "font": "Font",
+    "size": "Size",
+    "color": "Color",
+    "outline": "Outline",
+    "shadow": "Shadow",
+    "outlineW": "out",
+    "outlineWFull": "Outline width (px), 0 = none",
+    "bold": "Bold",
+    "italic": "Italic",
+    "caps": "UPPERCASE",
+    "plate": "Plate",
+    "resetAuto": "Reset to auto",
+    "resetGlobal": "Reset to global"
+  },
+  "voice": {
+    "clone": "Clone original",
+    "autocast": "Auto-cast by speaker",
+    "pack": "Pack voice",
+    "funny": "Funny voice",
+    "fixed": "Fixed duration",
+    "dynamic": "Natural length",
+    "regenAll": "Regenerate all voiceover"
+  },
+  "remix": {
+    "title": "Remix",
+    "placeholder": "Theme — e.g. ‘pirate theme’, ‘as a news report’, ‘sarcastic’",
+    "apply": "Apply remix",
+    "hint": "Gemma rewrites the whole script on your theme, keeping the timing. Export then re-dubs it."
+  },
+  "export": {
+    "title": "Export",
+    "summary": "{{segments}} segments · {{speakers}} speakers · {{lang}} captions",
+    "proceed": "Export",
+    "tweak": "Keep editing",
+    "beforeAfter": "Original ↔ Dubbed"
+  },
+  "blur": {
+    "title": "Mask",
+    "on": "Cover original text",
+    "add": "Add box",
+    "frame": "On this frame",
+    "all": "All zones",
+    "show": "Show mask",
+    "hide": "Hide mask",
+    "off": "off",
+    "modeBlur": "Blur (click → solid fill)",
+    "modeFill": "Solid fill (click → blur)",
+    "fillColor": "Fill colour"
+  },
+  "compare": {
+    "toggle": "Compare",
+    "original": "Original",
+    "result": "Dubbed"
+  },
+  "titles": {
+    "tab": "Titles",
+    "add": "Custom title"
+  },
+  "preset": {
+    "title": "Preset",
+    "original": "Match original"
+  },
+  "files": {
+    "title": "Files",
+    "download": "Download",
+    "open": "Open"
+  },
+  "nav": {
+    "new": "New",
+    "newHint": "Start with a new video"
+  },
+  "play": {
+    "dub": "Play the dub (video + voiceover)"
+  },
+  "seg": {
+    "regen": "Regenerate this line's voiceover",
+    "play": "Play this line's voiceover",
+    "keep": "Keep original",
+    "unkeep": "Re-dub",
+    "hide": "Hide line",
+    "show": "Show line",
+    "del": "Delete line",
+    "refresh": "Refresh",
+    "refreshHint": "Force-refresh the preview / subtitles (if it lags or hangs)"
+  },
+  "settings": {
+    "title": "Models",
+    "asr": "Speech recognition",
+    "llm": "Translation",
+    "vision": "Vision",
+    "tts": "Voice synthesis"
+  },
   "help": {
     "title": "About Dub Studio",
     "intro": "Dub Studio dubs and translates any short video entirely on your machine — nothing leaves your computer. Drop a clip; it auto-analyzes once, then you fine-tune every detail with a live preview.",
     "howTitle": "How it works",
-    "how": ["Drop an MP4/MOV — it splits the audio, recognizes speech, tells speakers apart, translates, and reads on-screen text.", "Pick a mode: subtitles, a full dub, or a funny remix.", "Edit anything — transcript, voices, subtitle style, masks — with instant preview.", "Export the finished video. Everything runs locally on your GPU."],
+    "how": [
+      "Drop an MP4/MOV — it splits the audio, recognizes speech, tells speakers apart, translates, and reads on-screen text.",
+      "Pick a mode: subtitles, a full dub, or a funny remix.",
+      "Edit anything — transcript, voices, subtitle style, masks — with instant preview.",
+      "Export the finished video. Everything runs locally on your GPU."
+    ],
     "featuresTitle": "Features",
-    "features": ["Voice cloning, auto-cast per speaker, or a voice pack", "On-screen text localized in place", "Rewrite the script and re-dub (funny mode)", "Subtitle styling: font, color, outline, shadow, plate", "Mask covers: blur or a solid rectangle over the original", "6 languages, fully offline, up to 4K"],
+    "features": [
+      "Voice cloning, auto-cast per speaker, or a voice pack",
+      "On-screen text localized in place",
+      "Rewrite the script and re-dub (funny mode)",
+      "Subtitle styling: font, color, outline, shadow, plate",
+      "Mask covers: blur or a solid rectangle over the original",
+      "6 languages, fully offline, up to 4K"
+    ],
     "sectionsTitle": "Sections",
-    "sections": ["Transcript — edit each line and its translation", "Voice — pick how it's voiced and regenerate", "Style & Mask — subtitles, titles, covers", "Settings (⚙) — the model stack (ASR / LLM / Vision / TTS)"],
+    "sections": [
+      "Transcript — edit each line and its translation",
+      "Voice — pick how it's voiced and regenerate",
+      "Style & Mask — subtitles, titles, covers",
+      "Settings (⚙) — the model stack (ASR / LLM / Vision / TTS)"
+    ],
     "donateTitle": "Support the author",
     "donateIntro": "I build local AI tools for free — no cloud, no subscriptions. Donations help me keep improving them and shipping new ones. Thank you! 🙏",
     "card": "Card / PayPal",
@@ -49,6 +182,44 @@
     "madeBy": "Built by",
     "founder": "founder of"
   },
-  "sel": { "pick": "Select:", "all": "All", "count": "selected", "keep": "Keep orig.", "hide": "Hide", "del": "Delete" },
-  "common": { "undo": "Undo", "redo": "Redo", "cancel": "Cancel", "language": "Language", "theme": "Theme", "rendering": "Rendering", "done": "Done", "error": "Error" }
+  "sel": {
+    "pick": "Select:",
+    "all": "All",
+    "count": "selected",
+    "keep": "Keep orig.",
+    "hide": "Hide",
+    "del": "Delete"
+  },
+  "common": {
+    "undo": "Undo",
+    "redo": "Redo",
+    "cancel": "Cancel",
+    "language": "Language",
+    "theme": "Theme",
+    "rendering": "Rendering",
+    "done": "Done",
+    "error": "Error"
+  },
+  "setup": {
+    "title": "First run",
+    "subtitle": "Dub Studio needs a few components before the first dub. Pick what to download — it runs in the background.",
+    "download": "Download all",
+    "downloadOne": "Download",
+    "cancel": "Cancel",
+    "installed": "Installed",
+    "missing": "Missing",
+    "downloading": "Downloading…",
+    "required": "Required",
+    "recommended": "Recommended",
+    "bundled": "Bundled with app",
+    "external": "System",
+    "driverMissing": "NVIDIA driver not detected",
+    "openDriver": "Open NVIDIA driver site",
+    "ready": "Everything is ready",
+    "continue": "Continue",
+    "totalToDownload": "To download",
+    "reinstallHint": "Ships with the app — reinstall if missing",
+    "done": "Done",
+    "error": "Error"
+  }
 }
