@@ -146,7 +146,10 @@
     "asr": "Speech recognition",
     "llm": "Translation",
     "vision": "Vision",
-    "tts": "Voice synthesis"
+    "tts": "Voice synthesis",
+    "modelsTab": "Models",
+    "engineTab": "Engine",
+    "redownload": "Re-download"
   },
   "help": {
     "title": "About Dub Studio",

@@ -29,29 +29,86 @@ function LanguageSwitcher() {
   );
 }
 
+// Модели и компоненты в настройках: список из /setup/status с кнопками скачки/докачки и прогрессом.
+function ModelsSection() {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<SetupStatus | null>(null);
+  const [prog, setProg] = useState<{ id: string; pct: number } | null>(null);
+  const refresh = () => api.setupStatus().then(setStatus).catch(() => {});
+  useEffect(() => { refresh(); }, []);
+  const dl = async (id: string) => {
+    if (prog) return;
+    setProg({ id, pct: 0 });
+    try {
+      const { job_id } = await api.setupDownload([id]);
+      await api.watchJob(job_id, (e) => { if (e.type === "progress" && (e.component === id || !e.component)) setProg({ id, pct: e.pct ?? 0 }); });
+    } catch { /* ignore */ } finally { setProg(null); await refresh(); }
+  };
+  if (!status) return <div className="mono text-[11px] text-[var(--color-muted)]">…</div>;
+  // только скачиваемые компоненты (модели/движки/рантаймы); внешнее (драйвер) и bundled — не тут.
+  const rows = status.components.filter((c) => c.delivery === "download");
+  return (
+    <div className="space-y-1.5">
+      {rows.map((c) => {
+        const active = prog?.id === c.id;
+        return (
+          <div key={c.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.installed ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
+            <div className="min-w-0 flex-1">
+              <div className="text-[12px] font-medium truncate">{c.name}</div>
+              <div className="mono text-[10px] text-[var(--color-muted)] truncate">{c.purpose} · {fmtBytes(c.size)}</div>
+            </div>
+            {active ? (
+              <div className="w-24 shrink-0">
+                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden"><div className="h-full bg-[var(--color-accent)] transition-[width]" style={{ width: `${prog?.pct ?? 0}%` }} /></div>
+                <div className="mono text-[10px] text-[var(--color-muted)] text-right mt-0.5">{Math.round(prog?.pct ?? 0)}%</div>
+              </div>
+            ) : (
+              <button onClick={() => dl(c.id)} disabled={!!prog}
+                className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] border border-[var(--color-border)] text-[var(--color-accent-2)] hover:border-[var(--color-accent)] disabled:opacity-40">
+                {c.installed ? <RefreshCw size={12} /> : <Download size={12} />}{c.installed ? t("settings.redownload") : t("setup.downloadOne")}
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const [cap, setCap] = useState<Capabilities | null>(null);
   const [m, setM] = useState<ModelStack>({ asr: "", llm: "", vision: "", tts: "" });
+  const [tab, setTab] = useState<"models" | "engine">("models");
   useEffect(() => { api.capabilities().then((c) => { setCap(c); if (c.models) setM(c.models); }).catch(() => {}); }, []);
   const SLOTS: [keyof ModelStack, string][] = [["asr", "ASR"], ["llm", "LLM"], ["vision", "Vision"], ["tts", "TTS"]];
+  const tabBtn = (id: "models" | "engine", label: string) =>
+    <button onClick={() => setTab(id)} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${tab === id ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>{label}</button>;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center glass-scrim anim-fade" onClick={onClose}>
-      <div className="w-[min(92vw,580px)] rounded-xl glass-panel anim-pop p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="w-[min(92vw,600px)] max-h-[86vh] flex flex-col rounded-xl glass-panel anim-pop p-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
           <span className="font-semibold">{t("settings.title")}</span>
           <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={16} /></button>
         </div>
-        <div className="mono text-[11px] text-[var(--color-muted)] mb-4">{cap ? `${cap.device} · ${cap.tts_quant}` : "…"}</div>
-        {SLOTS.map(([k, lbl]) => (
-          <div key={k} className="mb-2.5">
-            <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-1">{lbl} · {t(`settings.${k}`)}</div>
-            <input value={m[k]} onChange={(e) => setM({ ...m, [k]: e.target.value })}
-              className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[12px] mono focus:border-[var(--color-accent)] focus:outline-none" />
-          </div>
-        ))}
-        <button onClick={async () => { await api.setOpts(m).catch(() => {}); onClose(); }}
-          className="mt-3 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold hover:brightness-105">{t("common.done")}</button>
+        <div className="mono text-[11px] text-[var(--color-muted)] mb-3">{cap ? `${cap.device} · ${cap.tts_quant}` : "…"}</div>
+        <div className="flex gap-1.5 mb-3">{tabBtn("models", t("settings.modelsTab"))}{tabBtn("engine", t("settings.engineTab"))}</div>
+        <div className="overflow-y-auto flex-1 -mr-2 pr-2">
+          {tab === "models" ? <ModelsSection /> : (
+            <>
+              {SLOTS.map(([k, lbl]) => (
+                <div key={k} className="mb-2.5">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-1">{lbl} · {t(`settings.${k}`)}</div>
+                  <input value={m[k]} onChange={(e) => setM({ ...m, [k]: e.target.value })}
+                    className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[12px] mono focus:border-[var(--color-accent)] focus:outline-none" />
+                </div>
+              ))}
+              <button onClick={async () => { await api.setOpts(m).catch(() => {}); onClose(); }}
+                className="mt-3 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold hover:brightness-105">{t("common.done")}</button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
