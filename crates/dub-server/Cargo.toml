@@ -29,3 +29,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 mime_guess = "2"
+# setup-автозакачка: HTTPS-загрузка компонентов (rustls, без системного OpenSSL) + распаковка zip/wheel.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
+zip = { version = "3", default-features = false, features = ["deflate"] }

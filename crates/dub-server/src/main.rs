@@ -1,7 +1,7 @@
 //! Точка входа dub-server: поднимает axum на 127.0.0.1:8765 (порт как у backend/app.py).
 //! Корень репо резолвится из env DUB_STUDIO_ROOT, иначе — рабочий каталог процесса.
 
-use dub_server::{build_router, AppState};
+use dub_server::{augment_path_for_tools, build_router, AppState};
 use std::path::PathBuf;
 
 #[tokio::main]
@@ -21,6 +21,10 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(8765);
+
+    // Прописать в PATH каталоги скачанных бинарей (ffmpeg/llama/higgs-engine) до старта — чтобы после
+    // автозакачки они находились без рестарта процесса.
+    augment_path_for_tools(&repo_root);
 
     let state = AppState::new(&repo_root);
     tracing::info!(

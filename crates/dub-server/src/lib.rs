@@ -15,6 +15,7 @@ mod media;
 mod ocr;
 mod patch;
 mod render;
+mod setup;
 mod spa;
 mod translate;
 mod wavio;
@@ -125,6 +126,8 @@ pub struct AppState {
     pub fonts_dir: PathBuf,
     /// Корень моделей (для OCR: <root>/ocr/…). Env DUBENGINE_MODELS_ROOT, иначе <repo>/models.
     pub models_root: PathBuf,
+    /// Флаг отмены текущей setup-закачки (POST /setup/cancel взводит; download-loop его читает).
+    pub setup_cancel: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Корень моделей: env DUBENGINE_MODELS_ROOT, иначе <repo_root>/models.
@@ -132,6 +135,32 @@ fn models_root(repo_root: &Path) -> PathBuf {
     std::env::var("DUBENGINE_MODELS_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| repo_root.join("models"))
+}
+
+/// Прописать в PATH процесса каталоги скачанных бинарей (ffmpeg, llama, движок Higgs с CUDA/VC-DLL),
+/// чтобы `Command::new("ffmpeg")` и подобные находили их без перезапуска после автозакачки. Вызывается
+/// один раз при старте сервера (main.rs / Tauri-shell). Идемпотентно: не дублирует уже присутствующие.
+pub fn augment_path_for_tools(repo_root: &Path) {
+    let dirs = [
+        repo_root.join("tools").join("ffmpeg"),
+        repo_root.join("tools").join("llama"),
+        repo_root.join("models").join("higgs-engine"),
+    ];
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let cur = std::env::var("PATH").unwrap_or_default();
+    let mut prefix = String::new();
+    for d in dirs {
+        let s = d.to_string_lossy().to_string();
+        if !s.is_empty() && !cur.split(sep).any(|p| p == s) && !prefix.split(sep).any(|p| p == s) {
+            if !prefix.is_empty() {
+                prefix.push_str(sep);
+            }
+            prefix.push_str(&s);
+        }
+    }
+    if !prefix.is_empty() {
+        std::env::set_var("PATH", format!("{prefix}{sep}{cur}"));
+    }
 }
 
 impl AppState {
@@ -182,6 +211,7 @@ impl AppState {
             higgs_model_root,
             fonts_dir,
             models_root: mroot,
+            setup_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
@@ -232,6 +262,10 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/engine/capabilities", get(capabilities))
         .route("/engine/opts", axum::routing::patch(endpoints::set_opts))
+        // «Первый запуск»: статус компонентов + автозакачка недостающего (SSE через ту же job-машину).
+        .route("/setup/status", get(setup_status))
+        .route("/setup/download", post(setup_download))
+        .route("/setup/cancel", post(setup_cancel))
         .route("/fonts", get(endpoints::fonts))
         .route("/voices", get(endpoints::voices))
         .route("/presets", get(endpoints::presets))
@@ -289,6 +323,52 @@ fn which_ffmpeg() -> bool {
             std::env::split_paths(&paths).any(|dir| dir.join(name).is_file())
         })
         .unwrap_or(false)
+}
+
+// ─── /setup/status ; /setup/download ; /setup/cancel ────────────────────────
+
+/// GET /setup/status — статус каждого компонента (installed/missing/размер) + драйвер/готовность.
+/// Читает только диск (никаких моделей не грузит) — безопасно вызывать до любой закачки.
+async fn setup_status(State(st): State<AppState>) -> Json<Value> {
+    let root = st.repo_root.clone();
+    // ФС-обход в блокирующий пул (десятки stat-ов), чтобы не держать реактор.
+    let status = tokio::task::spawn_blocking(move || setup::setup_status(&root))
+        .await
+        .unwrap_or_else(|_| setup::setup_status(&st.repo_root));
+    Json(serde_json::to_value(status).unwrap_or_else(|_| json!({})))
+}
+
+/// POST /setup/download {ids:[...]} — поставить джобу закачки выбранных компонентов; вернуть job_id.
+/// Прогресс — по SSE GET /jobs/{id}/events (та же машина, что analyze/render).
+async fn setup_download(State(st): State<AppState>, Json(body): Json<Value>) -> Response {
+    let ids: Vec<String> = body
+        .get("ids")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
+        .unwrap_or_default();
+    if ids.is_empty() {
+        return (StatusCode::BAD_REQUEST, "ids пуст").into_response();
+    }
+    let root = st.repo_root.clone();
+    let cancel_flag = st.setup_cancel.clone();
+    cancel_flag.store(false, std::sync::atomic::Ordering::SeqCst); // свежий старт
+
+    let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
+        let cancel = {
+            let cf = cancel_flag.clone();
+            move || cf.load(std::sync::atomic::Ordering::SeqCst)
+        };
+        let cb = |ev: Value| progress(ev);
+        setup::download_components(&root, &ids, &cancel, &cb)
+    });
+    let job_id = st.jobs.enqueue(job).await;
+    Json(json!({ "job_id": job_id })).into_response()
+}
+
+/// POST /setup/cancel — взвести флаг отмены текущей закачки (download-loop прервётся на следующем чанке).
+async fn setup_cancel(State(st): State<AppState>) -> Json<Value> {
+    st.setup_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+    Json(json!({ "cancelled": true }))
 }
 
 // ─── POST /projects (multipart video upload) ────────────────────────────────
