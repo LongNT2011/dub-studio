@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useFloatable, dockSlot } from "./lib/useFloatable";
-import { api, type Project, type Capabilities, type ModelStack, type SetupStatus, type SetupComponent } from "./lib/api";
+import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent } from "./lib/api";
 import { LANGS, setLang, type Lang } from "./lib/i18n";
 import { useStore } from "./store";
 import PreviewCanvas from "./components/PreviewCanvas";
@@ -166,12 +166,7 @@ function ModelsSection() {
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const [cap, setCap] = useState<Capabilities | null>(null);
-  const [m, setM] = useState<ModelStack>({ asr: "", llm: "", vision: "", tts: "" });
-  const [tab, setTab] = useState<"models" | "engine">("models");
-  useEffect(() => { api.capabilities().then((c) => { setCap(c); if (c.models) setM(c.models); }).catch(() => {}); }, []);
-  const SLOTS: [keyof ModelStack, string][] = [["asr", "ASR"], ["llm", "LLM"], ["vision", "Vision"], ["tts", "TTS"]];
-  const tabBtn = (id: "models" | "engine", label: string) =>
-    <button onClick={() => setTab(id)} className={`px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${tab === id ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>{label}</button>;
+  useEffect(() => { api.capabilities().then(setCap).catch(() => {}); }, []);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center glass-scrim anim-fade" onClick={onClose}>
       <div className="w-[min(92vw,600px)] max-h-[86vh] flex flex-col rounded-xl glass-panel anim-pop p-5" onClick={(e) => e.stopPropagation()}>
@@ -180,22 +175,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={16} /></button>
         </div>
         <div className="mono text-[11px] text-[var(--color-muted)] mb-3">{cap ? `${cap.device} · ${cap.tts_quant}` : "…"}</div>
-        <div className="flex gap-1.5 mb-3">{tabBtn("models", t("settings.modelsTab"))}{tabBtn("engine", t("settings.engineTab"))}</div>
-        <div className="overflow-y-auto flex-1 -mr-2 pr-2">
-          {tab === "models" ? <ModelsSection /> : (
-            <>
-              {SLOTS.map(([k, lbl]) => (
-                <div key={k} className="mb-2.5">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-1">{lbl} · {t(`settings.${k}`)}</div>
-                  <input value={m[k]} onChange={(e) => setM({ ...m, [k]: e.target.value })}
-                    className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[12px] mono focus:border-[var(--color-accent)] focus:outline-none" />
-                </div>
-              ))}
-              <button onClick={async () => { await api.setOpts(m).catch(() => {}); onClose(); }}
-                className="mt-3 px-4 py-2 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold hover:brightness-105">{t("common.done")}</button>
-            </>
-          )}
-        </div>
+        <div className="overflow-y-auto flex-1 -mr-2 pr-2"><ModelsSection /></div>
       </div>
     </div>
   );
