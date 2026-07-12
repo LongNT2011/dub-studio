@@ -382,15 +382,14 @@ async fn hw_snapshot() -> Json<hw::HardwareSnapshot> {
 
 /// POST /setup/browse — открыть нативный диалог выбора папки, импортировать оттуда готовые модели по
 /// маркерам (без докачки). {picked:bool, imported:[...], status}.
-async fn setup_browse(State(st): State<AppState>) -> Json<Value> {
+async fn setup_browse(State(st): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     let root = st.repo_root.clone();
+    let only = body.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
     let res = tokio::task::spawn_blocking(move || {
-        let dir = rfd::FileDialog::new().set_title("Папка с готовыми моделями").pick_folder();
+        let title = if only.is_some() { "Файл(ы) модели" } else { "Папка с готовыми моделями" };
+        let dir = rfd::FileDialog::new().set_title(title).pick_folder();
         match dir {
-            Some(d) => {
-                let imported = setup::import_from_dir(&root, &d);
-                (true, imported)
-            }
+            Some(d) => (true, setup::import_from_dir(&root, &d, only.as_deref())),
             None => (false, Vec::new()),
         }
     })
@@ -399,13 +398,14 @@ async fn setup_browse(State(st): State<AppState>) -> Json<Value> {
     Json(json!({ "picked": res.0, "imported": res.1, "status": setup::setup_status(&st.repo_root) }))
 }
 
-/// POST /setup/import {path} — импортировать готовые модели из заданной папки (без диалога).
+/// POST /setup/import {path, id?} — импортировать готовые модели из заданной папки (без диалога).
 async fn setup_import(State(st): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
     let path = body.get("path").and_then(|v| v.as_str()).unwrap_or("");
+    let only = body.get("id").and_then(|v| v.as_str());
     let imported = if path.is_empty() {
         Vec::new()
     } else {
-        setup::import_from_dir(&st.repo_root, std::path::Path::new(path))
+        setup::import_from_dir(&st.repo_root, std::path::Path::new(path), only)
     };
     Json(json!({ "imported": imported, "status": setup::setup_status(&st.repo_root) }))
 }

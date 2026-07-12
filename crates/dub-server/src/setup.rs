@@ -217,6 +217,62 @@ pub fn manifest() -> Vec<Component> {
             ],
             external_url: None,
         },
+        // Альтернативные кванты TTS Higgs (выбор в настройках; своя папка на квант, aux те же).
+        Component {
+            id: "higgs-q6_k",
+            name: "Higgs Audio v3 (Q6_K)",
+            purpose: "Синтез дубляжа и клон голоса (TTS) — вариант полегче Q8_0",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 5_035_000_000,
+            files: &[
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q6_k/q6_k.gguf", dest_rel: "models/higgs-q6_k/q6_k.gguf", size: 5_023_637_248, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q6_k/config.json", dest_rel: "models/higgs-q6_k/config.json", size: 0, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q6_k/chat_template.jinja", dest_rel: "models/higgs-q6_k/chat_template.jinja", size: 0, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q6_k/tokenizer.json", dest_rel: "models/higgs-q6_k/tokenizer.json", size: 11_433_924, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q6_k/tokenizer_config.json", dest_rel: "models/higgs-q6_k/tokenizer_config.json", size: 0, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q6_k/higgs_audio_v2_tokenizer_config.json", dest_rel: "models/higgs-q6_k/higgs_audio_v2_tokenizer_config.json", size: 0, extract: Extract::None },
+            ],
+            markers: &[Marker { rel: "models/higgs-q6_k/q6_k.gguf", expect: 5_023_637_248 }, Marker { rel: "models/higgs-q6_k/tokenizer.json", expect: 0 }],
+            external_url: None,
+        },
+        Component {
+            id: "higgs-q4_k_m",
+            name: "Higgs Audio v3 (Q4_K_M)",
+            purpose: "Синтез дубляжа и клон голоса (TTS) — самый лёгкий вариант",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 4_098_000_000,
+            files: &[
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q4_k_m/q4_k_m.gguf", dest_rel: "models/higgs-q4_k_m/q4_k_m.gguf", size: 4_086_922_976, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q4_k_m/config.json", dest_rel: "models/higgs-q4_k_m/config.json", size: 0, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q4_k_m/chat_template.jinja", dest_rel: "models/higgs-q4_k_m/chat_template.jinja", size: 0, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q4_k_m/tokenizer.json", dest_rel: "models/higgs-q4_k_m/tokenizer.json", size: 11_433_924, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q4_k_m/tokenizer_config.json", dest_rel: "models/higgs-q4_k_m/tokenizer_config.json", size: 0, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/drbaph/Higgs-Audio-v3-Studio/resolve/main/models/higgs-q4_k_m/higgs_audio_v2_tokenizer_config.json", dest_rel: "models/higgs-q4_k_m/higgs_audio_v2_tokenizer_config.json", size: 0, extract: Extract::None },
+            ],
+            markers: &[Marker { rel: "models/higgs-q4_k_m/q4_k_m.gguf", expect: 4_086_922_976 }, Marker { rel: "models/higgs-q4_k_m/tokenizer.json", expect: 0 }],
+            external_url: None,
+        },
+        // Альтернативный квант ASR: fp32 (точнее, тяжелее int8). Отдельная папка (fp32 приоритетнее int8).
+        Component {
+            id: "parakeet-fp32",
+            name: "Parakeet-TDT 0.6B v3 (fp32)",
+            purpose: "Распознавание речи (ASR) — полная точность fp32",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 2_560_000_000,
+            files: &[
+                FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx", dest_rel: "models/tdt-fp32/encoder-model.onnx", size: 41_770_866, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx_data", dest_rel: "models/tdt-fp32/encoder-model.onnx_data", size: 0, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/decoder_joint-model.onnx", dest_rel: "models/tdt-fp32/decoder_joint-model.onnx", size: 72_520_893, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/nemo128.onnx", dest_rel: "models/tdt-fp32/nemo128.onnx", size: 139_764, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/vocab.txt", dest_rel: "models/tdt-fp32/vocab.txt", size: 93_939, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/config.json", dest_rel: "models/tdt-fp32/config.json", size: 0, extract: Extract::None },
+            ],
+            markers: &[Marker { rel: "models/tdt-fp32/encoder-model.onnx", expect: 41_770_866 }, Marker { rel: "models/tdt-fp32/vocab.txt", expect: 93_939 }],
+            external_url: None,
+        },
         Component {
             id: "sortformer",
             name: "Sortformer v2 (диаризация)",
@@ -421,8 +477,11 @@ fn vram_estimate(id: &str) -> u64 {
     let gb = |g: f64| (g * 1024.0 * 1024.0 * 1024.0) as u64;
     match id {
         "higgs" => gb(5.6),
+        "higgs-q6_k" => gb(5.1),
+        "higgs-q4_k_m" => gb(4.2),
         "gemma" => gb(8.5),
         "parakeet" => gb(1.1),
+        "parakeet-fp32" => gb(2.7),
         "sortformer" => gb(0.6),
         "roformer" => gb(0.5),
         "roformer-q5" => gb(0.45),
@@ -552,7 +611,7 @@ fn index_dir(dir: &Path, map: &mut std::collections::HashMap<String, Vec<(PathBu
 /// Импортировать готовые файлы компонентов из src_dir: для каждого маркера, которого нет на месте, ищем
 /// в src_dir файл с тем же именем (и размером, если известен) и КОПИРУЕМ на ожидаемый путь. Возвращает
 /// список импортированных id.
-pub fn import_from_dir(repo_root: &Path, src_dir: &Path) -> Vec<String> {
+pub fn import_from_dir(repo_root: &Path, src_dir: &Path, only: Option<&str>) -> Vec<String> {
     let mut map = std::collections::HashMap::new();
     let mut budget = 200_000usize;
     index_dir(src_dir, &mut map, 0, &mut budget);
@@ -560,6 +619,11 @@ pub fn import_from_dir(repo_root: &Path, src_dir: &Path) -> Vec<String> {
     for c in manifest() {
         if c.delivery != Delivery::Download {
             continue;
+        }
+        if let Some(id) = only {
+            if c.id != id {
+                continue;
+            }
         }
         let mut any = false;
         for m in c.markers {

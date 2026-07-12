@@ -46,6 +46,16 @@ function ModelsSection() {
       await api.watchJob(job_id, (e) => { if (e.type === "progress" && (e.component === id || !e.component)) setProg({ id, pct: e.pct ?? 0 }); });
     } catch { /* ignore */ } finally { setProg(null); await refresh(); }
   };
+  const browseId = async (id: string) => {
+    if (prog) return;
+    try { const r = await api.setupBrowse(id); if (r.picked) setStatus(r.status); } catch { /* ignore */ }
+  };
+  const BrowseBtn = ({ id }: { id: string }) => (
+    <button onClick={() => browseId(id)} disabled={!!prog} title={t("settings.browseFolder")}
+      className="shrink-0 inline-flex items-center px-1.5 py-1 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] disabled:opacity-40">
+      <FolderDown size={12} />
+    </button>
+  );
   if (!status) return <div className="mono text-[11px] text-[var(--color-muted)]">…</div>;
   const byId = Object.fromEntries(status.components.map((c) => [c.id, c]));
   const get = (id: string) => byId[id] as SetupComponent | undefined;
@@ -66,10 +76,13 @@ function ModelsSection() {
             <div className="mono text-[10px] text-[var(--color-muted)] text-right mt-0.5">{Math.round(prog?.pct ?? 0)}%</div>
           </div>
         ) : (
-          <button onClick={() => dl(c.id)} disabled={!!prog}
-            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] border border-[var(--color-border)] text-[var(--color-accent-2)] hover:border-[var(--color-accent)] disabled:opacity-40">
-            {c.installed ? <RefreshCw size={12} /> : <Download size={12} />}{c.installed ? t("settings.redownload") : t("setup.downloadOne")}
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <BrowseBtn id={c.id} />
+            <button onClick={() => dl(c.id)} disabled={!!prog}
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] border border-[var(--color-border)] text-[var(--color-accent-2)] hover:border-[var(--color-accent)] disabled:opacity-40">
+              {c.installed ? <RefreshCw size={12} /> : <Download size={12} />}{c.installed ? t("settings.redownload") : t("setup.downloadOne")}
+            </button>
+          </div>
         )}
       </div>
     );
@@ -99,10 +112,13 @@ function ModelsSection() {
           {active ? (
             <span className="mono text-[11px] text-[var(--color-accent)] w-10 text-right">{Math.round(prog?.pct ?? 0)}%</span>
           ) : (
-            <button onClick={() => dl(c.id)} disabled={!!prog} title={c.installed ? t("settings.redownload") : t("setup.downloadOne")}
-              className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[12px] border border-[var(--color-border)] text-[var(--color-accent-2)] hover:border-[var(--color-accent)] disabled:opacity-40">
-              {c.installed ? <RefreshCw size={12} /> : <Download size={12} />}
-            </button>
+            <>
+              <BrowseBtn id={c.id} />
+              <button onClick={() => dl(c.id)} disabled={!!prog} title={c.installed ? t("settings.redownload") : t("setup.downloadOne")}
+                className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[12px] border border-[var(--color-border)] text-[var(--color-accent-2)] hover:border-[var(--color-accent)] disabled:opacity-40">
+                {c.installed ? <RefreshCw size={12} /> : <Download size={12} />}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -129,8 +145,13 @@ function ModelsSection() {
         className="mb-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-[var(--color-border)] text-[12px] text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] transition-colors disabled:opacity-40">
         <FolderDown size={14} />{t("settings.browseFolder")}
       </button>
-      <Group label={t("settings.roleTts")}>{rowOf("higgs")}{rowOf("higgs-engine")}</Group>
-      <Group label={t("settings.roleAsr")}>{rowOf("parakeet")}</Group>
+      <Group label={t("settings.roleTts")}>
+        <VariantPicker base="Higgs Audio v3" ids={["higgs", "higgs-q6_k", "higgs-q4_k_m"]} />
+        {rowOf("higgs-engine")}
+      </Group>
+      <Group label={t("settings.roleAsr")}>
+        <VariantPicker base="Parakeet-TDT 0.6B v3" ids={["parakeet", "parakeet-fp32"]} />
+      </Group>
       <Group label={t("settings.roleMt")}>{rowOf("gemma")}{rowOf("llama")}</Group>
       <Group label={t("settings.roleSep")}>
         <VariantPicker base="Mel-Band Roformer voc_fv6" ids={["roformer", "roformer-q5", "roformer-q4"]} />
@@ -297,7 +318,6 @@ function TopBar() {
           <img src="/favicon.svg" alt="" width={20} height={20} className="rounded-[5px] shadow-[0_0_10px_rgba(198,242,78,0.25)]" />
           {t("app.name")}
         </span>
-        <span className="text-sm text-[var(--color-muted)] hidden sm:inline">{t("app.tagline")}</span>
       </div>
       <div className="flex items-center gap-2">
         <div id="dock-slot" className="flex items-center gap-2" />
