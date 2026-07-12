@@ -4,183 +4,128 @@
 
 # Dub Studio
 
-**The open-source CapCut for AI dubbing** — dub any short video into 6 languages, **locally & free**, with a live editor.
+**Нативная нейросеть-студия дубляжа видео на Windows — переозвучивает любой ролик с клоном голоса, переводом и локализацией вшитого текста, полностью офлайн. Ноль Python: один `.exe` на Rust + C++, всё остальное качается кнопкой.**
 
-[![Stars](https://img.shields.io/github/stars/timoncool/dub-studio?style=social)](https://github.com/timoncool/dub-studio/stargazers)
-[![License](https://img.shields.io/github/license/timoncool/dub-studio)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/timoncool/dub-studio?include_prereleases)](https://github.com/timoncool/dub-studio/releases)
-![Status: beta · help wanted](https://img.shields.io/badge/status-beta%20%C2%B7%20help%20wanted-f59e0b?labelColor=0b0c0e)
-![Windows portable](https://img.shields.io/badge/Windows-portable-0b0c0e?logo=windows)
-![100% local](https://img.shields.io/badge/100%25-local%20%C2%B7%20no%20upload-c6f24e?labelColor=0b0c0e)
+[![License](https://img.shields.io/github/license/timoncool/dub-studio?style=flat-square)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/timoncool/dub-studio?style=flat-square)](https://github.com/timoncool/dub-studio/stargazers)
+[![Last Commit](https://img.shields.io/github/last-commit/timoncool/dub-studio?style=flat-square)](https://github.com/timoncool/dub-studio/commits)
+[![Release](https://img.shields.io/github/v/release/timoncool/dub-studio?include_prereleases&style=flat-square)](https://github.com/timoncool/dub-studio/releases)
+[![Downloads](https://img.shields.io/github/downloads/timoncool/dub-studio/total?style=flat-square)](https://github.com/timoncool/dub-studio/releases)
 
-Smart auto‑defaults do the first pass; then you override **every caption, voice, blur box, font & title** with instant preview. Runs on your own GPU. No subscription, no uploads.
+![Dub Studio](docs/screenshot.png)
 
-<sub>**[Releases](https://github.com/timoncool/dub-studio/releases)** · **[Packaging](PACKAGING.md)** · dubs into EN / RU / ZH / ES / PT / FR</sub>
-
-**English** · **[Русский](README_RU.md)**
-
-<img src="docs/screenshot.png" width="900" alt="Dub Studio live editor — side-by-side original ↔ dubbed compare, transcript lane, and the title/subtitle style panel"/>
+**Русский** · **[English](docs/README-en.md)**
 
 </div>
 
----
+## Что это
 
-> [!IMPORTANT]
-> **Dub Studio is beta — and it's 100% not perfect yet.** Many features still need polish, and you can
-> help shape where it goes. The big one on the roadmap: making **every module swappable — ASR, LLM,
-> vision, TTS** — so you can plug in any model and tune the whole pipeline however you like. It's a large
-> effort and I'd love your help: issues, PRs, testing on real clips, and model recipes all move it forward.
-> If it's useful, ⭐ the repo and jump in.
+**Dub Studio** — портативная студия дубляжа для Windows: закидываешь короткий ролик, а на выходе получаешь его переозвучку на другом языке — **с сохранённым тембром голоса, переведёнными субтитрами и локализованным вшитым текстом на кадре**. Работает **100% локально**: ничего не уходит в облако, ни видео, ни голос. Умный авто-проход делает первый вариант сам, а дальше живой редактор отдаёт под правку **каждый субтитр, голос, блюр-бокс, шрифт и тайтл** с мгновенным превью.
 
-## Why
+Это **v2 — полностью нативный порт**. Прошлая версия тянула за собой embeddable-Python, torch, CUDA-wheel'ы и llama-cpp-python — сборка на гигабайты и хрупкая установка. Теперь весь пайплайн переписан на **Rust + нативные C++/CUDA-движки (GGUF/ONNX)**: один процесс, быстрый старт, низкое потребление VRAM, **ноль Python в рантайме**. Всё тяжёлое — модели, движки, CUDA/VC++-DLL, ffmpeg — приложение **скачивает и ставит само кнопкой** при первом запуске. Вручную нужен только драйвер NVIDIA.
 
-Cloud dubbing tools (HeyGen, Rask, ElevenLabs) charge per minute, upload your footage and your
-voiceprint, and give you shallow editing. Open‑source CLI tools are powerful but Gradio‑grade — no
-draggable canvas, no live preview. **Dub Studio is the missing middle:** a premium live‑preview
-editor, the only one that also **detects, blurs and re‑captions on‑screen text**, fully local and free.
+## Возможности
 
-## Examples
+- **Дубляж любого ролика с клоном голоса** — оригинальный тембр клонируется и говорит на новом языке (нативный движок [Higgs Audio v3](https://huggingface.co/bosonai), GGUF Q8_0). Авто-каст по спикерам или свой голос из пака
+- **Диаризация спикеров** — кто и когда говорит (NVIDIA **Sortformer** v2, до 4 голосов), разный голос на каждого спикера
+- **Перевод + vision-анализ стиля** — весь транскрипт переводится локально через **Gemma-4 12B** (QAT q4_0 GGUF, llama.cpp), а vision-проход разбирает раскладку кадра: стиль субтитров, тайтлы, бренды, зоны текста
+- **SOTA вокал-сепарация** — **Mel-Band Roformer** (нативный BSRoformer.cpp на CUDA) отделяет голос от музыки: фон ролика **сохраняется**, клон цепляется за чистую речь
+- **Локализация вшитого текста** — OCR детектит текст на кадре (**PP-OCR** ONNX), **блюрит оригинал** и печатает поверх локализованный титр в подобранном стиле — фича, которой нет ни у одного другого инструмента
+- **26 пресетов субтитров** — karaoke / word-by-word / hormozi / neon и другие, отрисованные **на твоём кадре** (JASSUB поверх того же `.ass`, что уходит в ffmpeg-burn — WYSIWYG)
+- **Живой редактор** — правь транскрипт, голоса, стиль субтитров, блюр-боксы, тайтлы; **превью 0.17 с/кадр**, каждая правка видна сразу
+- **Умный dirty-regen** — при экспорте переозвучиваются и пересчитываются **только правленые сегменты**, а не весь ролик
+- **Шуточный ремикс** — задай тему («как пират», «в стиле новостей») → модель переписывает весь скрипт → передубляж
+- **Сравнение до/после** — оригинал и дубляж бок о бок
+- **Автоскачка всего** — модели, движки, CUDA/VC++-рантайм, ffmpeg тянутся кнопкой при первом запуске, всё внутри папки приложения
+- **6 языков дубляжа** — EN / RU / ZH / ES / PT / FR, авто-детект языка источника
+- **Полностью портативная** — ничего не пишется в профиль пользователя, удалил папку — не осталось следа
 
-Russian original (left) → dubbed into English by Dub Studio (right) — voice **and** on‑screen text:
+## Системные требования
 
-<table>
-<tr>
-<td align="center"><b>Original — RU</b></td>
-<td align="center"><b>Dubbed to English</b></td>
-</tr>
-<tr>
-<td><video src="https://github.com/user-attachments/assets/f1e1046f-7f65-445e-ae15-cd6cc6cf2db2" controls></video></td>
-<td><video src="https://github.com/user-attachments/assets/a7a72493-0e25-4d37-acc1-e28998355cfe" controls></video></td>
-</tr>
-</table>
+- **ОС:** Windows 10 / 11 (x64)
+- **GPU:** NVIDIA с 8–16 ГБ VRAM
+- **WebView2** — предустановлен в Windows 11 (в Windows 10 ставится автоматически)
+- **Место на диске:** ~15 ГБ на модели, движки и рантайм (тянутся при первом запуске), + место под рабочие проекты
 
+## Что нужно установить
 
+**Вручную ставится только одно — свежий драйвер NVIDIA:**
 
+- **Драйвер NVIDIA** — [nvidia.com/Download](https://www.nvidia.com/Download/index.aspx). Драйвер — единственное, что нельзя доставить DLL-кой: он ставится в систему и включает `nvcuda.dll`. Приложение определяет его наличие само.
 
+**Всё остальное приложение скачает и предложит установить кнопками** — ставить CUDA Toolkit, Visual C++ Redistributable, ffmpeg или качать веса вручную больше не нужно:
 
+- **Модели** — Higgs Audio v3 (TTS), Gemma-4 12B + vision (перевод), Parakeet-TDT (ASR), Sortformer (диаризация), Mel-Band Roformer (сепарация) — прямые файлы с Hugging Face.
+- **Движки-сайдкары** — движок Higgs (`audiocpp_engine.dll`), llama.cpp (CUDA 13.3), BSRoformer.cpp, ONNX Runtime 1.24.2, ffmpeg (NVENC) — zip-релизы с GitHub.
+- **CUDA runtime** (`cudart64_13` / `cublas64_13` / `cublasLt64_13`) — из официальных редистрибутивных [PyPI-wheel'ов NVIDIA](https://pypi.org/project/nvidia-cublas/) (редистрибуция разрешена [CUDA Toolkit EULA](https://docs.nvidia.com/cuda/eula/index.html), Attachment A).
+- **VC++ runtime** и **OCR-модели** — идут **в комплекте** релиза рядом с `.exe`, ничего качать не надо.
 
+При **первом запуске** открывается панель «Первый запуск» со списком компонентов и статусами ✓/! у каждого. Жмёшь «Скачать» — приложение фоном тянет недостающее с прогрессом и перепроверяет. Драйвер отсутствует — кнопка открывает страницу загрузки NVIDIA.
 
+## Быстрый старт
 
+1. **Скачать** портативную сборку из [Releases](https://github.com/timoncool/dub-studio/releases) и распаковать в любую папку (или поставить через `-setup.exe` / `.msi`).
 
-## Features
+2. **Запустить** `Dub Studio.exe`.
 
-| | |
-|---|---|
-| 🎙️ **Faithful dub** | clone the original timbre, auto‑cast per speaker by gender, or pick a pack voice — different voice per speaker |
-| 🌍 **6 languages** | translate speech *and* on‑screen text; auto‑detects the source language |
-| 🅰️ **On‑screen text** | OCR → blur the original → re‑caption localized, in the matched style (the wedge no other tool owns) |
-| 🎬 **Live editor** | edit transcript, voices, caption style, blur boxes, titles — frame‑accurate preview at every step |
-| 🎛️ **Caption presets** | 26 built‑in looks (karaoke / word‑by‑word / hormozi / neon / …) rendered on *your* frame |
-| 😂 **Funny remix** | give a theme ("pirate", "as a news report") → the model rewrites the whole script → re‑dub |
-| 🔁 **Before / after** | side‑by‑side original ↔ dubbed — the trust check |
+3. **В панели «Первый запуск»** нажать «Скачать всё» — приложение само тянет модели, движки и рантайм (~15 ГБ, один раз). Драйвера NVIDIA нет — кнопка откроет сайт.
 
-## Dub Studio vs the alternatives
+4. **Закинуть видео**, выбрать язык перевода → авто-проход делает первый вариант дубляжа. Дальше правишь всё в редакторе и жмёшь «Экспорт».
 
-| | Dub Studio | OSS CLI tools | HeyGen / Rask / ElevenLabs |
-|---|:--:|:--:|:--:|
-| Local & private (no upload) | ✅ | ✅ | ❌ |
-| Free | ✅ | ✅ | ❌ |
-| Live‑preview editor | ✅ | ❌ | ⚠️ shallow |
-| On‑screen text blur + re‑caption | ✅ | ❌ | ⚠️ few, cloud |
-| Portable (one folder) | ✅ | ⚠️ | — |
+> Всё качается и хранится **внутри папки приложения**. Модели, кэши и проекты никуда больше не попадают.
 
-## Install
+## Как это работает
 
-> 🚀 **One-click, cross-platform install via [Pinokio](https://pinokio.co)** — Windows / Linux / macOS · NVIDIA / AMD / CPU:
->
-> [![Install on Pinokio](https://img.shields.io/badge/🚀_Install_on-Pinokio-7c3aed?style=for-the-badge)](https://pinokio.co/item?uri=https://github.com/timoncool/dub-studio-pinokio) [![Open in Pinokio](https://img.shields.io/badge/📂_Open_in-Pinokio-6d28d9?style=for-the-badge)](https://beta.pinokio.co/apps/github-com-timoncool-dub-studio-pinokio)
->
-> No `install.bat`, no manual CUDA wheels — Pinokio installs the right stack for your machine and the engine falls back gracefully off-NVIDIA. Launcher repo: **[timoncool/dub-studio-pinokio](https://github.com/timoncool/dub-studio-pinokio)**.
+`analyze()` — фиксированный первый проход: сепарация → ASR со словными таймингами → диаризация → контекстный перевод + vision (стиль субтитров / тайтлы / бренды) → OCR (раскладка / блюр-боксы). На выходе — редактируемый документ **Project**. Каждая правка это патч этого Project с превью ~0.17 с/кадр; экспорт пере-прогоняет **только загрязнённые стадии**.
 
-### Windows portable (manual)
+**Стек:** нативная оболочка Tauri 2 (Rust) поднимает `dub-server` (axum) на локальном порту и открывает окно на SPA — React 19 + Vite + Tailwind + react-konva поверх JASSUB. Движки: Parakeet-TDT (ASR, ONNX) · Sortformer (диаризация) · Gemma-4-12B GGUF (перевод + vision, llama.cpp) · Higgs Audio v3 (TTS, `audiocpp_engine.dll`) · Mel-Band Roformer (сепарация, BSRoformer.cpp) · PP-OCR (ONNX) · ffmpeg/NVENC. **Ни одного Python-процесса в рантайме.**
 
-**You need:** [Git](https://git-scm.com/download/win) · an NVIDIA GPU (RTX 20xx–50xx, CUDA 12.8, ~12 GB VRAM) · several GB of free disk for the wheels and models. You do **not** need Python, CUDA, Node or ffmpeg pre-installed — the installer fetches them all into the app folder, nothing system-wide.
-
-**1 — Clone the repo**
+### Сборка из исходников
 
 ```bash
 git clone https://github.com/timoncool/dub-studio.git
 cd dub-studio
+
+# 1) SPA
+cd frontend && npm install && npm run build && cd ..
+
+# 2) нативный сервер (axum)
+cargo build --release -p dub-server
+
+# 3) десктоп-оболочка (Tauri)
+cd desktop && npm install && npx tauri build
 ```
 
-**2 — Install:** double-click **`install.bat`** (or run it from the folder). One-time setup, entirely inside the folder — it installs:
+Требуется Node 20+, Rust (MSVC toolchain) и WebView2. Нативные движки (`audiocpp_engine.dll`, llama.cpp, BSRoformer.cpp, ONNX Runtime) пересобирать не нужно — приложение скачивает готовые.
 
-- embeddable **Python 3.11** + pip
-- **PyTorch 2.8** (CUDA 12.8) + the engine requirements
-- **llama-cpp-python** (Gemma GGUF, cu128) + **Triton** kernels
-- the **`dub-engine`** package (editable install)
-- **ffmpeg** (NVENC) + **Node**, then builds the web UI
-- the base **voice pack**
-- *optional:* a NeMo sub-venv for multi-speaker diarization (skips cleanly if it can't build)
+## Другие портативные нейросети
 
-**3 — Run:** double-click **`run.bat`**. It launches the local server and opens the editor at **http://127.0.0.1:8765**. Drop a video → the AI models (Gemma‑4 GGUF + mmproj, Parakeet, Qwen3‑TTS, Sortformer) download on first use, then it dubs. Close the window to stop.
+| Проект | Описание |
+|--------|----------|
+| [Higgs Ultimate](https://github.com/timoncool/Higgs-Ultimate) | Нативный синтез и клонирование речи (Higgs Audio v3) |
+| [ACE-Step Studio](https://github.com/timoncool/ACE-Step-Studio) | AI-студия музыки — песни, вокал, каверы, клипы |
+| [Foundation Music Lab](https://github.com/timoncool/Foundation-Music-Lab) | Генерация музыки + редактор таймлайна |
+| [Qwen3-TTS](https://github.com/timoncool/Qwen3-TTS_portable_rus) | Портативный TTS с клонированием голоса |
+| [VibeVoice ASR](https://github.com/timoncool/VibeVoice_ASR_portable_ru) | Портативное распознавание речи |
+| [SuperCaption Qwen3-VL](https://github.com/timoncool/SuperCaption_Qwen3-VL) | Портативное описание изображений |
 
-> **Shortcut:** you can skip step 2 — on a fresh clone, **`run.bat`** auto-runs `install.bat` for you if the app isn't set up yet. Minimum path: clone → double-click `run.bat`.
+## Авторы
 
-**Updating:** `git pull`, then double-click **`update.bat`** (re-pulls, reinstalls the engine, rebuilds the UI).
+- **Nerual Dreming** — [Telegram](https://t.me/nerual_dreming) | [neuro-cartel.com](https://neuro-cartel.com) | основатель [ArtGeneration.me](https://artgeneration.me)
+- **Нейро-Софт** — [Telegram](https://t.me/neuroport) | портативные нейросети
 
-| Script | What it does |
-|---|---|
-| **`install.bat`** | one-time setup — Python, CUDA wheels, engine, llama-cpp/Triton, ffmpeg, Node, UI build, voice pack |
-| **`run.bat`** | start the app at `http://127.0.0.1:8765` (auto-runs `install.bat` on first launch) |
-| **`update.bat`** | `git pull` → reinstall the engine → rebuild the UI |
+## Благодарности
 
-## How it works
+- **[Boson AI](https://huggingface.co/bosonai)** — модель Higgs Audio v3, и **[drbaph / Higgs-Audio-v3-Studio](https://huggingface.co/drbaph/Higgs-Audio-v3-Studio)** — GGUF-кванты и нативный движок `audiocpp_engine.dll`.
+- **[NVIDIA Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)** и **[Sortformer](https://huggingface.co/nvidia)** — ASR и диаризация; ONNX-веса из [istupakov/parakeet-tdt-0.6b-v3-onnx](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) и [altunenes/parakeet-rs](https://github.com/altunenes/parakeet-rs).
+- **[Google](https://huggingface.co/google/gemma-4-12b-it-qat-q4_0-gguf)** — Gemma-4 12B QAT (перевод + vision), через [llama.cpp](https://github.com/ggml-org/llama.cpp).
+- **[chenmozhijin / BSRoformer.cpp](https://github.com/chenmozhijin/BSRoformer.cpp)** и **[GaboxR67](https://huggingface.co/GaboxR67)** — нативный движок и модель Mel-Band Roformer.
 
-`analyze()` is the fixed first stage: separate → ASR (word timings) → diarize → context‑translate +
-vision (caption style / titles / brands) → OCR (layout / blur boxes). It returns an editable
-**Project** document. Every edit is a patch on that Project with a ~0.14 s CPU preview; export re‑runs
-only the dirtied stages. The engine is a self‑contained package in this repo under `dub-engine/`, bundled into the portable build.
+## Поддержать автора
 
-**Stack:** React 19 + Vite + Tailwind + react‑konva over JASSUB · single‑worker FastAPI · Parakeet
-TDT (ASR) · Sortformer (diarization) · Gemma‑4‑12B GGUF (translate + vision) · Qwen3‑TTS · ffmpeg/NVENC.
+Я создаю опенсорс софт и занимаюсь исследованиями в области ИИ. Большая часть всего, что я делаю, находится в открытом доступе. Ваши пожертвования позволяют мне создавать и исследовать больше, не отвлекаясь на поиск еды для продолжения существования =)
 
-## Contributing
-
-**Dub Studio is beta and built in the open — your help is genuinely wanted.** Issues, PRs, testing on real
-clips, and model recipes are all welcome; good‑first‑issues are labeled, and I aim to respond within 24 h.
-
-**On the roadmap — great places to jump in:**
-
-- **Swappable modules** — make ASR / LLM / vision / TTS fully pluggable, so anyone can wire in their own
-  model and configure the whole pipeline end‑to‑end. This is the big one.
-- Smarter on‑screen‑text localization — colour / contrast matching on tricky backgrounds.
-- More voice packs, caption presets, and target languages.
-
-If any of this is your thing, open an issue to claim it — I'm happy to help you get set up.
-
-## License
-
-The app is open‑source; bundled models keep their own licenses (audited before each release).
-
----
-
-## More portable neural nets by the author
-
-| Project | What it does |
-|---|---|
-| [Foundation Music Lab](https://github.com/timoncool/Foundation-Music-Lab) | Music generation + timeline editor |
-| [VibeVoice ASR](https://github.com/timoncool/VibeVoice_ASR_portable_ru) | Speech recognition (ASR) |
-| [LavaSR](https://github.com/timoncool/LavaSR_portable_ru) | Audio super‑resolution |
-| [Qwen3‑TTS](https://github.com/timoncool/Qwen3-TTS_portable_rus) | Text‑to‑speech (Qwen) |
-| [SuperCaption Qwen3‑VL](https://github.com/timoncool/SuperCaption_Qwen3-VL) | Image captioning |
-| [VideoSOS](https://github.com/timoncool/videosos) | In‑browser AI video production |
-| [RC Stable Audio Tools](https://github.com/timoncool/RC-stable-audio-tools-portable) | Music & audio generation |
-
-## Author
-
-- **Nerual Dreming** ([t.me/nerual_dreming](https://t.me/nerual_dreming)) — [neuro-cartel.com](https://neuro-cartel.com) · founder of [ArtGeneration.me](https://artgeneration.me)
-- **Neuro‑Soft** ([t.me/neuroport](https://t.me/neuroport)) — portable repacks of neural nets
-
----
-
-> **If this is useful, drop a ⭐ — it helps others find the project and keeps it moving.**
-
-## Support the Author
-
-I build open-source software and do AI research. Most of what I create is free and available to everyone. Your donations help me keep creating without worrying about where the next meal comes from =)
-
-**[All donation methods](DONATE.md)** | **[dalink.to/nerual_dreming](https://dalink.to/nerual_dreming)** | **[boosty.to/neuro_art](https://boosty.to/neuro_art)**
+**[Все способы поддержки](DONATE.md)** | **[dalink.to/nerual_dreming](https://dalink.to/nerual_dreming)** | **[boosty.to/neuro_art](https://boosty.to/neuro_art)**
 
 - **BTC:** `1E7dHL22RpyhJGVpcvKdbyZgksSYkYeEBC`
 - **ETH (ERC20):** `0xb5db65adf478983186d4897ba92fe2c25c594a0c`
@@ -195,3 +140,7 @@ I build open-source software and do AI research. Most of what I create is free a
    <img alt="Star History Chart" src="docs/stars-light.svg" />
  </picture>
 </a>
+
+## Лицензия
+
+Код приложения — [MIT](LICENSE). Веса моделей сохраняют свои лицензии (Higgs Audio v3 — research/non-commercial Boson AI; Gemma — Gemma Terms; и т.д.) — аудит перед каждым релизом.

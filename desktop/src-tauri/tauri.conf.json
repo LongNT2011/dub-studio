@@ -17,7 +17,13 @@
     "active": true,
     "targets": "all",
     "icon": ["icons/icon.ico"],
-    "resources": [],
+    "resources": {
+      "staging/dub-server.exe": "dub-server.exe",
+      "staging/frontend/dist": "frontend/dist",
+      "staging/fonts": "fonts",
+      "staging/models/higgs-engine": "models/higgs-engine",
+      "staging/models/ocr": "models/ocr"
+    },
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
