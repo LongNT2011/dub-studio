@@ -186,6 +186,9 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
     );
 
     // cover-plate: цвет сцены за субтитром (только плоский фон, светлый box-less субтитр).
+    // KP — СУБСТИТУТ подложки (питон: невидимая крышка цвета сцены под outline-текстом), а не дубль
+    // к ней: при продуктовой плашке (plate=None/true, без outline_w-оверрайда) S-стиль сам непрозрачен
+    // и оригинал уже накрыт — вторая крышка запрещена (иначе блюр + белая крышка + чёрная плашка разом).
     let ss_scene = sub_style.and_then(|s| s.scene_color.clone());
     let cover_c: Option<String> = ss_scene.filter(|sc| {
         sub_style
@@ -193,6 +196,7 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
                 s.scene_flat
                     && look::lum(&s.color) > 0.45
                     && s.background.as_deref().map(|b| b == "none").unwrap_or(true)
+                    && (s.outline_w.is_some() || !s.plate.unwrap_or(true))
             })
             .unwrap_or(false)
             && !sc.is_empty()
@@ -483,8 +487,9 @@ mod tests {
         assert!(s.contains("&H00FFFFFF,&H00F2F2F2"), "OutlineColour белый + BackColour: {s}");
     }
 
-    // Светлый box-less текст + FLAT сцена (scene_flat) -> инвизибл cover-плашка цвета сцены под текстом
-    // (KP-событие Layer 0), которая прячет блюр оригинала. Порт cover_c captions.py 566-603.
+    // Светлый box-less текст + FLAT сцена (scene_flat) + ОТКЛЮЧЁННАЯ плашка -> инвизибл cover-плашка
+    // цвета сцены под outline-текстом (KP-событие Layer 0), которая прячет блюр оригинала. Порт cover_c
+    // captions.py 566-603: KP — субститут подложки, живёт только в ветке без своей плашки.
     #[test]
     fn flat_scene_emits_cover_plate_kp_event() {
         let ss = SubStyle {
@@ -493,6 +498,7 @@ mod tests {
             scene_color: Some("#E0E0E0".into()),
             scene_flat: true,
             bold: true,
+            plate: Some(false),
             ..Default::default()
         };
         let ass = build_str(720, 1280, &ss, &subs1());
@@ -502,6 +508,28 @@ mod tests {
             .find(|l| l.starts_with("Dialogue: 0,") && l.contains(",KP,") && l.contains("\\p1"));
         assert!(kp.is_some(), "ожидалась cover-плашка KP при scene_flat: \n{ass}");
         assert!(kp.unwrap().contains("&HE0E0E0&"), "cover-плашка цвета сцены: {}", kp.unwrap());
+    }
+
+    // ОДНА крышка, не две (репорт юзера 2026-07-12, кадр «ПРЯМО.»): при продуктовой плашке (plate
+    // дефолт ON) KP-крышка НЕ эмитится даже на плоской сцене — иначе блюр + белый прямоугольник +
+    // чёрная плашка оказываются на кадре одновременно.
+    #[test]
+    fn default_plate_suppresses_cover_kp() {
+        let ss = SubStyle {
+            color: "#FFFFFF".into(),
+            background: Some("none".into()),
+            scene_color: Some("#FFFFFF".into()),
+            scene_flat: true,
+            bold: true,
+            ..Default::default() // plate=None -> продуктовый дефолт ON
+        };
+        let ass = build_str(720, 1280, &ss, &subs1());
+        let s = s_style_line(&ass);
+        assert!(s.contains(",3,11,0,2,"), "дефолтная подложка BorderStyle=3 ожидается: {s}");
+        assert!(
+            !ass.lines().any(|l| l.starts_with("Dialogue: 0,") && l.contains(",KP,")),
+            "при включённой плашке cover-KP быть не должно:\n{ass}"
+        );
     }
 
     // Светлый box-less текст на ТЕКСТУРНОЙ сцене (scene_flat=false): S-style теперь дефолт-подложка

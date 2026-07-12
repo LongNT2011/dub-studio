@@ -136,14 +136,15 @@ pub fn text_geom(lines: &[String], fs: i64, fontpath: &Path) -> (f32, f32, f32) 
     for (i, line) in lines.iter().enumerate() {
         let s = if line.is_empty() { " " } else { line.as_str() };
         ink_w = ink_w.max(advance_width(&scaled, s));
-        // Вертикальный ink bbox строки от baseline: top = -maxAscentInk, bottom = +maxDescentInk.
-        // Аппроксимируем ink-высоту строки метриками шрифта (asc/desc): PIL getbbox даёт РЕАЛЬНЫЙ ink,
-        // но для укладки плашки достаточно консистентной оценки (ниже клампится к кадру). bbox_top в
-        // системе PIL — смещение ВНИЗ от точки рисования; воспроизводим top=-asc..bot=+desc от baseline.
+        // Вертикальный ink bbox строки. line_ink_vspan отдаёт его ОТ BASELINE (top≈-asc, отрицателен
+        // вверх), а питоновский PIL getbbox — от ВЕРХА ячейки строки (ascender-линии), вниз положительно.
+        // lt = верх ячейки строки i, значит baseline = lt + asc: переводим baseline-оффсеты в систему
+        // питона прибавлением asc. Без этого весь ink-блок уезжает вверх на ~asc и KP/титул-плашки
+        // рисуются мимо текста.
         let (bb_top, bb_bot) = line_ink_vspan(&scaled, s, asc, desc);
         let lt = top0 + i as f32 * lh;
-        ink_top = ink_top.min(lt + bb_top);
-        ink_bot = ink_bot.max(lt + bb_bot);
+        ink_top = ink_top.min(lt + asc + bb_top);
+        ink_bot = ink_bot.max(lt + asc + bb_bot);
     }
     (ink_w, ink_top, ink_bot)
 }
@@ -189,4 +190,34 @@ pub fn font_file_for(family: &str) -> Option<&'static str> {
         "Caveat" => "Caveat.ttf",
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Конвенция _text_geom (как в питоне): ink-экстенты ОТНОСИТЕЛЬНО метрического центра блока,
+    // ink-блок лежит ВНУТРИ метрической ячейки [top0, top0+n*lh]. Регресс-якорь на баг 2026-07-12:
+    // baseline-оффсеты ab_glyph подмешивались без сдвига на asc и весь блок уезжал вверх на ~ascent —
+    // KP-крышка и титул-плашки рисовались мимо текста (кадр «ПРЯМО.»: белый прямоугольник не там).
+    #[test]
+    fn text_geom_ink_within_metric_cell() {
+        let fp = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fonts/Montserrat-Bold.ttf");
+        assert!(fp.exists(), "нет шрифта для теста: {}", fp.display());
+        let fs = 48i64;
+        let font = load_font(&fp).expect("шрифт грузится");
+        let scaled = font.as_scaled(PxScale::from(fs as f32));
+        let lh = scaled.ascent() - scaled.descent();
+        for lines in [vec!["ПРЯМО.".to_string()], vec!["Ag".into(), "Что".into()]] {
+            let n = lines.len() as f32;
+            let (iw, top, bot) = text_geom(&lines, fs, &fp);
+            assert!(iw > 0.0);
+            assert!(top < 0.0 && bot > 0.0, "ink должен обнимать центр: top={top} bot={bot}");
+            assert!(
+                top >= -lh * n / 2.0 - 1.0 && bot <= lh * n / 2.0 + 1.0,
+                "ink вне метрической ячейки (сдвиг на ascent?): top={top} bot={bot} lh={lh} n={n}"
+            );
+        }
+    }
 }
