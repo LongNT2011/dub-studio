@@ -460,9 +460,10 @@ pub fn run(
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-/// Порт _auto_fill_boxes (pipeline.py 48-99): выбор накрытия per-box. Однотонный фон за текстом
-/// (доля доминирующего цвета >= 0.72) -> fill его цветом; g_flat от Gemma -> fill всегда
-/// (scene_color или доминанта); иначе fill=None (блюр). Любой сбой -> блюр.
+/// Выбор накрытия per-box (порт _auto_fill_boxes, pipeline.py 48-99): фон бокса почти однотонный ->
+/// fill его цветом (при плоской сцене и совпадении — scene_color от Gemma); текстура -> блюр.
+/// Фон меряется по верхней+нижней полосам бокса (текст центрирован — полосы чистые) на 3 кадрах
+/// спана, берётся лучший: длинные коалесцированные боксы на части кадров содержат чужой текст.
 fn auto_fill_boxes(
     video: &std::path::Path,
     boxes: &mut [BlurBox],
@@ -480,23 +481,33 @@ fn auto_fill_boxes(
         let y0 = b.y.max(0);
         let x1 = (b.x + b.w).min(vw);
         let y1 = (b.y + b.h).min(vh);
-        if x1 - x0 < 6 || y1 - y0 < 6 {
+        if x1 - x0 < 6 || y1 - y0 < 8 {
             continue;
         }
-        let mid = ((b.t0 + b.t1) / 2.0).max(0.0);
-        let Some((dom, frac)) = dominant_box_colour(video, x0, y0, x1 - x0, y1 - y0, mid) else {
-            continue;
-        };
-        if g_flat {
-            b.fill = Some(g_col.clone().unwrap_or(dom));
-        } else if frac >= 0.72 {
-            b.fill = Some(dom);
+        let best = [0.25, 0.5, 0.75]
+            .iter()
+            .filter_map(|q| {
+                let t = (b.t0 + (b.t1 - b.t0) * q).max(0.0);
+                box_bg_colour(video, x0, y0, x1 - x0, y1 - y0, t)
+            })
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        let Some((dom, frac)) = best else { continue };
+        if frac >= 0.72 {
+            let close_to_scene = g_flat
+                && g_col.as_deref().is_some_and(|g| colour_close(g, &dom));
+            b.fill = Some(if close_to_scene { g_col.clone().unwrap() } else { dom });
         }
     }
 }
 
-/// Доминирующий цвет ROI кадра в момент t: ("#rrggbb", доля). Сбой -> None.
-fn dominant_box_colour(
+/// Каналы двух "#rrggbb" различаются не сильнее шага квантования.
+fn colour_close(a: &str, b: &str) -> bool {
+    let px = |s: &str, i: usize| u8::from_str_radix(&s[1 + i * 2..3 + i * 2], 16).unwrap_or(0);
+    (0..3).all(|i| (px(a, i) as i32 - px(b, i) as i32).abs() < 24)
+}
+
+/// Цвет фона бокса в момент t: доминанта верхней+нижней полос ROI ("#rrggbb", доля). Сбой -> None.
+fn box_bg_colour(
     video: &std::path::Path,
     x: i64,
     y: i64,
@@ -525,7 +536,17 @@ fn dominant_box_colour(
     if !out.status.success() {
         return None;
     }
-    dominant_colour_rgb24(&out.stdout)
+    let stride = (w as usize) * 3;
+    let rows = out.stdout.len() / stride;
+    if rows < 8 {
+        return None;
+    }
+    let ins = (rows / 6).max(4);
+    let mut strips = Vec::with_capacity(2 * ins * stride);
+    for r in (0..ins).chain(rows - ins..rows) {
+        strips.extend_from_slice(&out.stdout[r * stride..(r + 1) * stride]);
+    }
+    dominant_colour_rgb24(&strips)
 }
 
 /// Доминирующий цвет RGB24-буфера с квантованием по 24 (питоновские бины //24): усреднённый hex + доля.
