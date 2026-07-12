@@ -256,13 +256,25 @@ fn build_dub(
     }
 
     // 6) свести с инструменталом (если есть).
-    if let Some(inst) = instrumental {
+    let mixed = if let Some(inst) = instrumental {
         emit(progress, "mix", "сведение: инструментал + дубль-вокал");
         let new_audio = wd.join("new_audio.m4a");
         media::mix(&dub, &inst, &new_audio)?;
-        Ok(new_audio)
+        new_audio
     } else {
-        Ok(dub)
+        dub
+    };
+    // 7) финальная нормализация программы EBU R128 + true-peak лимитер (-1 dBTP). Пофразное
+    // выравнивание уже сделало спикеров равными; здесь программа приводится к целевой громкости
+    // соцсетей (-14 LUFS) без клиппинга.
+    emit(progress, "mix", "нормализация громкости (EBU R128, true-peak)");
+    let final_audio = wd.join("final_audio.m4a");
+    match media::loudnorm(&mixed, &final_audio, -14.0, -1.0, 11.0) {
+        Ok(()) => Ok(final_audio),
+        Err(e) => {
+            emit(progress, "mix", &format!("loudnorm пропущен ({e})"));
+            Ok(mixed)
+        }
     }
 }
 
@@ -323,12 +335,12 @@ fn timeline(placed: &[(f64, PathBuf)], total_dur: f64, out_wav: &Path) -> Result
     let mut laid: Vec<(f64, Vec<f32>)> = Vec::with_capacity(placed.len());
     let mut cursor = 0.0f64;
     for (start, wav) in &placed {
-        let (s, ssr) = if *wav == placed[0].1 {
+        let (mut s, ssr) = if *wav == placed[0].1 {
             (first.0.clone(), first.1)
         } else {
             wavio::read_mono_f32(wav)?
         };
-        let _ = ssr;
+        normalize_voice(&mut s, ssr); // все фразы/спикеры к одной громкости
         let at = start.max(cursor);
         cursor = at + s.len() as f64 / sr as f64;
         laid.push((at, s));
@@ -350,6 +362,137 @@ fn timeline(placed: &[(f64, PathBuf)], total_dur: f64, out_wav: &Path) -> Result
     }
     wavio::write_mono_f32(out_wav, &track, sr)?;
     Ok(())
+}
+
+/// Выровнять ОДНУ фразу к общей громкости, чтобы все спикеры звучали одинаково громко (dialog-gated
+/// нормализация): интегральная громкость BS.1770 к -16 LUFS; короткие/тихие фразы — RMS к -18 dBFS.
+/// Пики НЕ ограничиваем — их ловит финальный true-peak лимитер (media::loudnorm) на смиксованной
+/// дорожке; здесь только выравнивание уровня. Сани-кап +40 dB (не раздувать почти-тишину).
+fn normalize_voice(x: &mut [f32], sr: u32) {
+    if x.is_empty() {
+        return;
+    }
+    let peak = x.iter().fold(0.0f32, |m, &v| m.max(v.abs()));
+    if peak < 1e-4 {
+        return; // почти тишина -> не трогаем
+    }
+    let mut gain: Option<f64> = None;
+    if x.len() >= (0.4 * sr as f64) as usize {
+        if let Some(li) = integrated_lufs(x, sr) {
+            if li.is_finite() && li > -60.0 {
+                gain = Some(10f64.powf((-16.0 - li) / 20.0));
+            }
+        }
+    }
+    let gain = gain.unwrap_or_else(|| {
+        let thr = peak * 0.05;
+        let (mut sum, mut cnt) = (0.0f64, 0usize);
+        for &v in x.iter() {
+            if v.abs() > thr {
+                sum += (v as f64) * (v as f64);
+                cnt += 1;
+            }
+        }
+        let rms = if cnt > 0 {
+            (sum / cnt as f64).sqrt()
+        } else {
+            (x.iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>() / x.len() as f64).sqrt()
+        }
+        .max(1e-9);
+        10f64.powf(-18.0 / 20.0) / rms
+    });
+    let gain = gain.min(10f64.powf(40.0 / 20.0)); // сани-кап, пики ловит финальный лимитер
+    for v in x.iter_mut() {
+        *v = (*v as f64 * gain) as f32;
+    }
+}
+
+/// Интегральная громкость ITU-R BS.1770 (LUFS) моно-сигнала: K-weighting (high-shelf + high-pass
+/// биквады как в pyloudnorm) -> блоки 400мс с overlap 75% -> абсолютный гейт -70 + относительный -10.
+/// None если блоков не осталось (слишком коротко/тихо).
+fn integrated_lufs(x: &[f32], sr: u32) -> Option<f64> {
+    let hs = biquad_high_shelf(1681.9744509555319, 0.7071752369554196, 4.0, sr as f64);
+    let hp = biquad_high_pass(38.13547087613982, 0.5003270373253953, sr as f64);
+    let y = apply_biquad(&apply_biquad(x, &hs), &hp);
+    let block = (0.4 * sr as f64) as usize;
+    let step = (0.1 * sr as f64) as usize;
+    if block == 0 || step == 0 || y.len() < block {
+        return None;
+    }
+    let mut zs: Vec<f64> = Vec::new();
+    let mut i = 0;
+    while i + block <= y.len() {
+        let ms: f64 = y[i..i + block].iter().map(|&v| (v as f64) * (v as f64)).sum::<f64>()
+            / block as f64;
+        zs.push(ms);
+        i += step;
+    }
+    if zs.is_empty() {
+        return None;
+    }
+    let loud = |z: f64| -0.691 + 10.0 * (z.max(1e-12)).log10();
+    // абсолютный гейт -70 LUFS
+    let abs_gated: Vec<f64> = zs.iter().copied().filter(|&z| loud(z) >= -70.0).collect();
+    if abs_gated.is_empty() {
+        return None;
+    }
+    let mean_abs = abs_gated.iter().sum::<f64>() / abs_gated.len() as f64;
+    let rel_thr = loud(mean_abs) - 10.0;
+    let rel_gated: Vec<f64> = abs_gated.into_iter().filter(|&z| loud(z) >= rel_thr).collect();
+    if rel_gated.is_empty() {
+        return None;
+    }
+    let mean_rel = rel_gated.iter().sum::<f64>() / rel_gated.len() as f64;
+    Some(loud(mean_rel))
+}
+
+/// Биквад-фильтр прямой формы I (b/a нормированы на a0). Возвращает отфильтрованный сигнал.
+fn apply_biquad(x: &[f32], c: &[f64; 5]) -> Vec<f32> {
+    let [b0, b1, b2, a1, a2] = *c;
+    let (mut x1, mut x2, mut y1, mut y2) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+    let mut out = Vec::with_capacity(x.len());
+    for &xn in x {
+        let xn = xn as f64;
+        let yn = b0 * xn + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1;
+        x1 = xn;
+        y2 = y1;
+        y1 = yn;
+        out.push(yn as f32);
+    }
+    out
+}
+
+/// High-shelf биквад (pyloudnorm K-weighting stage 1). Коэффы [b0,b1,b2,a1,a2] нормированы на a0.
+fn biquad_high_shelf(fc: f64, q: f64, gain_db: f64, sr: f64) -> [f64; 5] {
+    let a = 10f64.powf(gain_db / 40.0);
+    let w0 = 2.0 * std::f64::consts::PI * fc / sr;
+    let (cw, sw) = (w0.cos(), w0.sin());
+    let alpha = sw / (2.0 * q);
+    let am = a - 1.0;
+    let ap = a + 1.0;
+    let sa = 2.0 * a.sqrt() * alpha;
+    let b0 = a * (ap + am * cw + sa);
+    let b1 = -2.0 * a * (am + ap * cw);
+    let b2 = a * (ap + am * cw - sa);
+    let a0 = ap - am * cw + sa;
+    let a1 = 2.0 * (am - ap * cw);
+    let a2 = ap - am * cw - sa;
+    [b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0]
+}
+
+/// High-pass биквад (pyloudnorm K-weighting stage 2, RLB). Коэффы нормированы на a0.
+fn biquad_high_pass(fc: f64, q: f64, sr: f64) -> [f64; 5] {
+    let w0 = 2.0 * std::f64::consts::PI * fc / sr;
+    let (cw, sw) = (w0.cos(), w0.sin());
+    let alpha = sw / (2.0 * q);
+    let b0 = (1.0 + cw) / 2.0;
+    let b1 = -(1.0 + cw);
+    let b2 = (1.0 + cw) / 2.0;
+    let a0 = 1.0 + alpha;
+    let a1 = -2.0 * cw;
+    let a2 = 1.0 - alpha;
+    [b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0]
 }
 
 /// E2E-верификация капшенов без TTS/аудио: собрать ASS из Project и вжечь блюр+сабы в captioned.mp4.
@@ -615,6 +758,26 @@ mod tests {
     // сидит в НИЖНЕЙ половине 824-кадра (>=0.45vh=371) вместе с настоящей полосой (cy≈630-642). Питон медианит
     // seg_y ТОЛЬКО по caption_boxes (полоса). Band-боксы помечены extra["band"], seg_y едет только
     // по ним -> строка на полосе, плашка (BorderStyle=3) обнимает текст там же, блюр оригинала накрыт.
+    // Две фразы разной входной громкости после normalize_voice звучат одинаково (RMS сходится) —
+    // все спикеры на выходе на одном уровне.
+    #[test]
+    fn normalize_equalizes_speaker_loudness() {
+        let sr = 24000u32;
+        let sine = |amp: f32| -> Vec<f32> {
+            (0..sr) // 1 c
+                .map(|i| amp * (2.0 * std::f64::consts::PI * 180.0 * i as f64 / sr as f64).sin() as f32)
+                .collect()
+        };
+        let rms = |x: &[f32]| (x.iter().map(|&v| (v * v) as f64).sum::<f64>() / x.len() as f64).sqrt();
+        let mut loud = sine(0.8);
+        let mut quiet = sine(0.08);
+        normalize_voice(&mut loud, sr);
+        normalize_voice(&mut quiet, sr);
+        let (rl, rq) = (rms(&loud), rms(&quiet));
+        // после выравнивания уровни должны сойтись (dialog-gated нормализация); пики ловит лимитер.
+        assert!((rl - rq).abs() / rl.max(1e-9) < 0.15, "уровни должны сойтись: loud={rl:.4} quiet={rq:.4}");
+    }
+
     #[test]
     fn seg_y_rides_band_not_tagline_ducks() {
         let (vw, vh) = (464i64, 824i64);

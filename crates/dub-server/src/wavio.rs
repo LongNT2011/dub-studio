@@ -91,3 +91,4 @@ pub fn write_mono_f32(path: &Path, data: &[f32], sample_rate: u32) -> Result<(),
     w.finalize().map_err(|e| format!("finalize: {e}"))?;
     Ok(())
 }
+
