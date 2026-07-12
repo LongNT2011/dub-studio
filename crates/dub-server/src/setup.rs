@@ -412,6 +412,23 @@ pub struct ComponentStatus {
     pub detail: Option<String>,
     /// URL внешней страницы (драйвер).
     pub external_url: Option<String>,
+    /// Оценка VRAM при загрузке модели, байт (0 для движков/рантаймов без весов).
+    pub vram: u64,
+}
+
+/// Оценка VRAM загруженной модели по id (движки/рантаймы = 0). Грубо, для показа в UI.
+fn vram_estimate(id: &str) -> u64 {
+    let gb = |g: f64| (g * 1024.0 * 1024.0 * 1024.0) as u64;
+    match id {
+        "higgs" => gb(5.6),
+        "gemma" => gb(8.5),
+        "parakeet" => gb(1.1),
+        "sortformer" => gb(0.6),
+        "roformer" => gb(0.5),
+        "roformer-q5" => gb(0.45),
+        "roformer-q4" => gb(0.4),
+        _ => 0,
+    }
 }
 
 /// Существует ли маркер и «целый» ли он (размер совпадает, если expect != 0).
@@ -474,6 +491,7 @@ pub fn component_status(repo_root: &Path, c: &Component) -> ComponentStatus {
         missing,
         detail,
         external_url: c.external_url.map(|s| s.to_string()),
+        vram: vram_estimate(c.id),
     }
 }
 

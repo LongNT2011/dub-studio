@@ -156,7 +156,8 @@
     "roleSep": "Voice cleanup · separation",
     "roleDiar": "Diarization",
     "roleRuntime": "Engines & runtime",
-    "browseFolder": "Import from folder"
+    "browseFolder": "Import from folder",
+    "disk": "disk"
   },
   "help": {
     "title": "About Dub Studio",

@@ -156,7 +156,8 @@
     "roleSep": "Очистка голоса · сепарация",
     "roleDiar": "Диаризация",
     "roleRuntime": "Движки и рантайм",
-    "browseFolder": "Указать готовую папку"
+    "browseFolder": "Указать готовую папку",
+    "disk": "диск"
   },
   "help": {
     "title": "О Dub Studio",

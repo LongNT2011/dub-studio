@@ -45,7 +45,7 @@ export type SetupComponent = {
   requirement: "required" | "recommended" | "optional";
   delivery: "download" | "bundled" | "external";
   size: number; installed: boolean; bytesOnDisk: number;
-  missing: string[]; detail?: string | null; externalUrl?: string | null;
+  missing: string[]; detail?: string | null; externalUrl?: string | null; vram?: number;
 };
 export type SetupStatus = {
   components: SetupComponent[]; ready: boolean;

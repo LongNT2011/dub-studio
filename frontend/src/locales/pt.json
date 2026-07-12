@@ -156,7 +156,8 @@
     "roleSep": "Limpeza de voz",
     "roleDiar": "Diarização",
     "roleRuntime": "Motores e runtime",
-    "browseFolder": "Importar da pasta"
+    "browseFolder": "Importar da pasta",
+    "disk": "disco"
   },
   "help": {
     "title": "Sobre o Dub Studio",

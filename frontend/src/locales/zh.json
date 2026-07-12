@@ -156,7 +156,8 @@
     "roleSep": "人声清理 · 分离",
     "roleDiar": "说话人分离",
     "roleRuntime": "引擎与运行时",
-    "browseFolder": "从文件夹导入"
+    "browseFolder": "从文件夹导入",
+    "disk": "磁盘"
   },
   "help": {
     "title": "关于 Dub Studio",

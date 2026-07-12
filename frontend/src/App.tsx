@@ -56,7 +56,7 @@ function ModelsSection() {
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.installed ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
         <div className="min-w-0 flex-1">
           <div className="text-[12px] font-medium truncate">{c.name}</div>
-          <div className="mono text-[10px] text-[var(--color-muted)] truncate">{c.purpose} · {fmtBytes(c.size)}</div>
+          <div className="mono text-[10px] text-[var(--color-muted)] truncate">{c.purpose} · {c.vram ? `${fmtBytes(c.vram)} VRAM · ` : ""}{fmtBytes(c.size)} {t("settings.disk")}</div>
         </div>
         {active ? (
           <div className="w-24 shrink-0">
@@ -88,11 +88,11 @@ function ModelsSection() {
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${variants.some((v) => v.installed) ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
           <div className="min-w-0 flex-1">
             <div className="text-[12px] font-medium truncate">{base}</div>
-            <div className="mono text-[10px] text-[var(--color-muted)] truncate">{c.purpose}</div>
+            <div className="mono text-[10px] text-[var(--color-muted)] truncate">{c.vram ? `${fmtBytes(c.vram)} VRAM · ` : ""}{fmtBytes(c.size)} {t("settings.disk")}</div>
           </div>
           <select value={pick} onChange={(e) => setPick(e.target.value)}
             className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none">
-            {variants.map((v) => <option key={v.id} value={v.id}>{quant(v)}{v.installed ? " ✓" : ""} · {fmtBytes(v.size)}</option>)}
+            {variants.map((v) => <option key={v.id} value={v.id}>{quant(v)}{v.installed ? " ✓" : ""} · {fmtBytes(v.size)}{v.vram ? ` / ${fmtBytes(v.vram)} VRAM` : ""}</option>)}
           </select>
           {active ? (
             <span className="mono text-[11px] text-[var(--color-accent)] w-10 text-right">{Math.round(prog?.pct ?? 0)}%</span>
