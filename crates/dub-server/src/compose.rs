@@ -607,7 +607,13 @@ fn merge_titles_by_y(sorted: Vec<Value>) -> Vec<Value> {
             if (yfrac(&t) - yfrac(last)).abs() <= 0.06 {
                 let prev = last.get("tgt").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 let cur = t.get("tgt").and_then(|x| x.as_str()).unwrap_or("");
-                let joined = format!("{prev}\n{cur}").trim().to_string();
+                // склеиваем строки, но одинаковые (vision дублирует персистентный тайтл) не повторяем
+                let key = |s: &str| s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>();
+                let mut lines: Vec<String> = prev.split('\n').map(|s| s.to_string()).collect();
+                if !cur.trim().is_empty() && !lines.iter().any(|l| key(l) == key(cur)) {
+                    lines.push(cur.to_string());
+                }
+                let joined = lines.join("\n").trim().to_string();
                 if let Value::Object(m) = last {
                     m.insert("tgt".into(), Value::from(joined));
                 }
@@ -874,6 +880,20 @@ mod tests {
         // НЕ подстрока — оба живут
         let out2 = merge_titles_by_y(vec![t("Утка", 0.1), t("Совсем другой титр", 0.3)]);
         assert_eq!(out2.len(), 2);
+    }
+
+    #[test]
+    fn identical_persistent_title_not_doubled_boris() {
+        // Персистентный тайтл vision вернул дважды на соседних y (0.17/0.185) — склейка НЕ повторяет
+        // одинаковую строку (иначе «POV:…\nPOV:…» вдвое строк -> кегль ужимается до нечитаемого).
+        let t = |tgt: &str, y: f64| serde_json::json!({"text": tgt, "tgt": tgt, "y_frac": y});
+        let out = merge_titles_by_y(vec![
+            t("POV: Ты пытаешься затащить славянку к себе домой.", 0.17),
+            t("POV: Ты пытаешься затащить славянку к себе домой.", 0.185),
+        ]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["tgt"], "POV: Ты пытаешься затащить славянку к себе домой.");
+        assert!(!out[0]["tgt"].as_str().unwrap().contains('\n'), "одна строка, без дубля");
     }
 
     fn reg(text: &str, x: i64, y: i64, w: i64, h: i64, t0: f32, t1: f32) -> Region {
