@@ -91,7 +91,8 @@
     "g_female": "女",
     "g_male": "男",
     "preview": "试听",
-    "narrowSearch": "缩小搜索范围以查看更多"
+    "narrowSearch": "缩小搜索范围以查看更多",
+    "fromSpeakers": "从说话人创建语音："
   },
   "remix": {
     "title": "改编",

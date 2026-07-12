@@ -89,6 +89,7 @@ export const api = {
   voicesGet: (name: string) => fetch(`${BASE}/voices/get`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then(j<{ ok: boolean; voices?: string[]; error?: string }>),
   voicesRename: (from: string, to: string) => fetch(`${BASE}/voices/rename`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from, to }) }).then(j<{ voices: string[] }>),
   voicesDelete: (name: string) => fetch(`${BASE}/voices/delete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then(j<{ voices: string[] }>),
+  speakerVoice: (pid: string, speaker: string, name: string) => fetch(`${BASE}/projects/${pid}/speaker-voice`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ speaker, name }) }).then(j<{ ok: boolean; name: string; voices: string[] }>),
   presets: () => fetch(`${BASE}/presets`).then(j<{ presets: Record<string, Record<string, unknown>>; reveals: string[] }>),
   createProject: (file: File) => {
     const fd = new FormData(); fd.append("file", file);

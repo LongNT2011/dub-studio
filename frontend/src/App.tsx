@@ -621,9 +621,23 @@ function Editor() {
   const [selTitles, setSelTitles] = useState<Set<number>>(new Set()); // multi-select: titles
   const [fonts, setFonts] = useState<Record<string, string>>({});
   const [voiceList, setVoiceList] = useState<string[]>([]);
+  const [spkVoiceBusy, setSpkVoiceBusy] = useState<string | null>(null);
   const [presets, setPresets] = useState<Record<string, Record<string, unknown>>>({});
   useEffect(() => { api.fonts().then((r) => setFonts(r.fonts)).catch(() => {}); }, []);   // bundled caption fonts
-  useEffect(() => { api.voices().then((r) => setVoiceList(r.voices)).catch(() => {}); }, []);   // pack voices
+  // голоса из каталога; если пусто и ещё не пробовали — тихо тянем дефолтный пак (VibeVoice, ~100МБ) в фоне
+  useEffect(() => {
+    api.voices().then(async (r) => {
+      setVoiceList(r.voices);
+      if (r.voices.length === 0 && !localStorage.getItem("voicepack-auto")) {
+        localStorage.setItem("voicepack-auto", "1");
+        try {
+          const { job_id } = await api.voicesDownloadPack();
+          await api.watchJob(job_id, () => {});
+          const v = await api.voices(); setVoiceList(v.voices);
+        } catch { /* тихо: пак опционален */ }
+      }
+    }).catch(() => {});
+  }, []);
   useEffect(() => { api.presets().then((r) => setPresets(r.presets)).catch(() => {}); }, []);   // caption look presets
   const [sizeDraft, setSizeDraft] = useState<number | null>(null);   // live size while dragging (commit on release)
   const [lane, setLane] = useState<"subs" | "blur" | "titles">("subs"); // left lane: which object type to edit
@@ -1160,6 +1174,27 @@ function Editor() {
             </select>
             <VoiceRecorder voiceList={voiceList} onVoices={setVoiceList}
               onDone={(nm) => branch("recast", { voice_mode: "voice", voice_name: nm })} />
+            {(() => {
+              const spks = [...new Set(p.segments.map((s) => s.speaker ?? "0"))].sort();
+              if (spks.length === 0) return null;
+              return (
+                <div className="mt-2">
+                  <div className="text-[10px] text-[var(--color-muted)] mb-1">{t("voice.fromSpeakers")}</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {spks.map((spk) => (
+                      <button key={spk} disabled={spkVoiceBusy !== null}
+                        onClick={async () => {
+                          setSpkVoiceBusy(spk);
+                          try { const r = await api.speakerVoice(pid!, spk, `Спикер ${spk}`); if (r.ok) { setVoiceList(r.voices); branch("recast", { voice_mode: "voice", voice_name: r.name }); } } catch { /* ignore */ } finally { setSpkVoiceBusy(null); }
+                        }}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[var(--color-border)] text-[12px] hover:border-[var(--color-accent)] disabled:opacity-40">
+                        {spkVoiceBusy === spk ? <Loader2 size={12} className="animate-spin" /> : <AudioLines size={12} className="text-[var(--color-accent)]" />}SPK {spk}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
             {p.audio.voice.mode !== "voice" && (
               <div className="mt-1 text-[10px] text-[var(--color-muted)] leading-snug">{t("voice.recordHint")}</div>
             )}

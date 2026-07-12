@@ -91,7 +91,8 @@
     "g_female": "F",
     "g_male": "M",
     "preview": "Escuchar",
-    "narrowSearch": "Afina la búsqueda"
+    "narrowSearch": "Afina la búsqueda",
+    "fromSpeakers": "Voz del hablante:"
   },
   "remix": {
     "title": "Remix",

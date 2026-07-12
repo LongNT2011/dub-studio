@@ -286,6 +286,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/voices/get", post(voices_get))
         .route("/voices/rename", post(voices_rename))
         .route("/voices/delete", post(voices_delete))
+        .route("/projects/{pid}/speaker-voice", post(speaker_voice))
         .route("/fonts", get(endpoints::fonts))
         .route("/voices", get(voices_list))
         .route("/presets", get(endpoints::presets))
@@ -459,6 +460,49 @@ async fn record_stop(State(st): State<AppState>) -> Json<Value> {
         _ => None,
     };
     Json(json!({ "name": name, "voices": list_voice_names(&st.voices_dir) }))
+}
+
+/// POST /projects/{pid}/speaker-voice {speaker, name} — сделать голос из спикера: вырезать его
+/// длиннейшую реплику из источника → voices/<name>.wav (16k mono, <=12с). Порт «Сделать голос» Higgs.
+async fn speaker_voice(
+    State(st): State<AppState>,
+    axum::extract::Path(pid): axum::extract::Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let proj = match st.load_project(&pid) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let want = body.get("speaker").and_then(|v| v.as_str()).unwrap_or("0").to_string();
+    let name = sanitize_voice_name(body.get("name").and_then(|v| v.as_str()).unwrap_or(""));
+    // длиннейшая реплика спикера.
+    let cand = proj
+        .segments
+        .iter()
+        .filter(|s| s.speaker.clone().unwrap_or_else(|| "0".into()) == want)
+        .max_by(|a, b| (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap_or(std::cmp::Ordering::Equal));
+    let Some(cand) = cand else {
+        return (StatusCode::BAD_REQUEST, "у спикера нет реплик").into_response();
+    };
+    let (start, end) = (cand.start, cand.end.min(cand.start + 12.0));
+    let input = std::fs::read_to_string(dir.join("source.txt")).unwrap_or_default();
+    let input = if !input.trim().is_empty() { PathBuf::from(input.trim()) } else { dir.join("source.mp4") };
+    let out = st.voices_dir.join(format!("{name}.wav"));
+    let voices_dir = st.voices_dir.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&voices_dir).ok();
+        media::trim(&input, &out, start, end)
+    })
+    .await;
+    match res {
+        Ok(Ok(())) => Json(json!({ "ok": true, "name": name, "voices": list_voice_names(&st.voices_dir) })).into_response(),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
 /// GET /voices/catalog — каталог доп-голосов (HF датасет Slait/russia_voices): имя, пол, URL-превью.
