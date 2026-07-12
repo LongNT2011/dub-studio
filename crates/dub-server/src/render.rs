@@ -367,9 +367,21 @@ pub(crate) fn build_ass(proj: &Project, out_ass: &Path, vw: i64, vh: i64, total:
     // PER-SEGMENT Y-RIDE (порт pipeline.py 616-631). Каждую дублированную строку кладём на y, где в этот
     // момент была ОРИГИНАЛЬНАЯ полоса сабов, чтобы наш текст/плашка НАКРЫЛИ заблюренный оригинал (а не
     // висели на одной фикс-линии, пока блюр другой строки просвечивает — репорт юзера). Источник полосы —
-    // persisted blur_boxes (это и есть покадровые caption_boxes: pipeline.py band_blur -> blur_boxes;
-    // caption_boxes отдельно не сохраняются, их считает off-limits OCR-стадия). Fallback: fixed sub_y.
-    let band: Vec<&dub_core::BlurBox> = proj.captions.blur_boxes.iter().filter(|b| !b.hidden).collect();
+    // persisted blur_boxes. Питон медианит per-segment seg_y (pipeline.py 757-765) ТОЛЬКО по caption_boxes
+    // (субтитр-полоса из analyze_layout), а НЕ по всему blur-набору — титры/таглайны/group туда не входят.
+    // Порт складывает всё в blur_boxes, поэтому band-подмножество помечено compose.rs маркером extra["band"]
+    // (= питоновский caption_boxes-производный band_blur). seg_y едет ТОЛЬКО по нему. Без такого — верхний
+    // title/tagline-блюр в нижней половине кадра затягивал медиану вверх и строка садилась мимо полосы
+    // (репорт: «SUBSCRIPTION.» на таглайне y≈464 вместо полосы y≈641). Fallback (старые проекты без
+    // маркера / ручной blur из редактора): весь blur-набор, как было — иначе потеряли бы band целиком.
+    let all_band: Vec<&dub_core::BlurBox> =
+        proj.captions.blur_boxes.iter().filter(|b| !b.hidden).collect();
+    let tagged: Vec<&dub_core::BlurBox> = all_band
+        .iter()
+        .copied()
+        .filter(|b| b.extra.get("band").and_then(|v| v.as_bool()).unwrap_or(false))
+        .collect();
+    let band: Vec<&dub_core::BlurBox> = if tagged.is_empty() { all_band } else { tagged };
     let no_band = band.len() < 3; // нет повторяющейся ОРИГИНАЛЬНОЙ полосы -> не на что ехать
     let cap_lo = 0.40 * vw as f64;
     let cap_hi = 0.60 * vw as f64;
@@ -516,5 +528,130 @@ fn map_sub_style(s: &CoreSubStyle) -> CapSubStyle {
             .get("plate_color")
             .and_then(|v| v.as_str())
             .map(|x| x.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dub_core::{BlurBox as CoreBlurBox, Segment};
+
+    fn bb(x: i64, y: i64, w: i64, h: i64, t0: f64, t1: f64, band: bool) -> CoreBlurBox {
+        let mut b = CoreBlurBox {
+            x, y, w, h, t0, t1, hidden: false, extra: Default::default(),
+        };
+        if band {
+            b.extra.insert("band".into(), Value::Bool(true));
+        }
+        b
+    }
+
+    fn seg(id: &str, start: f64, end: f64, tgt: &str) -> Segment {
+        Segment {
+            id: id.into(),
+            start,
+            end,
+            speaker: None,
+            src_text: String::new(),
+            tgt_text: tgt.into(),
+            voice: None,
+            dirty: false,
+            extra: Default::default(),
+        }
+    }
+
+    // Y самого раннего S-субтитра (наш дублированный) в ASS: \pos(cx,cy) -> cy.
+    fn first_sub_y(ass: &str) -> i64 {
+        for l in ass.lines() {
+            if l.starts_with("Dialogue:") && l.contains(",S,") {
+                if let Some(i) = l.find("\\pos(") {
+                    let rest = &l[i + 5..];
+                    let close = rest.find(')').unwrap();
+                    let inner = &rest[..close];
+                    let cy: i64 = inner.split(',').nth(1).unwrap().trim().parse().unwrap();
+                    return cy;
+                }
+            }
+        }
+        panic!("нет S-субтитра с \\pos в ASS:\n{ass}");
+    }
+
+    fn build_to_string(proj: &Project, vw: i64, vh: i64) -> String {
+        let dir = std::env::temp_dir()
+            .join(format!("render_segy_{}_{}.ass", std::process::id(),
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        build_ass(proj, &dir, vw, vh, 44.77).unwrap();
+        let s = std::fs::read_to_string(&dir).unwrap();
+        let _ = std::fs::remove_file(&dir);
+        s
+    }
+
+    // РЕГРЕСС-ЯКОРЬ репорта ducks_ru (ru→en): кадр s0 «SUBSCRIPTION.». Верхний title/tagline-блюр (cy≈438,464)
+    // сидит в НИЖНЕЙ половине 824-кадра (>=0.45vh=371) вместе с настоящей полосой (cy≈630-642). Питон медианит
+    // seg_y ТОЛЬКО по caption_boxes (полоса), поэтому строка садится на полосу (y≈641). Порт до фикса медианил
+    // по ВСЕМУ blur-набору -> 464 (таглайн). После фикса band-боксы помечены extra["band"] и seg_y едет ТОЛЬКО
+    // по ним -> строка на полосе, плашка (BorderStyle=3) обнимает текст ТАМ ЖЕ, блюр оригинала накрыт.
+    #[test]
+    fn seg_y_rides_band_not_tagline_ducks() {
+        let (vw, vh) = (464i64, 824i64);
+        let mut proj = Project::default();
+        proj.mode = "dub".into();
+        proj.captions.sub_y = Some(634);
+        proj.captions.sub_y_locked = false;
+        // sub_style как у ducks: белый Oswald caps, дефолт-подложка (plate ON -> BorderStyle=3).
+        let mut ss = CoreSubStyle::default();
+        ss.color = "#FFFFFF".into();
+        ss.bold = true;
+        ss.uppercase = true;
+        ss.font = Some("Oswald".into());
+        ss.extra.insert("background".into(), Value::String("none".into()));
+        proj.captions.sub_style = Some(ss);
+        // Блюр-набор ВЕРНО воспроизводит реальные ae61067e1f14 для окна s0-word4 (2.22-2.80): покадровый
+        // таглайн cy≈437/464 (10 боксов, НЕ band) РАВЕН по числу настоящей полосе cy≈630-686 (9 боксов, band).
+        // До фикса медиана 19 боксов = 464 (таглайн). После — только band -> 641. Пропорция важна: таглайн
+        // держится per-frame, так что без разделения списков он затягивает медиану ровно на границе.
+        let mut boxes = Vec::new();
+        for t in [1.75, 2.0, 2.25, 2.5, 2.75].iter() {
+            boxes.push(bb(161, 427, 140, 21, *t, *t + 0.25, false)); // таглайн стр.1 cy=437
+            boxes.push(bb(42, 453, 378, 22, *t, *t + 0.25, false));  // таглайн стр.2 cy=464 (широкая)
+        }
+        for (cy, t) in [(630.0, 1.75), (630.0, 2.0), (641.0, 2.25), (641.0, 2.5),
+                        (641.0, 2.75), (641.0, 3.0), (652.0, 1.75), (652.0, 2.0), (686.0, 2.5)]
+        {
+            let y = cy as i64 - 9;
+            boxes.push(bb(120, y, 220, 19, t, t + 0.25, true)); // полоса
+        }
+        proj.captions.blur_boxes = boxes;
+        proj.segments = vec![
+            seg("s0", 2.22, 2.80, "SUBSCRIPTION."), // окно 4-й word-группы s0
+        ];
+        let ass = build_to_string(&proj, vw, vh);
+        let y = first_sub_y(&ass);
+        assert!(
+            (630..=650).contains(&y),
+            "строка должна ехать на полосу оригинала (~640), а не на таглайн (~464): y={y}\n{ass}"
+        );
+        // плашка обнимает текст: S-style несёт BorderStyle=3 (плашка = обводка вокруг текста той же строки).
+        let s_style = ass.lines().find(|l| l.starts_with("Style: S,")).unwrap();
+        assert!(s_style.contains(",3,11,"), "плашка = BorderStyle=3 в стиле строки: {s_style}");
+    }
+
+    // Fallback: старый проект БЕЗ маркеров band (ручной blur из редактора / до фикса). seg_y обязан работать
+    // по всему blur-набору как раньше — иначе band потерян целиком. Здесь только полоса без тегов -> едет на неё.
+    #[test]
+    fn seg_y_fallback_untagged_boxes() {
+        let (vw, vh) = (464i64, 824i64);
+        let mut proj = Project::default();
+        proj.mode = "dub".into();
+        proj.captions.sub_y = Some(634);
+        let mut boxes = Vec::new();
+        for t in [0.75, 1.0, 1.25, 1.5].iter() {
+            boxes.push(bb(120, 631, 220, 19, *t, *t + 0.25, false)); // НЕ помечены band
+        }
+        proj.captions.blur_boxes = boxes;
+        proj.segments = vec![seg("s0", 1.0, 1.5, "TEXT")];
+        let ass = build_to_string(&proj, vw, vh);
+        let y = first_sub_y(&ass);
+        assert!((630..=650).contains(&y), "fallback: без маркеров едем по всему набору: y={y}");
     }
 }

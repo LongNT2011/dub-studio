@@ -341,6 +341,22 @@ pub fn run(
         .map(|g| bbox_box(g.bbox, g.start, g.end))
         .collect();
 
+    // ПОМЕТИТЬ band-боксы маркером extra["band"]=true. Питон держит субтитр-полосу в ОТДЕЛЬНОМ списке
+    // caption_boxes (analyze_layout) и per-segment seg_y (pipeline.py 757-765) медианит ТОЛЬКО по нему —
+    // титры/таглайны/group туда не попадают по построению. Порт складывает всё в один blur_boxes, поэтому
+    // маркируем именно band-подмножество (= питоновский caption_boxes-производный band_blur), чтобы
+    // render.rs::seg_y ехал на РЕАЛЬНУЮ полосу оригинала, а не на верхний title/tagline-блюр в нижней
+    // половине кадра (репорт: строка «SUBSCRIPTION.» села на таглайн y≈464 вместо полосы y≈641).
+    let band_tagged: Vec<BlurBox> = band_blur
+        .iter()
+        .cloned()
+        .map(|mut b| {
+            b.extra.insert("band".to_string(), serde_json::Value::Bool(true));
+            b
+        })
+        .collect();
+    let band_blur: &[BlurBox] = &band_tagged;
+
     let final_blur: Vec<BlurBox> = if !ctitles.is_empty() {
         // ctx-ветка: loc_blocks + band_blur + leftover + cap_blur + group_blur (порт 586-587).
         let drawn: Vec<(f32, f32, f32, f32)> = loc_blocks
