@@ -204,13 +204,14 @@ pub fn time_stretch(src: &Path, dst: &Path, factor: f64) -> Result<(), String> {
     ])
 }
 
-/// Свести дубль-вокал поверх инструментала (музыка приглушена music_gain=0.45). Порт media.mix.
-/// Нормализуем оба входа к stereo (aformat) ДО amix: наш mono-дубляж (hound) несёт нестандартный
-/// channel layout "1 channels (FL)", который AAC-энкодер отвергает (-22). aformat=cl=stereo снимает это.
+/// Свести дубль-вокал поверх инструментала. Голос вырезан сепарацией, поэтому инструментал = реальный
+/// фон и звучит почти в полный уровень (0.9); amix с normalize=0 НЕ делит входы пополам (иначе фон уходил
+/// ~в 0.22 от реального). Итоговый баланс/пик держит финальный loudnorm. aformat=cl=stereo снимает
+/// нестандартный mono channel layout нашего hound-дубляжа (AAC иначе -22).
 pub fn mix(voice: &Path, music: &Path, out: &Path) -> Result<(), String> {
     let fc = "[0:a]aformat=channel_layouts=stereo[v];\
-              [1:a]aformat=channel_layouts=stereo,volume=0.45[m];\
-              [v][m]amix=inputs=2:duration=longest:dropout_transition=0[a]";
+              [1:a]aformat=channel_layouts=stereo,volume=0.9[m];\
+              [v][m]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a]";
     run_ff(&[
         OsStr::new("-y"), OsStr::new("-i"), voice.as_os_str(), OsStr::new("-i"), music.as_os_str(),
         OsStr::new("-filter_complex"), OsStr::new(fc), OsStr::new("-map"), OsStr::new("[a]"),

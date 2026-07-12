@@ -58,7 +58,7 @@ export default function ResourceMonitor() {
   const hasGpu = !!hw.gpuName;
 
   return (
-    <div className="fixed bottom-9 right-4 z-40 select-none" style={{ width: open ? 248 : "auto" }}>
+    <div className="fixed bottom-9 left-4 z-40 select-none" style={{ width: open ? 248 : "auto" }}>
       <div className="rounded-xl border border-white/10 bg-[var(--color-panel,rgba(18,20,26,0.92))] backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.45)] overflow-hidden">
         <button
           onClick={() => setOpen((v) => !v)}
