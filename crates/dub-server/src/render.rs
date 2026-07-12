@@ -189,7 +189,8 @@ fn build_dub(
             let cand = ["wav", "mp3"].iter().map(|e| paths.voices_dir.join(format!("{name}.{e}"))).find(|p| p.is_file());
             cand.and_then(|src| {
                 let out = wd.join("ref_pack.wav");
-                media::to_16k_mono(&src, &out).ok().map(|_| out)
+                // реф КАПИТСЯ до 12с (как клон-рефы): длинный реф -> Higgs не выделяет prefill-граф.
+                media::trim(&src, &out, 0.0, 12.0).ok().map(|_| out)
             })
         })
     } else {
