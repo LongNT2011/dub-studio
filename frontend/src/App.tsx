@@ -45,33 +45,88 @@ function ModelsSection() {
     } catch { /* ignore */ } finally { setProg(null); await refresh(); }
   };
   if (!status) return <div className="mono text-[11px] text-[var(--color-muted)]">…</div>;
-  // только скачиваемые компоненты (модели/движки/рантаймы); внешнее (драйвер) и bundled — не тут.
-  const rows = status.components.filter((c) => c.delivery === "download");
-  return (
-    <div className="space-y-1.5">
-      {rows.map((c) => {
-        const active = prog?.id === c.id;
-        return (
-          <div key={c.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.installed ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-medium truncate">{c.name}</div>
-              <div className="mono text-[10px] text-[var(--color-muted)] truncate">{c.purpose} · {fmtBytes(c.size)}</div>
-            </div>
-            {active ? (
-              <div className="w-24 shrink-0">
-                <div className="h-1.5 rounded-full bg-white/10 overflow-hidden"><div className="h-full bg-[var(--color-accent)] transition-[width]" style={{ width: `${prog?.pct ?? 0}%` }} /></div>
-                <div className="mono text-[10px] text-[var(--color-muted)] text-right mt-0.5">{Math.round(prog?.pct ?? 0)}%</div>
-              </div>
-            ) : (
-              <button onClick={() => dl(c.id)} disabled={!!prog}
-                className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] border border-[var(--color-border)] text-[var(--color-accent-2)] hover:border-[var(--color-accent)] disabled:opacity-40">
-                {c.installed ? <RefreshCw size={12} /> : <Download size={12} />}{c.installed ? t("settings.redownload") : t("setup.downloadOne")}
-              </button>
-            )}
+  const byId = Object.fromEntries(status.components.map((c) => [c.id, c]));
+  const get = (id: string) => byId[id] as SetupComponent | undefined;
+
+  // строка одного компонента (кнопка скачать/докачать + прогресс)
+  const Row = (c: SetupComponent) => {
+    const active = prog?.id === c.id;
+    return (
+      <div key={c.id} className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${c.installed ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[12px] font-medium truncate">{c.name}</div>
+          <div className="mono text-[10px] text-[var(--color-muted)] truncate">{c.purpose} · {fmtBytes(c.size)}</div>
+        </div>
+        {active ? (
+          <div className="w-24 shrink-0">
+            <div className="h-1.5 rounded-full bg-white/10 overflow-hidden"><div className="h-full bg-[var(--color-accent)] transition-[width]" style={{ width: `${prog?.pct ?? 0}%` }} /></div>
+            <div className="mono text-[10px] text-[var(--color-muted)] text-right mt-0.5">{Math.round(prog?.pct ?? 0)}%</div>
           </div>
-        );
-      })}
+        ) : (
+          <button onClick={() => dl(c.id)} disabled={!!prog}
+            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] border border-[var(--color-border)] text-[var(--color-accent-2)] hover:border-[var(--color-accent)] disabled:opacity-40">
+            {c.installed ? <RefreshCw size={12} /> : <Download size={12} />}{c.installed ? t("settings.redownload") : t("setup.downloadOne")}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // модель с выбором кванта: дропдаун вариантов + скачать выбранный
+  const VariantPicker = ({ base, ids }: { base: string; ids: string[] }) => {
+    const variants = ids.map(get).filter(Boolean) as SetupComponent[];
+    const installed = variants.find((v) => v.installed);
+    const [pick, setPick] = useState<string>(installed?.id ?? variants[0]?.id ?? "");
+    const c = get(pick);
+    if (!c) return null;
+    const quant = (v: SetupComponent) => (v.name.match(/\(([^)]+)\)\s*$/)?.[1] ?? v.name);
+    const active = prog?.id === c.id;
+    return (
+      <div className="px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
+        <div className="flex items-center gap-2.5">
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${variants.some((v) => v.installed) ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium truncate">{base}</div>
+            <div className="mono text-[10px] text-[var(--color-muted)] truncate">{c.purpose}</div>
+          </div>
+          <select value={pick} onChange={(e) => setPick(e.target.value)}
+            className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none">
+            {variants.map((v) => <option key={v.id} value={v.id}>{quant(v)}{v.installed ? " ✓" : ""} · {fmtBytes(v.size)}</option>)}
+          </select>
+          {active ? (
+            <span className="mono text-[11px] text-[var(--color-accent)] w-10 text-right">{Math.round(prog?.pct ?? 0)}%</span>
+          ) : (
+            <button onClick={() => dl(c.id)} disabled={!!prog} title={c.installed ? t("settings.redownload") : t("setup.downloadOne")}
+              className="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-md text-[12px] border border-[var(--color-border)] text-[var(--color-accent-2)] hover:border-[var(--color-accent)] disabled:opacity-40">
+              {c.installed ? <RefreshCw size={12} /> : <Download size={12} />}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const Group = ({ label, children }: { label: string; children: React.ReactNode }) => (
+    <div className="mb-3">
+      <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-1.5">{label}</div>
+      <div className="space-y-1.5">{children}</div>
+    </div>
+  );
+
+  const rowOf = (id: string) => { const c = get(id); return c ? <Row key={id} {...c} /> : null; };
+
+  return (
+    <div>
+      <Group label={t("settings.roleTts")}>{rowOf("higgs")}{rowOf("higgs-engine")}</Group>
+      <Group label={t("settings.roleAsr")}>{rowOf("parakeet")}</Group>
+      <Group label={t("settings.roleMt")}>{rowOf("gemma")}{rowOf("llama")}</Group>
+      <Group label={t("settings.roleSep")}>
+        <VariantPicker base="Mel-Band Roformer voc_fv6" ids={["roformer", "roformer-q5", "roformer-q4"]} />
+        {rowOf("bsroformer-engine")}
+      </Group>
+      <Group label={t("settings.roleDiar")}>{rowOf("sortformer")}</Group>
+      <Group label={t("settings.roleRuntime")}>{rowOf("onnxruntime")}{rowOf("ffmpeg")}{rowOf("cuda-runtime")}{rowOf("vcruntime")}{rowOf("ocr")}</Group>
     </div>
   );
 }
@@ -1202,8 +1257,8 @@ function FirstRun() {
   const refresh = async () => {
     const s = await api.setupStatus();
     setStatus(s);
-    // preselect every missing downloadable component
-    setSel(new Set(s.components.filter((c) => c.delivery === "download" && !c.installed).map((c) => c.id)));
+    // preselect every missing downloadable component (кроме опциональных квантов — их качают вручную)
+    setSel(new Set(s.components.filter((c) => c.delivery === "download" && !c.installed && c.requirement !== "optional").map((c) => c.id)));
     return s;
   };
   useEffect(() => { refresh().catch((e) => setErr(String(e))); }, []);

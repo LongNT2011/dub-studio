@@ -42,7 +42,7 @@ export type JobEvent = { type: "progress" | "done" | "error"; stage?: string; pc
 // «Первый запуск»: статус внешних компонентов (модели/движки/системные библиотеки) + автозакачка.
 export type SetupComponent = {
   id: string; name: string; purpose: string;
-  requirement: "required" | "recommended";
+  requirement: "required" | "recommended" | "optional";
   delivery: "download" | "bundled" | "external";
   size: number; installed: boolean; bytesOnDisk: number;
   missing: string[]; detail?: string | null; externalUrl?: string | null;

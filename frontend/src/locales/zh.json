@@ -149,7 +149,13 @@
     "tts": "语音合成",
     "modelsTab": "模型",
     "engineTab": "引擎",
-    "redownload": "重新下载"
+    "redownload": "重新下载",
+    "roleTts": "配音 · TTS",
+    "roleAsr": "识别 · ASR",
+    "roleMt": "翻译 + 视觉",
+    "roleSep": "人声清理 · 分离",
+    "roleDiar": "说话人分离",
+    "roleRuntime": "引擎与运行时"
   },
   "help": {
     "title": "关于 Dub Studio",

@@ -63,6 +63,8 @@ pub enum Requirement {
     Required,
     /// Улучшает результат, но пайплайн деградирует gracefully (напр. OCR-блюр).
     Recommended,
+    /// Альтернативный вариант/квант (качается по выбору в настройках, не преселектится, не гейтит).
+    Optional,
 }
 
 /// Как компонент попадает на диск.
@@ -239,6 +241,33 @@ pub fn manifest() -> Vec<Component> {
                 FileSpec { url: HF_ROFORMER, dest_rel: "models/bsroformer/voc_fv6-Q8_0.gguf", size: 251_707_744, extract: Extract::None },
             ],
             markers: &[Marker { rel: "models/bsroformer/voc_fv6-Q8_0.gguf", expect: 251_707_744 }],
+            external_url: None,
+        },
+        // Альтернативные кванты сепарации (выбор в настройках; лёгкие, качество чуть ниже Q8_0).
+        Component {
+            id: "roformer-q5",
+            name: "Mel-Band Roformer voc_fv6 (Q5_0)",
+            purpose: "Сепарация — вариант полегче Q8_0",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 167_303_008,
+            files: &[
+                FileSpec { url: "https://huggingface.co/chenmozhijin/BSRoformer-GGUF/resolve/main/GaboxR67/MelBandRoformers/melbandroformers/vocals/voc_fv6-Q5_0.gguf", dest_rel: "models/bsroformer/voc_fv6-Q5_0.gguf", size: 167_303_008, extract: Extract::None },
+            ],
+            markers: &[Marker { rel: "models/bsroformer/voc_fv6-Q5_0.gguf", expect: 167_303_008 }],
+            external_url: None,
+        },
+        Component {
+            id: "roformer-q4",
+            name: "Mel-Band Roformer voc_fv6 (Q4_0)",
+            purpose: "Сепарация — самый лёгкий вариант",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 139_168_096,
+            files: &[
+                FileSpec { url: "https://huggingface.co/chenmozhijin/BSRoformer-GGUF/resolve/main/GaboxR67/MelBandRoformers/melbandroformers/vocals/voc_fv6-Q4_0.gguf", dest_rel: "models/bsroformer/voc_fv6-Q4_0.gguf", size: 139_168_096, extract: Extract::None },
+            ],
+            markers: &[Marker { rel: "models/bsroformer/voc_fv6-Q4_0.gguf", expect: 139_168_096 }],
             external_url: None,
         },
         // ── СAЙДКАРЫ / ДВИЖКИ ───────────────────────────────────────────────

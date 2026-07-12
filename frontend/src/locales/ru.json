@@ -149,7 +149,13 @@
     "tts": "Синтез голоса",
     "modelsTab": "Модели",
     "engineTab": "Движок",
-    "redownload": "Перекачать"
+    "redownload": "Перекачать",
+    "roleTts": "Озвучка · TTS",
+    "roleAsr": "Распознавание · ASR",
+    "roleMt": "Перевод + Vision",
+    "roleSep": "Очистка голоса · сепарация",
+    "roleDiar": "Диаризация",
+    "roleRuntime": "Движки и рантайм"
   },
   "help": {
     "title": "О Dub Studio",

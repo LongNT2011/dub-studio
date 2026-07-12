@@ -149,7 +149,13 @@
     "tts": "Synthèse vocale",
     "modelsTab": "Modèles",
     "engineTab": "Moteur",
-    "redownload": "Retélécharger"
+    "redownload": "Retélécharger",
+    "roleTts": "Voix · TTS",
+    "roleAsr": "Parole · ASR",
+    "roleMt": "Traduction + Vision",
+    "roleSep": "Nettoyage voix",
+    "roleDiar": "Diarisation",
+    "roleRuntime": "Moteurs & runtime"
   },
   "help": {
     "title": "À propos de Dub Studio",
