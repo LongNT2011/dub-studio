@@ -70,7 +70,7 @@ pub fn stage(
 
     let (localize, caption_boxes, sub_y_det) = analyze_layout(&regions, vh, &raw, &spoken);
 
-    // ── band_blur (порт pipeline.py:416-442, item#2 аудита) ────────────────────
+    // ── band_blur (порт pipeline.py:416-442) ───────────────────────────────────
     // caption_boxes -> Det (x,y,w,h,t), отфильтровать центр-straddle гейтом (боковые вывески CHIYA/BAKERY
     // выпадают), коалесцировать в бокс-спаны (IoU>=0.5, тайм-гейт 1.6*dt), pad (-6,-4,+12,+8), t0..t1+dt.
     let dets: Vec<blur::Det> = caption_boxes

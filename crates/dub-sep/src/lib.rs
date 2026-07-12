@@ -1,5 +1,5 @@
-//! dub-sep — вокал/инструментал сепарация. Порт dubengine/separate.py, но движок ЗАМЕНЁН приказом
-//! юзера (2026-07-11): вместо UVR-MDX (audio-separator) — **Mel-Band Roformer voc_fv6-Q8_0** через
+//! dub-sep — вокал/инструментал сепарация (порт dubengine/separate.py).
+//! Движок: **Mel-Band Roformer voc_fv6-Q8_0** через
 //! нативный сайдкар **BSRoformer.cpp** (C++/ggml, CUDA). Эталон интеграции — voiceclean.rs из
 //! Higgs-Ultimate (CLI `<model.gguf> <in.wav> <out.wav>`, вход 44.1кГц, CREATE_NO_WINDOW, cwd=папка
 //! движка ради ggml-DLL).

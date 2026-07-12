@@ -38,7 +38,7 @@ pub use jobs::JobQueue;
 
 /// E2E-верификация caption-композита БЕЗ ASR/Gemma/TTS: берём УЖЕ проанализированный project.json
 /// (кэш transcript+raw_ctx), заново гоним OCR-стадию + compose (реальная детекция + матчинг титров),
-/// затем вжигаем блюр+сабы в captioned.mp4. Так проверяем items 1-5/8 аудита на живых данных, не
+/// затем вжигаем блюр+сабы в captioned.mp4. Проверка на живых данных, не
 /// перезапуская тяжёлый Gemma-vision. Возвращает путь к captioned.mp4.
 pub fn verify_captions_e2e(
     repo_root: &Path,
@@ -50,7 +50,7 @@ pub fn verify_captions_e2e(
     let mut proj = Project::from_json(&text).map_err(|e| e.to_string())?;
 
     // OCR-стадия перезаписывает captions.blur_boxes/titles/sub_style/sub_px через compose. Чистим
-    // прошлый прогон, чтобы видеть свежий результат (не смешивать со старым blur из project.json).
+    // предыдущий вывод, чтобы не смешивать со старым blur из project.json.
     proj.captions.blur_boxes.clear();
     proj.captions.titles.clear();
 
