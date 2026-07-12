@@ -251,62 +251,96 @@ pub fn detect_regions(
     jitter: f32,
     score_thr: f32,
 ) -> Result<(Vec<Region>, Vec<RawDet>), String> {
-    let mut det_model = OnnxModel::load(&paths.det)?;
-    let mut rec_model = OnnxModel::load(&paths.rec)?;
-    // cls опционален: улучшает ориентацию строк (0/180). Отключаем через DUB_OCR_NO_CLS.
-    let mut cls_model = if paths.cls.is_file() && std::env::var_os("DUB_OCR_NO_CLS").is_none() {
-        Some(OnnxModel::load(&paths.cls)?)
-    } else {
-        None
-    };
-    // словарь: сначала метадата ONNX (ключ "character", источник истины RapidOCR v3), затем .dict.txt.
-    let dict = match RecDict::from_session_meta(&rec_model) {
+    // словарь и параметры грузим один раз (rec-мета читается с временной сессии) и клонируем воркерам.
+    let rec_probe = OnnxModel::load(&paths.rec)?;
+    let dict = match RecDict::from_session_meta(&rec_probe) {
         Ok(d) => d,
         Err(_) => RecDict::load(&paths.rec_dict)?,
     };
+    drop(rec_probe);
     let det_params = DetParams::default();
+    let use_cls = paths.cls.is_file() && std::env::var_os("DUB_OCR_NO_CLS").is_none();
 
     let fdir = work_dir.join("frames");
     let frames = extract_frames(video, &fdir, fps)?;
 
-    let mut frame_lines: Vec<(f32, Vec<Line>)> = Vec::new();
+    // Кадры независимы -> W воркеров, каждый со своим набором сессий (ORT Session не Sync), intra=1
+    // чтобы не оверсабскрайбить ядра. Порядок восстанавливаем по индексу кадра.
+    let workers = std::env::var("DUB_OCR_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4))
+        .clamp(1, 8)
+        .min(frames.len().max(1));
 
-    for (i, fp) in frames.iter().enumerate() {
-        let t = i as f32 / fps as f32;
-        let img = match image::open(fp) {
-            Ok(im) => im.to_rgb8(),
-            Err(_) => continue,
-        };
-        // det -> боксы; (опц. cls) -> кропы -> rec ПАЧКОЙ (один инференс на кадр).
-        let boxes = detect(&mut det_model, &img, &det_params)?;
-        let mut crops: Vec<RgbImage> = Vec::with_capacity(boxes.len());
-        for b in &boxes {
-            let mut crop = crop_rgb(&img, b.x, b.y, b.w, b.h);
-            if let Some(cls_model) = cls_model.as_mut() {
-                if cls::should_rotate180(cls_model, &crop)? {
-                    crop = image::imageops::rotate180(&crop);
+    let frames = std::sync::Arc::new(frames);
+    let dict_a = std::sync::Arc::new(dict);
+    let next = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let out = std::sync::Arc::new(std::sync::Mutex::new(
+        Vec::<(usize, f32, Vec<Line>)>::new(),
+    ));
+    let err = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let (frames, dict_a, next, out, err) = (
+                frames.clone(),
+                dict_a.clone(),
+                next.clone(),
+                out.clone(),
+                err.clone(),
+            );
+            let (det_path, rec_path, cls_path) =
+                (paths.det.clone(), paths.rec.clone(), paths.cls.clone());
+            scope.spawn(move || {
+                let mut det_model = match OnnxModel::load_with_intra(&det_path, 1) {
+                    Ok(m) => m,
+                    Err(e) => { *err.lock().unwrap() = Some(e); return; }
+                };
+                let mut rec_model = match OnnxModel::load_with_intra(&rec_path, 1) {
+                    Ok(m) => m,
+                    Err(e) => { *err.lock().unwrap() = Some(e); return; }
+                };
+                let mut cls_model = if use_cls {
+                    match OnnxModel::load_with_intra(&cls_path, 1) {
+                        Ok(m) => Some(m),
+                        Err(e) => { *err.lock().unwrap() = Some(e); return; }
+                    }
+                } else {
+                    None
+                };
+                loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if i >= frames.len() {
+                        break;
+                    }
+                    let t = i as f32 / fps as f32;
+                    let img = match image::open(&frames[i]) {
+                        Ok(im) => im.to_rgb8(),
+                        Err(_) => continue,
+                    };
+                    match process_frame(
+                        &mut det_model, &mut rec_model, cls_model.as_mut(),
+                        &dict_a, &det_params, &img, score_thr,
+                    ) {
+                        Ok(lines) => out.lock().unwrap().push((i, t, lines)),
+                        Err(e) => { *err.lock().unwrap() = Some(e); return; }
+                    }
                 }
-            }
-            crops.push(crop);
+            });
         }
-        let results = recognize_batch(&mut rec_model, &dict, &crops)?;
-        let mut lines_raw: Vec<(String, f32, f32, f32, f32)> = Vec::new();
-        for (b, (txt, score)) in boxes.iter().zip(results) {
-            if std::env::var_os("DUB_OCR_DEBUG").is_some() {
-                eprintln!(
-                    "  t={t:.2} [{score:.2}] {:?} @({:.0},{:.0} {:.0}x{:.0})",
-                    txt.trim(), b.x, b.y, b.w, b.h
-                );
-            }
-            if txt.trim().is_empty() || score < score_thr {
-                continue;
-            }
-            lines_raw.push((txt.trim().to_string(), b.x, b.y, b.w, b.h));
-        }
-        // merge_rows (аспект-фильтр применяется внутри detect_regions_frames, как в питоне).
-        let lines: Vec<Line> = merge_rows(lines_raw, 0.6);
-        frame_lines.push((t, lines));
+    });
+
+    if let Some(e) = err.lock().unwrap().take() {
+        return Err(e);
     }
+    let mut frame_lines_idx = std::sync::Arc::try_unwrap(out)
+        .map_err(|_| "out arc")?
+        .into_inner()
+        .map_err(|e| e.to_string())?;
+    frame_lines_idx.sort_by_key(|(i, _, _)| *i);
+    let frame_lines: Vec<(f32, Vec<Line>)> =
+        frame_lines_idx.into_iter().map(|(_, t, l)| (t, l)).collect();
 
     let (regions, raw) = detect_regions_frames(&frame_lines, fps, min_dur, iou_thr, pad, jitter);
     Ok((regions, raw))
@@ -314,6 +348,39 @@ pub fn detect_regions(
 
 /// Строка детекции для трекинга: (text, x, y, w, h) в пикселях.
 pub type Line = (String, f32, f32, f32, f32);
+
+/// Обработать один кадр: det -> кропы -> (опц. cls) -> rec ПАЧКОЙ -> фильтр порога -> merge_rows.
+#[allow(clippy::too_many_arguments)]
+fn process_frame(
+    det_model: &mut OnnxModel,
+    rec_model: &mut OnnxModel,
+    mut cls_model: Option<&mut OnnxModel>,
+    dict: &RecDict,
+    det_params: &DetParams,
+    img: &RgbImage,
+    score_thr: f32,
+) -> Result<Vec<Line>, String> {
+    let boxes = detect(det_model, img, det_params)?;
+    let mut crops: Vec<RgbImage> = Vec::with_capacity(boxes.len());
+    for b in &boxes {
+        let mut crop = crop_rgb(img, b.x, b.y, b.w, b.h);
+        if let Some(cls) = cls_model.as_deref_mut() {
+            if cls::should_rotate180(cls, &crop)? {
+                crop = image::imageops::rotate180(&crop);
+            }
+        }
+        crops.push(crop);
+    }
+    let results = recognize_batch(rec_model, dict, &crops)?;
+    let mut lines_raw: Vec<(String, f32, f32, f32, f32)> = Vec::new();
+    for (b, (txt, score)) in boxes.iter().zip(results) {
+        if txt.trim().is_empty() || score < score_thr {
+            continue;
+        }
+        lines_raw.push((txt.trim().to_string(), b.x, b.y, b.w, b.h));
+    }
+    Ok(merge_rows(lines_raw, 0.6))
+}
 
 /// Кадро-ориентированный трекинг (порт detect_regions без ONNX): на вход отсортированные по времени
 /// per-frame строки. Аспект-фильтр (w>=1.2h) и вся IoU/sim/de-jitter логика — здесь. Общий код-путь

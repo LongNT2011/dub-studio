@@ -16,6 +16,7 @@ use ndarray::Array4;
 const REC_H: usize = 48;
 
 /// Словарь распознавания: blank в позиции 0, далее символы из метаданных ONNX (или .dict.txt).
+#[derive(Clone)]
 pub struct RecDict {
     chars: Vec<String>, // chars[0] = blank
 }

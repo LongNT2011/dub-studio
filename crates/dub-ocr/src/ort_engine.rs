@@ -66,9 +66,18 @@ pub struct OnnxModel {
 
 impl OnnxModel {
     pub fn load(path: &Path) -> Result<Self, String> {
+        Self::load_with_intra(path, 0)
+    }
+
+    /// Загрузить сессию с заданным числом intra-op потоков (0 = дефолт ORT = все ядра). При кадровой
+    /// параллельности ставим 1, чтобы W воркеров не оверсабскрайбили ядра.
+    pub fn load_with_intra(path: &Path, intra: usize) -> Result<Self, String> {
         ensure_ort_dylib();
-        let session = Session::builder()
-            .map_err(|e| format!("ort builder: {e}"))?
+        let mut b = Session::builder().map_err(|e| format!("ort builder: {e}"))?;
+        if intra > 0 {
+            b = b.with_intra_threads(intra).map_err(|e| format!("intra_threads: {e}"))?;
+        }
+        let session = b
             .commit_from_file(path)
             .map_err(|e| format!("commit_from_file {}: {e}", path.display()))?;
         Ok(Self { session })
