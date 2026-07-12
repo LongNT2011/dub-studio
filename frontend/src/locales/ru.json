@@ -155,7 +155,8 @@
     "roleMt": "Перевод + Vision",
     "roleSep": "Очистка голоса · сепарация",
     "roleDiar": "Диаризация",
-    "roleRuntime": "Движки и рантайм"
+    "roleRuntime": "Движки и рантайм",
+    "browseFolder": "Указать готовую папку"
   },
   "help": {
     "title": "О Dub Studio",

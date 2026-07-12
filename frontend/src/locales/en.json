@@ -155,7 +155,8 @@
     "roleMt": "Translate + Vision",
     "roleSep": "Voice cleanup · separation",
     "roleDiar": "Diarization",
-    "roleRuntime": "Engines & runtime"
+    "roleRuntime": "Engines & runtime",
+    "browseFolder": "Import from folder"
   },
   "help": {
     "title": "About Dub Studio",

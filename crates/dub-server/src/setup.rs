@@ -507,6 +507,72 @@ pub fn detect_driver() -> bool {
         || std::path::Path::new("/usr/lib/libcuda.so.1").exists()
 }
 
+// ── Импорт готовых моделей из выбранной папки ────────────────────────────────
+
+/// Рекурсивно собрать карту basename(lower) -> [(path, size)] под dir (лимит глубины/файлов, чтоб не
+/// уйти в бесконечность на большом диске).
+fn index_dir(dir: &Path, map: &mut std::collections::HashMap<String, Vec<(PathBuf, u64)>>, depth: usize, budget: &mut usize) {
+    if depth > 8 || *budget == 0 {
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        if *budget == 0 {
+            return;
+        }
+        let p = e.path();
+        if p.is_dir() {
+            index_dir(&p, map, depth + 1, budget);
+        } else if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
+            let size = e.metadata().map(|m| m.len()).unwrap_or(0);
+            map.entry(name.to_lowercase()).or_default().push((p.clone(), size));
+            *budget -= 1;
+        }
+    }
+}
+
+/// Импортировать готовые файлы компонентов из src_dir: для каждого маркера, которого нет на месте, ищем
+/// в src_dir файл с тем же именем (и размером, если известен) и КОПИРУЕМ на ожидаемый путь. Возвращает
+/// список импортированных id.
+pub fn import_from_dir(repo_root: &Path, src_dir: &Path) -> Vec<String> {
+    let mut map = std::collections::HashMap::new();
+    let mut budget = 200_000usize;
+    index_dir(src_dir, &mut map, 0, &mut budget);
+    let mut imported = Vec::new();
+    for c in manifest() {
+        if c.delivery != Delivery::Download {
+            continue;
+        }
+        let mut any = false;
+        for m in c.markers {
+            let dest = repo_root.join(m.rel);
+            if marker_ok(repo_root, m) {
+                continue;
+            }
+            let base = Path::new(m.rel).file_name().and_then(|s| s.to_str()).map(|s| s.to_lowercase());
+            let Some(base) = base else { continue };
+            let Some(cands) = map.get(&base) else { continue };
+            // предпочитаем точное совпадение размера, иначе первый попавшийся.
+            let pick = cands
+                .iter()
+                .find(|(_, sz)| m.expect != 0 && *sz == m.expect)
+                .or_else(|| cands.first());
+            if let Some((src, _)) = pick {
+                if let Some(parent) = dest.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if std::fs::copy(src, &dest).is_ok() {
+                    any = true;
+                }
+            }
+        }
+        if any && component_status(repo_root, &c).installed {
+            imported.push(c.id.to_string());
+        }
+    }
+    imported
+}
+
 // ── Полный статус (для GET /setup/status) ────────────────────────────────────
 
 #[derive(Clone, Debug, Serialize)]

@@ -75,6 +75,7 @@ export const api = {
     fetch(`${BASE}/setup/download`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }).then(j<{ job_id: string }>),
   setupCancel: () => fetch(`${BASE}/setup/cancel`, { method: "POST" }).then(j<{ cancelled: boolean }>),
   hwSnapshot: () => fetch(`${BASE}/hw/snapshot`).then(j<HwSnapshot>),
+  setupBrowse: () => fetch(`${BASE}/setup/browse`, { method: "POST" }).then(j<{ picked: boolean; imported: string[]; status: SetupStatus }>),
   fonts: () => fetch(`${BASE}/fonts`).then(j<{ fonts: Record<string, string> }>),
   setOpts: (edit: Partial<ModelStack>) =>
     fetch(`${BASE}/engine/opts`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit) }).then(j<{ models: ModelStack }>),

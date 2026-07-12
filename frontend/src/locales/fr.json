@@ -155,7 +155,8 @@
     "roleMt": "Traduction + Vision",
     "roleSep": "Nettoyage voix",
     "roleDiar": "Diarisation",
-    "roleRuntime": "Moteurs & runtime"
+    "roleRuntime": "Moteurs & runtime",
+    "browseFolder": "Importer d’un dossier"
   },
   "help": {
     "title": "À propos de Dub Studio",

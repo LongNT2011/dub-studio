@@ -155,7 +155,8 @@
     "roleMt": "翻译 + 视觉",
     "roleSep": "人声清理 · 分离",
     "roleDiar": "说话人分离",
-    "roleRuntime": "引擎与运行时"
+    "roleRuntime": "引擎与运行时",
+    "browseFolder": "从文件夹导入"
   },
   "help": {
     "title": "关于 Dub Studio",

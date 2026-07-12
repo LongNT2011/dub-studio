@@ -116,8 +116,17 @@ function ModelsSection() {
 
   const rowOf = (id: string) => { const c = get(id); return c ? <Row key={id} {...c} /> : null; };
 
+  const browse = async () => {
+    if (prog) return;
+    try { const r = await api.setupBrowse(); if (r.picked) setStatus(r.status); } catch { /* ignore */ }
+  };
+
   return (
     <div>
+      <button onClick={browse} disabled={!!prog}
+        className="mb-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-[var(--color-border)] text-[12px] text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] transition-colors disabled:opacity-40">
+        <FolderDown size={14} />{t("settings.browseFolder")}
+      </button>
       <Group label={t("settings.roleTts")}>{rowOf("higgs")}{rowOf("higgs-engine")}</Group>
       <Group label={t("settings.roleAsr")}>{rowOf("parakeet")}</Group>
       <Group label={t("settings.roleMt")}>{rowOf("gemma")}{rowOf("llama")}</Group>
@@ -1366,6 +1375,11 @@ function FirstRun() {
             <button onClick={() => api.setupCancel().catch(() => {})}
               className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg border border-[var(--color-border)] text-sm text-[var(--color-muted)] hover:text-[var(--color-text)]">
               <Square size={14} />{t("setup.cancel")}</button>
+          )}
+          {!busy && (
+            <button onClick={async () => { try { const r = await api.setupBrowse(); if (r.picked) { setStatus(r.status); setSel(new Set(r.status.components.filter((c) => c.delivery === "download" && !c.installed && c.requirement !== "optional").map((c) => c.id))); } } catch { /* ignore */ } }}
+              className="inline-flex items-center gap-1.5 px-3 py-2.5 rounded-lg border border-dashed border-[var(--color-border)] text-sm text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] transition-colors">
+              <FolderDown size={14} />{t("settings.browseFolder")}</button>
           )}
           {status?.ready && !busy && (
             <button onClick={() => setStage("empty")}

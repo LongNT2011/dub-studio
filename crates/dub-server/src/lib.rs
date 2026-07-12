@@ -267,6 +267,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/setup/status", get(setup_status))
         .route("/setup/download", post(setup_download))
         .route("/setup/cancel", post(setup_cancel))
+        .route("/setup/browse", post(setup_browse))
+        .route("/setup/import", post(setup_import))
         .route("/hw/snapshot", get(hw_snapshot))
         .route("/fonts", get(endpoints::fonts))
         .route("/voices", get(endpoints::voices))
@@ -376,6 +378,36 @@ async fn setup_cancel(State(st): State<AppState>) -> Json<Value> {
 /// GET /hw/snapshot — снимок GPU/VRAM/темп/мощность + RAM для монитора ресурсов.
 async fn hw_snapshot() -> Json<hw::HardwareSnapshot> {
     Json(tokio::task::spawn_blocking(hw::snapshot).await.unwrap_or_default())
+}
+
+/// POST /setup/browse — открыть нативный диалог выбора папки, импортировать оттуда готовые модели по
+/// маркерам (без докачки). {picked:bool, imported:[...], status}.
+async fn setup_browse(State(st): State<AppState>) -> Json<Value> {
+    let root = st.repo_root.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        let dir = rfd::FileDialog::new().set_title("Папка с готовыми моделями").pick_folder();
+        match dir {
+            Some(d) => {
+                let imported = setup::import_from_dir(&root, &d);
+                (true, imported)
+            }
+            None => (false, Vec::new()),
+        }
+    })
+    .await
+    .unwrap_or((false, Vec::new()));
+    Json(json!({ "picked": res.0, "imported": res.1, "status": setup::setup_status(&st.repo_root) }))
+}
+
+/// POST /setup/import {path} — импортировать готовые модели из заданной папки (без диалога).
+async fn setup_import(State(st): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
+    let path = body.get("path").and_then(|v| v.as_str()).unwrap_or("");
+    let imported = if path.is_empty() {
+        Vec::new()
+    } else {
+        setup::import_from_dir(&st.repo_root, std::path::Path::new(path))
+    };
+    Json(json!({ "imported": imported, "status": setup::setup_status(&st.repo_root) }))
 }
 
 // ─── POST /projects (multipart video upload) ────────────────────────────────
