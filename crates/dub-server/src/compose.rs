@@ -486,7 +486,33 @@ fn merge_titles_by_y(sorted: Vec<Value>) -> Vec<Value> {
         }
         merged.push(t);
     }
-    merged
+    dedup_substring_titles(merged)
+}
+
+/// Дубли от vision: один титр — подстрока другого на соседней строке (Δy<=0.13, чуть за порогом
+/// мёржа), напр. «СДВГ» и «СДВГ и перфекционизм.» — рисовались оба стопкой. Оставляем более полный.
+fn dedup_substring_titles(titles: Vec<Value>) -> Vec<Value> {
+    let norm = |v: &Value, k: &str| {
+        v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_lowercase()
+            .chars().filter(|c| c.is_alphanumeric()).collect::<String>()
+    };
+    let mut keep = vec![true; titles.len()];
+    for i in 0..titles.len() {
+        for j in 0..titles.len() {
+            if i == j || !keep[i] || !keep[j] {
+                continue;
+            }
+            let (ti, tj) = (norm(&titles[i], "text"), norm(&titles[j], "text"));
+            if ti.is_empty() || tj.is_empty() {
+                continue;
+            }
+            // i — подстрока j (и короче), близко по y → i лишний
+            if ti != tj && tj.contains(&ti) && (yfrac(&titles[i]) - yfrac(&titles[j])).abs() <= 0.13 {
+                keep[i] = false;
+            }
+        }
+    }
+    titles.into_iter().zip(keep).filter(|(_, k)| *k).map(|(t, _)| t).collect()
 }
 
 /// region -> BlurBox (x,y,w,h,t0,t1). Порт region_blur_box (без роста — регион уже с pad detect_regions).
@@ -705,6 +731,18 @@ fn translate_taglines(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn substring_title_dupe_dropped_adhd() {
+        // «СДВГ» ⊂ «СДВГ и перфекционизм.» на Δy=0.0601 (за порогом мёржа 0.06) — остаётся полный.
+        let t = |text: &str, y: f64| serde_json::json!({"text": text, "tgt": text, "y_frac": y});
+        let out = merge_titles_by_y(vec![t("СДВГ", 0.134), t("СДВГ и перфекционизм.", 0.1941)]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["text"], "СДВГ и перфекционизм.");
+        // НЕ подстрока — оба живут
+        let out2 = merge_titles_by_y(vec![t("Утка", 0.1), t("Совсем другой титр", 0.3)]);
+        assert_eq!(out2.len(), 2);
+    }
 
     fn reg(text: &str, x: i64, y: i64, w: i64, h: i64, t0: f32, t1: f32) -> Region {
         Region { text: text.into(), x, y, w, h, t0, t1 }
