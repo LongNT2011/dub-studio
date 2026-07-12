@@ -339,7 +339,13 @@ pub fn emit_title(out: &mut Vec<String>, b: &Title, width: i64, height: i64) {
     // SIZE: seed от line height оригинала, кап, перенос по ширине бокса.
     let n_src = (b.text.matches('\n').count() as i64 + 1).max(1);
     let lh0 = b.lh.unwrap_or(h).max(1);
-    let max_lines = (n_src + 1).max(((h as f64 / lh0 as f64).round() as i64) + 1);
+    // КЕГЛЬ — от ВЫСОТЫ СТРОКИ (lh), НЕ от bbox.h. bbox af95837 растянут на всю contiguous-СТОПКУ
+    // (для блюра — дыра не возвращается), но h стопки НЕ равно высоте титр-ТЕКСТА: у boris блюр-стопка
+    // 169px против строки ~70px. Раньше max_lines=round(h/lh)+1 читал h СТОПКИ -> для 169/70 давал 3
+    // строки, автошринк не срабатывал и fs=lh=70 раздувало титр втрое против оригинала. Бюджет строк
+    // считаем от СОБСТВЕННОГО кол-ва исходных строк (n_src) + 1 слак — оригинальный box держал ровно
+    // n_src*lh, round((n_src*lh)/lh)+1 = n_src+1 — стопка блюра на кегль больше не влияет.
+    let max_lines = (n_src + 1).max(2);
     let fs_cap = (height as f64 * 0.085) as i64;
     let szpx = b.size_px;
     let mut fs = match szpx {

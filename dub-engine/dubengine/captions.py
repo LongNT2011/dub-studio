@@ -393,9 +393,14 @@ def _emit_title(out, b, width, height):
     # box width (not the whole frame) so the footprint + line count match the original.
     n_src = max(1, (b.get("text") or "").count("\n") + 1)
     lh0 = max(1, int(b.get("lh") or h))
-    # allow as many wrapped lines as the ORIGINAL box height held (+1 slack) — a longer translation keeps the
-    # original SIZE and just takes the lines it needs, instead of being shrunk to fit n_src lines (tiny POV bug).
-    max_lines = max(n_src + 1, round(h / lh0) + 1)
+    # SIZE comes from the LINE HEIGHT (lh), NOT bbox h. The blur-bleed fix grows bbox to the whole contiguous
+    # STACK (so the blur has no hole), but the stack h is NOT the title-TEXT height: boris' blur stack is 169px
+    # vs a ~70px line. round(h/lh0)+1 read the STACK h -> for 169/70 it allowed 3 lines, so the auto-shrink
+    # never fired and fs=lh=70 ballooned the title 3x over the original. Budget the line count from the title's
+    # OWN source line count (n_src) +1 slack — the original box held exactly n_src*lh, so round((n_src*lh)/lh)+1
+    # = n_src+1. This keeps "a longer translation keeps the original SIZE and takes the lines it needs" while the
+    # blur stack no longer inflates the kegel (tiny-POV bug stays fixed, giant-POV regression gone).
+    max_lines = max(n_src + 1, 2)
     fs_cap = int(height * 0.085)
     _szpx = b.get("size_px")                                    # explicit editor size override -> skip auto-fit
     fs = max(12, int(_szpx)) if _szpx else min(fs_cap, max(22, lh0))
