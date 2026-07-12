@@ -179,7 +179,7 @@ fn op_regen_all(p: &mut Project, _edit: &Value) -> PatchResult {
 /// Порт edit_caption._apply: неизвестных ключей нет (Pydantic валидирует), но extra="allow" сохраняет
 /// vision-поля (background/scene_*). Здесь принимаем любые ключи стиля; типизированные кладём в поля,
 /// остальные — в extra, чтобы map_sub_style (render.rs) их подхватил (в т.ч. plate/plate_color — тумблер
-/// подложки, продуктовое отклонение 2026-07-12).
+/// подложки).
 fn apply_substyle_fields(st: &mut SubStyle, fields: &serde_json::Map<String, Value>) {
     for (k, v) in fields {
         match k.as_str() {
@@ -397,6 +397,9 @@ fn op_blur(p: &mut Project, edit: &Value) -> PatchResult {
     if let Some(t0) = f(edit, "t0") { bx.t0 = t0; }
     if let Some(t1) = f(edit, "t1") { bx.t1 = t1; }
     if let Some(hidden) = b(edit, "hidden") { bx.hidden = hidden; }
+    if let Some(v) = edit.get("fill") {
+        bx.fill = v.as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
+    }
     Ok(())
 }
 
@@ -410,7 +413,7 @@ fn op_blur_add(p: &mut Project, edit: &Value) -> PatchResult {
     let t0 = f(edit, "t0").unwrap_or(0.0);
     let t1 = f(edit, "t1").unwrap_or(p.meta.duration);
     p.captions.blur_boxes.push(BlurBox {
-        x, y, w, h, t0, t1, hidden: false, extra: Default::default(),
+        x, y, w, h, t0, t1, hidden: false, fill: None, extra: Default::default(),
     });
     Ok(())
 }

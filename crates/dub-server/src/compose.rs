@@ -345,8 +345,7 @@ pub fn run(
     // caption_boxes (analyze_layout) и per-segment seg_y (pipeline.py 757-765) медианит ТОЛЬКО по нему —
     // титры/таглайны/group туда не попадают по построению. Порт складывает всё в один blur_boxes, поэтому
     // маркируем именно band-подмножество (= питоновский caption_boxes-производный band_blur), чтобы
-    // render.rs::seg_y ехал на РЕАЛЬНУЮ полосу оригинала, а не на верхний title/tagline-блюр в нижней
-    // половине кадра (репорт: строка «SUBSCRIPTION.» села на таглайн y≈464 вместо полосы y≈641).
+    // render.rs::seg_y ехал на реальную полосу оригинала, а не на верхний title/tagline-блюр.
     let band_tagged: Vec<BlurBox> = band_blur
         .iter()
         .cloned()
@@ -407,6 +406,19 @@ pub fn run(
 
     // ── записать в Project ─────────────────────────────────────────────────────
     proj.captions.titles = loc_blocks.iter().map(locblock_to_title).collect();
+    let mut final_blur = final_blur;
+    let hint: Option<(bool, Option<String>)> = if !ctitles.is_empty() {
+        proj.captions.sub_style.as_ref().map(|s| (s.scene_flat, s.scene_color.clone()))
+    } else {
+        None
+    };
+    auto_fill_boxes(
+        &ctx.paths.input,
+        &mut final_blur,
+        hint.as_ref().map(|(f, c)| (*f, c.as_deref())),
+        ctx.vw,
+        ctx.vh,
+    );
     proj.captions.blur_boxes = final_blur;
 
     // ── sub_px (порт 608-610) ──────────────────────────────────────────────────
@@ -447,6 +459,103 @@ pub fn run(
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
+
+/// Порт _auto_fill_boxes (pipeline.py 48-99): выбор накрытия per-box. Однотонный фон за текстом
+/// (доля доминирующего цвета >= 0.72) -> fill его цветом; g_flat от Gemma -> fill всегда
+/// (scene_color или доминанта); иначе fill=None (блюр). Любой сбой -> блюр.
+fn auto_fill_boxes(
+    video: &std::path::Path,
+    boxes: &mut [BlurBox],
+    hint: Option<(bool, Option<&str>)>,
+    vw: i64,
+    vh: i64,
+) {
+    let g_flat = hint.map(|(f, _)| f).unwrap_or(false);
+    let g_col: Option<String> = hint
+        .and_then(|(_, c)| c)
+        .filter(|c| c.starts_with('#') && c.len() >= 7)
+        .map(|c| c.to_string());
+    for b in boxes.iter_mut() {
+        let x0 = b.x.max(0);
+        let y0 = b.y.max(0);
+        let x1 = (b.x + b.w).min(vw);
+        let y1 = (b.y + b.h).min(vh);
+        if x1 - x0 < 6 || y1 - y0 < 6 {
+            continue;
+        }
+        let mid = ((b.t0 + b.t1) / 2.0).max(0.0);
+        let Some((dom, frac)) = dominant_box_colour(video, x0, y0, x1 - x0, y1 - y0, mid) else {
+            continue;
+        };
+        if g_flat {
+            b.fill = Some(g_col.clone().unwrap_or(dom));
+        } else if frac >= 0.72 {
+            b.fill = Some(dom);
+        }
+    }
+}
+
+/// Доминирующий цвет ROI кадра в момент t: ("#rrggbb", доля). Сбой -> None.
+fn dominant_box_colour(
+    video: &std::path::Path,
+    x: i64,
+    y: i64,
+    w: i64,
+    h: i64,
+    t: f64,
+) -> Option<(String, f64)> {
+    let ffmpeg = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+    let out = std::process::Command::new(ffmpeg)
+        .args(["-v", "error", "-ss", &format!("{t:.3}")])
+        .arg("-i")
+        .arg(video)
+        .args([
+            "-frames:v",
+            "1",
+            "-vf",
+            &format!("crop={w}:{h}:{x}:{y}"),
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "rgb24",
+            "-",
+        ])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    dominant_colour_rgb24(&out.stdout)
+}
+
+/// Доминирующий цвет RGB24-буфера с квантованием по 24 (питоновские бины //24): усреднённый hex + доля.
+fn dominant_colour_rgb24(rgb: &[u8]) -> Option<(String, f64)> {
+    let n = rgb.len() / 3;
+    if n == 0 {
+        return None;
+    }
+    let key = |p: &[u8]| -> u32 {
+        ((p[0] as u32 / 24) << 16) | ((p[1] as u32 / 24) << 8) | (p[2] as u32 / 24)
+    };
+    let mut counts: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    for p in rgb.chunks_exact(3) {
+        *counts.entry(key(p)).or_insert(0) += 1;
+    }
+    let (&bk, &bc) = counts.iter().max_by_key(|(_, c)| **c)?;
+    let (mut sr, mut sg, mut sb) = (0u64, 0u64, 0u64);
+    for p in rgb.chunks_exact(3) {
+        if key(p) == bk {
+            sr += p[0] as u64;
+            sg += p[1] as u64;
+            sb += p[2] as u64;
+        }
+    }
+    let m = bc as u64;
+    Some((
+        format!("#{:02x}{:02x}{:02x}", sr / m, sg / m, sb / m),
+        bc as f64 / n as f64,
+    ))
+}
 
 fn yfrac(t: &Value) -> f64 {
     t.get("y_frac").and_then(|v| v.as_f64()).unwrap_or(0.0)
@@ -518,7 +627,7 @@ fn dedup_substring_titles(titles: Vec<Value>) -> Vec<Value> {
 /// region -> BlurBox (x,y,w,h,t0,t1). Порт region_blur_box (без роста — регион уже с pad detect_regions).
 fn region_box(r: &R) -> BlurBox {
     let b = blur::region_blur_box(r.x, r.y, r.w, r.h, r.t0, r.t1);
-    BlurBox { x: b.0 as i64, y: b.1 as i64, w: b.2 as i64, h: b.3 as i64, t0: b.4 as f64, t1: b.5 as f64, hidden: false, extra: Default::default() }
+    BlurBox { x: b.0 as i64, y: b.1 as i64, w: b.2 as i64, h: b.3 as i64, t0: b.4 as f64, t1: b.5 as f64, hidden: false, fill: None, extra: Default::default() }
 }
 
 /// (x,y,w,h)+time -> BlurBox с округлением времени (как group_blur/loc_block: bbox + start/end).
@@ -531,6 +640,7 @@ fn bbox_box(bbox: (f32, f32, f32, f32), t0: f32, t1: f32) -> BlurBox {
         t0: ((t0 * 100.0).round() / 100.0) as f64,
         t1: ((t1 * 100.0).round() / 100.0) as f64,
         hidden: false,
+        fill: None,
         extra: Default::default(),
     }
 }
@@ -544,6 +654,7 @@ fn locblock_box(b: &LocBlock) -> BlurBox {
         t0: ((b.start * 100.0).round() / 100.0) as f64,
         t1: ((b.end * 100.0).round() / 100.0) as f64,
         hidden: false,
+        fill: None,
         extra: Default::default(),
     }
 }

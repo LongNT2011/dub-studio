@@ -37,8 +37,20 @@ fn en(t0: f64, t1: f64) -> String {
     format!("enable='between(t\\,{:.2}\\,{:.2})'", t0, t1)
 }
 
-/// Собрать filter_complex графа блюр+ASS (общий для burn/burn_frame). `prefix_parts` — начальные
-/// узлы (для burn_frame это select). Возвращает (graph, использует_ли_filter_complex).
+/// '#RRGGBB' -> цвет ffmpeg drawbox '0xrrggbb' (кривое значение -> чёрный). Порт _ff_color.
+fn ff_color(hexc: Option<&str>) -> String {
+    let c = hexc.unwrap_or("").trim_start_matches('#');
+    if c.len() >= 6 {
+        format!("0x{}", c[..6].to_lowercase())
+    } else {
+        "0x000000".to_string()
+    }
+}
+
+/// Собрать filter_complex графа накрытий+ASS (общий для burn/burn_frame) — порт _cover_parts.
+/// Per-box взаимоисключающе: fill="#hex" -> СПЛОШНОЙ drawbox этого цвета (плоский фон, чистый край,
+/// на фоне своего цвета невидим); fill=None -> бокс идёт в ОДИН полнокадровый gblur и композитится
+/// обратно строго внутри бокса (текстурная сцена). `lead_parts` — начальные узлы (burn_frame: select).
 fn blur_graph(
     ass_f: &str,
     blur_boxes: &[BlurBox],
@@ -48,35 +60,90 @@ fn blur_graph(
     lead_parts: &[String],
     base_label: &str,
 ) -> String {
-    let n = blur_boxes.len();
+    let pad = |bx: &BlurBox| {
+        let bx0 = (bx.x - 2).max(0);
+        let by0 = (bx.y - 2).max(0);
+        let bw = (bx.w + 4).min(frame_w - bx0);
+        let bh = (bx.h + 4).min(frame_h - by0);
+        (bx0, by0, bw, bh, (bx.t0 - 0.6).max(0.0), bx.t1 + 0.4)
+    };
+    let fills: Vec<&BlurBox> = blur_boxes.iter().filter(|b| b.fill.is_some()).collect();
+    let blurs: Vec<&BlurBox> = blur_boxes.iter().filter(|b| b.fill.is_none()).collect();
     let mut parts: Vec<String> = lead_parts.to_vec();
-    parts.push(format!("[{base_label}]split=2[base][bsrc]"));
-    parts.push(format!("[bsrc]gblur=sigma={}[blr]", blur_sigma));
-    let srcs: Vec<String>;
-    if n > 1 {
-        let mut s = format!("[blr]split={n}");
-        for i in 0..n {
-            s.push_str(&format!("[s{i}]"));
-        }
-        parts.push(s);
-        srcs = (0..n).map(|i| format!("s{i}")).collect();
-    } else {
-        srcs = vec!["blr".to_string()];
+    let mut cur = base_label.to_string();
+    if !fills.is_empty() {
+        // сплошные накрытия: цепочка drawbox прямо на стриме.
+        let dbs: Vec<String> = fills
+            .iter()
+            .map(|bx| {
+                let (bx0, by0, bw, bh, t0b, t1b) = pad(bx);
+                format!(
+                    "drawbox=x={bx0}:y={by0}:w={bw}:h={bh}:color={}@1:t=fill:{}",
+                    ff_color(bx.fill.as_deref()),
+                    en(t0b, t1b)
+                )
+            })
+            .collect();
+        parts.push(format!("[{cur}]{}[filled]", dbs.join(",")));
+        cur = "filled".to_string();
     }
-    let mut cur = "base".to_string();
-    for (i, bx) in blur_boxes.iter().enumerate() {
-        let (dx, dy) = (2i64, 2i64);
-        let bx0 = (bx.x - dx).max(0);
-        let by0 = (bx.y - dy).max(0);
-        let bw = (bx.w + 2 * dx).min(frame_w - bx0);
-        let bh = (bx.h + 2 * dy).min(frame_h - by0);
-        let t0b = (bx.t0 - 0.6).max(0.0);
-        let t1b = bx.t1 + 0.4;
-        parts.push(format!("[{}]crop={bw}:{bh}:{bx0}:{by0}[c{i}]", srcs[i]));
-        parts.push(format!("[{cur}][c{i}]overlay={bx0}:{by0}:{}[v{i}]", en(t0b, t1b)));
-        cur = format!("v{i}");
+    if !blurs.is_empty() {
+        let n = blurs.len();
+        parts.push(format!("[{cur}]split=2[cbase][bsrc]"));
+        parts.push(format!("[bsrc]gblur=sigma={}[blr]", blur_sigma));
+        let srcs: Vec<String>;
+        if n > 1 {
+            let mut s = format!("[blr]split={n}");
+            for i in 0..n {
+                s.push_str(&format!("[s{i}]"));
+            }
+            parts.push(s);
+            srcs = (0..n).map(|i| format!("s{i}")).collect();
+        } else {
+            srcs = vec!["blr".to_string()];
+        }
+        cur = "cbase".to_string();
+        for (i, bx) in blurs.iter().enumerate() {
+            let (bx0, by0, bw, bh, t0b, t1b) = pad(bx);
+            parts.push(format!("[{}]crop={bw}:{bh}:{bx0}:{by0}[c{i}]", srcs[i]));
+            parts.push(format!("[{cur}][c{i}]overlay={bx0}:{by0}:{}[v{i}]", en(t0b, t1b)));
+            cur = format!("v{i}");
+        }
     }
     format!("{};[{cur}]{ass_f}[outv]", parts.join(";"))
+}
+
+#[cfg(test)]
+mod graph_tests {
+    use super::*;
+
+    fn bx(fill: Option<&str>) -> BlurBox {
+        BlurBox { x: 100, y: 900, w: 300, h: 60, t0: 1.0, t1: 3.0, fill: fill.map(|s| s.into()) }
+    }
+
+    // fill-боксы -> drawbox сплошным цветом, БЕЗ gblur; blur-боксы -> gblur-ветка. Порт _cover_parts.
+    #[test]
+    fn fills_use_drawbox_not_gblur() {
+        let g = blur_graph("ass='x.ass'", &[bx(Some("#FFFFFF"))], 720, 1280, 60, &[], "0:v");
+        assert!(g.contains("drawbox=") && g.contains("color=0xffffff@1:t=fill"), "{g}");
+        assert!(!g.contains("gblur"), "все боксы fill -> gblur не нужен: {g}");
+    }
+
+    #[test]
+    fn mixed_boxes_split_between_drawbox_and_gblur() {
+        let g = blur_graph(
+            "ass='x.ass'",
+            &[bx(Some("#FFFFFF")), bx(None)],
+            720,
+            1280,
+            60,
+            &[],
+            "0:v",
+        );
+        assert!(g.contains("drawbox=") && g.contains("gblur"), "{g}");
+        // drawbox-цепь идёт ПЕРЕД блюром (питон: fills -> filled -> split для блюра).
+        assert!(g.find("drawbox").unwrap() < g.find("gblur").unwrap(), "{g}");
+    }
 }
 
 /// Вжечь блюр боксов оригинала + оверлей ASS. blur_boxes: [(x,y,w,h,t0,t1)]. Без аудио (муксится

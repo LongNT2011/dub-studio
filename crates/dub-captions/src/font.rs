@@ -136,11 +136,8 @@ pub fn text_geom(lines: &[String], fs: i64, fontpath: &Path) -> (f32, f32, f32) 
     for (i, line) in lines.iter().enumerate() {
         let s = if line.is_empty() { " " } else { line.as_str() };
         ink_w = ink_w.max(advance_width(&scaled, s));
-        // Вертикальный ink bbox строки. line_ink_vspan отдаёт его ОТ BASELINE (top≈-asc, отрицателен
-        // вверх), а питоновский PIL getbbox — от ВЕРХА ячейки строки (ascender-линии), вниз положительно.
-        // lt = верх ячейки строки i, значит baseline = lt + asc: переводим baseline-оффсеты в систему
-        // питона прибавлением asc. Без этого весь ink-блок уезжает вверх на ~asc и KP/титул-плашки
-        // рисуются мимо текста.
+        // line_ink_vspan отдаёт bbox от baseline; PIL getbbox — от верха ячейки. lt = верх ячейки,
+        // baseline = lt + asc.
         let (bb_top, bb_bot) = line_ink_vspan(&scaled, s, asc, desc);
         let lt = top0 + i as f32 * lh;
         ink_top = ink_top.min(lt + asc + bb_top);
@@ -196,10 +193,7 @@ pub fn font_file_for(family: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    // Конвенция _text_geom (как в питоне): ink-экстенты ОТНОСИТЕЛЬНО метрического центра блока,
-    // ink-блок лежит ВНУТРИ метрической ячейки [top0, top0+n*lh]. Регресс-якорь на баг 2026-07-12:
-    // baseline-оффсеты ab_glyph подмешивались без сдвига на asc и весь блок уезжал вверх на ~ascent —
-    // KP-крышка и титул-плашки рисовались мимо текста (кадр «ПРЯМО.»: белый прямоугольник не там).
+    // Ink-экстенты относительно метрического центра блока лежат внутри ячейки [top0, top0+n*lh].
     #[test]
     fn text_geom_ink_within_metric_cell() {
         let fp = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

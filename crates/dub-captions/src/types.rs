@@ -41,13 +41,10 @@ pub struct SubStyle {
     pub scene_color: Option<String>,
     pub scene_flat: bool,
     pub solid: bool,
-    /// Дефолтная подложка сабов (продуктовое отклонение 2026-07-12, приказ юзера): при bg=none/пусто
-    /// сабы рисуются на СПЛОШНОЙ плашке (ветка A, BorderStyle=3), как в эталоне example_dub.mp4.
-    /// None (не задано) = продуктовый дефолт ON (плашка). Some(false) = юзер отключил оверрайдом
-    /// (fall-through к питоновским outline/dark-plate веткам). Some(true) = принудительно плашка.
+    /// Some(true) = принудительная сплошная плашка (BorderStyle=3) из редактора; None/Some(false) =
+    /// стиль по vision (полоса оригинала/outline).
     pub plate: Option<bool>,
-    /// Цвет дефолтной подложки, если vision не дал явного bg. Дефолт чёрный #000000 (эталон); если
-    /// vision дал тёмный scene_color — можно его. None -> #000000.
+    /// Цвет принудительной плашки. None -> #000000.
     pub plate_color: Option<String>,
 }
 
@@ -84,8 +81,8 @@ pub struct Sub {
     pub y: Option<i64>,
 }
 
-/// Blur-бокс для burn: (x,y,w,h,t0,t1).
-#[derive(Clone, Copy, Debug, Default)]
+/// Blur-бокс для burn: (x,y,w,h,t0,t1,fill).
+#[derive(Clone, Debug, Default)]
 pub struct BlurBox {
     pub x: i64,
     pub y: i64,
@@ -93,4 +90,6 @@ pub struct BlurBox {
     pub h: i64,
     pub t0: f64,
     pub t1: f64,
+    /// None = gblur; "#rrggbb" = сплошная заливка (порт fill из _cover_parts).
+    pub fill: Option<String>,
 }

@@ -73,7 +73,6 @@ pub fn stage(
     // ── band_blur (порт pipeline.py:416-442, item#2 аудита) ────────────────────
     // caption_boxes -> Det (x,y,w,h,t), отфильтровать центр-straddle гейтом (боковые вывески CHIYA/BAKERY
     // выпадают), коалесцировать в бокс-спаны (IoU>=0.5, тайм-гейт 1.6*dt), pad (-6,-4,+12,+8), t0..t1+dt.
-    // Раньше здесь был мёртвый путь: по одному BlurBox на каждый raw бокс БЕЗ центр-гейта/коалесценции.
     let dets: Vec<blur::Det> = caption_boxes
         .iter()
         .filter(|b| blur::straddles_center(b.0 as f32, b.2 as f32, vw as f32))
@@ -90,6 +89,7 @@ pub fn stage(
             t0: s.4 as f64,
             t1: s.5 as f64,
             hidden: false,
+            fill: None,
             extra: Default::default(),
         })
         .collect();

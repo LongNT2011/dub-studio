@@ -40,6 +40,7 @@ pub fn preview_frame(
             h: b.h,
             t0: b.t0,
             t1: b.t1,
+            fill: b.fill.clone(),
         })
         .collect();
 

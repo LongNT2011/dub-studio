@@ -293,6 +293,9 @@ pub struct BlurBox {
     pub t1: f64,
     #[serde(default)]
     pub hidden: bool,
+    /// None = gblur (текстурный фон); "#rrggbb" = сплошная заливка этим цветом (плоский фон).
+    #[serde(default)]
+    pub fill: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
