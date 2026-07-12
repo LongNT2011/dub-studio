@@ -15,6 +15,7 @@ mod jobs;
 mod media;
 mod ocr;
 mod patch;
+mod record;
 mod render;
 mod setup;
 mod spa;
@@ -127,6 +128,8 @@ pub struct AppState {
     pub fonts_dir: PathBuf,
     /// Корень моделей (для OCR: <root>/ocr/…). Env DUBENGINE_MODELS_ROOT, иначе <repo>/models.
     pub models_root: PathBuf,
+    /// Каталог голосов-паков + записей с микрофона. Env DUBENGINE_VOICES, иначе <repo>/voices.
+    pub voices_dir: PathBuf,
     /// Флаг отмены текущей setup-закачки (POST /setup/cancel взводит; download-loop его читает).
     pub setup_cancel: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -197,6 +200,9 @@ impl AppState {
         let fonts_dir = std::env::var("DUB_STUDIO_FONTS_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|_| repo_root.join("fonts"));
+        let voices_dir = std::env::var("DUBENGINE_VOICES")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| repo_root.join("voices"));
         AppState {
             repo_root,
             workspace,
@@ -212,6 +218,7 @@ impl AppState {
             higgs_model_root,
             fonts_dir,
             models_root: mroot,
+            voices_dir,
             setup_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
@@ -270,8 +277,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/setup/browse", post(setup_browse))
         .route("/setup/import", post(setup_import))
         .route("/hw/snapshot", get(hw_snapshot))
+        .route("/record/devices", get(record_devices))
+        .route("/record/level", get(record_level))
+        .route("/record/start", post(record_start))
+        .route("/record/stop", post(record_stop))
+        .route("/voices/download-pack", post(voices_download_pack))
         .route("/fonts", get(endpoints::fonts))
-        .route("/voices", get(endpoints::voices))
+        .route("/voices", get(voices_list))
         .route("/presets", get(endpoints::presets))
         .route("/projects", post(create_project))
         .route(
@@ -378,6 +390,82 @@ async fn setup_cancel(State(st): State<AppState>) -> Json<Value> {
 /// GET /hw/snapshot — снимок GPU/VRAM/темп/мощность + RAM для монитора ресурсов.
 async fn hw_snapshot() -> Json<hw::HardwareSnapshot> {
     Json(tokio::task::spawn_blocking(hw::snapshot).await.unwrap_or_default())
+}
+
+/// Безопасное имя голоса: только буквы/цифры/пробел/дефис/подчёркивание (без разделителей путей).
+fn sanitize_voice_name(s: &str) -> String {
+    let n: String = s
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '-' || *c == '_')
+        .take(48)
+        .collect();
+    let n = n.trim().to_string();
+    if n.is_empty() { "Мой голос".to_string() } else { n }
+}
+
+/// Имена голосов в каталоге: стемы .wav/.mp3 (запись с микрофона = .wav; пак = .mp3).
+fn list_voice_names(dir: &Path) -> Vec<String> {
+    let mut names = std::collections::BTreeSet::new();
+    if let Ok(rd) = std::fs::read_dir(dir) {
+        for e in rd.flatten() {
+            let p = e.path();
+            let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+            if ext == "wav" || ext == "mp3" {
+                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                    names.insert(stem.to_string());
+                }
+            }
+        }
+    }
+    names.into_iter().collect()
+}
+
+/// GET /voices — список голосов из каталога (пак + записи с микрофона).
+async fn voices_list(State(st): State<AppState>) -> Json<Value> {
+    Json(json!({ "voices": list_voice_names(&st.voices_dir) }))
+}
+
+/// GET /record/devices — список микрофонов.
+async fn record_devices() -> Json<Value> {
+    Json(json!({ "devices": tokio::task::spawn_blocking(record::input_devices).await.unwrap_or_default() }))
+}
+
+/// GET /record/level — текущий пик 0..1 (метр уровня).
+async fn record_level() -> Json<Value> {
+    Json(json!({ "level": record::level() }))
+}
+
+/// POST /record/start {name, device?} — начать запись голоса в voices/<name>.wav.
+async fn record_start(State(st): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
+    let name = sanitize_voice_name(body.get("name").and_then(|v| v.as_str()).unwrap_or("Мой голос"));
+    let device = body.get("device").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let path = st.voices_dir.join(format!("{name}.wav"));
+    match tokio::task::spawn_blocking(move || record::start(&path, device)).await {
+        Ok(Ok(())) => Json(json!({ "ok": true, "name": name })),
+        Ok(Err(e)) => Json(json!({ "ok": false, "error": e })),
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+/// POST /record/stop — остановить запись; вернуть имя записанного голоса + обновлённый список.
+async fn record_stop(State(st): State<AppState>) -> Json<Value> {
+    let path = tokio::task::spawn_blocking(record::stop).await;
+    let name = match path {
+        Ok(Ok(p)) => p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()),
+        _ => None,
+    };
+    Json(json!({ "name": name, "voices": list_voice_names(&st.voices_dir) }))
+}
+
+/// POST /voices/download-pack — скачать пак голосов (VibeVoice) и распаковать в каталог голосов.
+async fn voices_download_pack(State(st): State<AppState>) -> Response {
+    let dir = st.voices_dir.clone();
+    let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
+        let cb = |ev: Value| progress(ev);
+        record::download_pack(&dir, &cb)
+    });
+    let job_id = st.jobs.enqueue(job).await;
+    Json(json!({ "job_id": job_id })).into_response()
 }
 
 /// POST /setup/browse — открыть нативный диалог выбора папки, импортировать оттуда готовые модели по
@@ -577,6 +665,7 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
         higgs_device: 0,
         higgs_threads: st.opts.num_threads,
         max_stretch: st.opts.max_stretch as f64,
+        voices_dir: st.voices_dir.clone(),
     };
 
     let dir_for_job = dir.clone();

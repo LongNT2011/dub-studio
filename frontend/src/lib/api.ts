@@ -80,6 +80,11 @@ export const api = {
   setOpts: (edit: Partial<ModelStack>) =>
     fetch(`${BASE}/engine/opts`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit) }).then(j<{ models: ModelStack }>),
   voices: () => fetch(`${BASE}/voices`).then(j<{ voices: string[] }>),
+  recordDevices: () => fetch(`${BASE}/record/devices`).then(j<{ devices: string[] }>),
+  recordLevel: () => fetch(`${BASE}/record/level`).then(j<{ level: number }>),
+  recordStart: (name: string, device?: string) => fetch(`${BASE}/record/start`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, device }) }).then(j<{ ok: boolean; name?: string; error?: string }>),
+  recordStop: () => fetch(`${BASE}/record/stop`, { method: "POST" }).then(j<{ name: string | null; voices: string[] }>),
+  voicesDownloadPack: () => fetch(`${BASE}/voices/download-pack`, { method: "POST" }).then(j<{ job_id: string }>),
   presets: () => fetch(`${BASE}/presets`).then(j<{ presets: Record<string, Record<string, unknown>>; reveals: string[] }>),
   createProject: (file: File) => {
     const fd = new FormData(); fd.append("file", file);

@@ -77,7 +77,13 @@
     "funny": "搞笑声音",
     "fixed": "固定时长",
     "dynamic": "自然时长",
-    "regenAll": "重新生成全部配音"
+    "regenAll": "重新生成全部配音",
+    "record": "录制语音",
+    "recordStop": "停止",
+    "recordName": "语音名称",
+    "downloadPack": "下载语音包",
+    "packDownloading": "下载中…",
+    "recordHint": "录制你自己的声音——它会出现在列表中。"
   },
   "remix": {
     "title": "改编",

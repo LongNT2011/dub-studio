@@ -77,7 +77,13 @@
     "funny": "Funny voice",
     "fixed": "Fixed duration",
     "dynamic": "Natural length",
-    "regenAll": "Regenerate all voiceover"
+    "regenAll": "Regenerate all voiceover",
+    "record": "Record voice",
+    "recordStop": "Stop",
+    "recordName": "Voice name",
+    "downloadPack": "Download voice pack",
+    "packDownloading": "Downloading pack…",
+    "recordHint": "Record your own voice — it appears in the list and can be picked in “Voice from pack”."
   },
   "remix": {
     "title": "Remix",

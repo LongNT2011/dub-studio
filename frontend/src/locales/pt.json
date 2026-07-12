@@ -77,7 +77,13 @@
     "funny": "Voz engraçada",
     "fixed": "Duração fixa",
     "dynamic": "Duração natural",
-    "regenAll": "Regenerar toda a narração"
+    "regenAll": "Regenerar toda a narração",
+    "record": "Gravar voz",
+    "recordStop": "Parar",
+    "recordName": "Nome da voz",
+    "downloadPack": "Baixar pack de vozes",
+    "packDownloading": "Baixando…",
+    "recordHint": "Grave sua voz — aparecerá na lista."
   },
   "remix": {
     "title": "Remix",

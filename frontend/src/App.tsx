@@ -1155,6 +1155,11 @@ function Editor() {
               <option value="autocast">{t("voice.autocast")}</option>
               <option value="voice">{t("voice.pack")}</option>
             </select>
+            <VoiceRecorder voiceList={voiceList} onVoices={setVoiceList}
+              onDone={(nm) => branch("recast", { voice_mode: "voice", voice_name: nm })} />
+            {p.audio.voice.mode !== "voice" && (
+              <div className="mt-1 text-[10px] text-[var(--color-muted)] leading-snug">{t("voice.recordHint")}</div>
+            )}
             {p.audio.voice.mode === "voice" && (() => {
               // per-speaker pack voices: engine maps a comma-list to sorted speakers (cycling), so each
               // diarized speaker can get a DISTINCT/funny voice. 1 speaker -> a single picker.
@@ -1192,6 +1197,69 @@ function Editor() {
 
       </aside>
       <CommandPalette commands={cmds} />
+    </div>
+  );
+}
+
+// Запись своего голоса с микрофона + скачка пака голосов. onDone(name) — новый голос готов.
+function VoiceRecorder({ voiceList, onVoices, onDone }: { voiceList: string[]; onVoices: (v: string[]) => void; onDone: (name: string) => void }) {
+  const { t } = useTranslation();
+  const [rec, setRec] = useState(false);
+  const [level, setLevel] = useState(0);
+  const [name, setName] = useState("");
+  const [packMsg, setPackMsg] = useState<string | null>(null);
+  const lvlTimer = useRef<number | null>(null);
+
+  const start = async () => {
+    const nm = (name.trim() || `Мой голос ${voiceList.length + 1}`);
+    const r = await api.recordStart(nm).catch(() => null);
+    if (!r || !r.ok) return;
+    setRec(true);
+    lvlTimer.current = window.setInterval(async () => {
+      try { const l = await api.recordLevel(); setLevel(l.level); } catch { /* ignore */ }
+    }, 100);
+  };
+  const stop = async () => {
+    if (lvlTimer.current) window.clearInterval(lvlTimer.current);
+    setRec(false); setLevel(0);
+    const r = await api.recordStop().catch(() => null);
+    if (r) { onVoices(r.voices); if (r.name) onDone(r.name); setName(""); }
+  };
+  const downloadPack = async () => {
+    setPackMsg(t("voice.packDownloading"));
+    try {
+      const { job_id } = await api.voicesDownloadPack();
+      await api.watchJob(job_id, (e) => { if (e.type === "progress") setPackMsg(`${e.msg ?? ""} ${e.pct ? Math.round(e.pct) + "%" : ""}`); });
+      const v = await api.voices(); onVoices(v.voices);
+    } catch { /* ignore */ } finally { setPackMsg(null); }
+  };
+
+  return (
+    <div className="mt-2 space-y-2">
+      <div className="flex items-center gap-2">
+        <input value={name} onChange={(e) => setName(e.target.value)} disabled={rec} placeholder={t("voice.recordName")}
+          className="flex-1 min-w-0 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[12px] focus:border-[var(--color-accent)] focus:outline-none" />
+        {rec ? (
+          <button onClick={stop} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-warn,#ef4444)] text-white text-[12px] font-semibold">
+            <Square size={13} />{t("voice.recordStop")}
+          </button>
+        ) : (
+          <button onClick={start} title={t("voice.record")} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-[12px] font-medium hover:border-[var(--color-accent)]">
+            <span className="w-2 h-2 rounded-full bg-[var(--color-danger,#ef4444)]" />{t("voice.record")}
+          </button>
+        )}
+      </div>
+      {rec && (
+        <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+          <div className="h-full bg-[var(--color-accent)] transition-[width] duration-100" style={{ width: `${Math.min(100, level * 140)}%` }} />
+        </div>
+      )}
+      {voiceList.length === 0 && !rec && (
+        <button onClick={downloadPack} disabled={!!packMsg}
+          className="w-full inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg border border-dashed border-[var(--color-border)] text-[12px] text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] disabled:opacity-50">
+          {packMsg ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}{packMsg || t("voice.downloadPack")}
+        </button>
+      )}
     </div>
   );
 }

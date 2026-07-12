@@ -34,6 +34,7 @@ pub struct RenderPaths {
     pub higgs_device: i32,
     pub higgs_threads: i32,
     pub max_stretch: f64,
+    pub voices_dir: PathBuf,   // каталог голосов-паков + записей с микрофона
 }
 
 pub type Progress<'a> = dyn Fn(Value) + Send + Sync + 'a;
@@ -180,11 +181,33 @@ fn build_dub(
     let vocals16 = wd.join("vocals16.wav");
     media::to_16k_mono(&vocals, &vocals16)?;
 
-    // 3) клон-референс НА КАЖДОГО спикера: длиннейшая реплика спикера -> ref_spk{N}.wav (voices.resolve
-    //    clone). Мультиспикер-ролик озвучивается голосом своего диаризованного спикера.
-    let spk_refs = build_speaker_refs(&segs, &vocals16, wd)?;
-    let first_ref = spk_refs.values().next().cloned().unwrap_or_else(|| wd.join("ref.wav"));
+    // 3) клон-референс. voice.mode="voice" + имя -> берём ОДИН реф из пака/записи (voices/<name>.wav|mp3)
+    //    на всех спикеров. Иначе (clone) — длиннейшая реплика КАЖДОГО спикера из вокала ролика.
+    let pack_ref: Option<PathBuf> = if proj.audio.voice.mode == "voice" {
+        proj.audio.voice.name.as_deref().and_then(|name| {
+            let name = name.split(',').next().unwrap_or(name).trim();
+            let cand = ["wav", "mp3"].iter().map(|e| paths.voices_dir.join(format!("{name}.{e}"))).find(|p| p.is_file());
+            cand.and_then(|src| {
+                let out = wd.join("ref_pack.wav");
+                media::to_16k_mono(&src, &out).ok().map(|_| out)
+            })
+        })
+    } else {
+        None
+    };
+    let spk_refs = if pack_ref.is_some() {
+        std::collections::BTreeMap::new()
+    } else {
+        build_speaker_refs(&segs, &vocals16, wd)?
+    };
+    let first_ref = pack_ref
+        .clone()
+        .or_else(|| spk_refs.values().next().cloned())
+        .unwrap_or_else(|| wd.join("ref.wav"));
     let ref_of = |s: &dub_core::Segment| -> PathBuf {
+        if let Some(pr) = &pack_ref {
+            return pr.clone();
+        }
         s.speaker
             .as_deref()
             .and_then(|k| spk_refs.get(k))
