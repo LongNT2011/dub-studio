@@ -18,6 +18,20 @@ pub use types::{BlurBox, Sub, SubStyle, Title};
 
 use std::path::Path;
 
+/// Габарит нарисованного дублированного субтитра (по фактической геометрии text_geom + паддинг) для
+/// блюр-подложки ПОД нашим текстом. Отдаётся из build(), когда стиль без непрозрачной плашки (иначе
+/// плашка сама кроет фон) — render добавляет её к блюр-боксам, чтобы новый текст лёг на размытый фон,
+/// а не половиной на чистое видео. Старые band-боксы (прячут ОРИГИНАЛ) при этом остаются нетронутыми.
+#[derive(Clone, Debug)]
+pub struct SubCover {
+    pub x: i64,
+    pub y: i64,
+    pub w: i64,
+    pub h: i64,
+    pub t0: f64,
+    pub t1: f64,
+}
+
 /// Параметры build (порт сигнатуры captions.build). preset — имя PRESET (BorderStyle-плашка); titles/
 /// subs — контент; sub_y/sub_style/caption_style/… — стиль; sub_px — измеренный размер оригинала.
 #[derive(Default)]
@@ -74,7 +88,9 @@ pub fn presets_catalog() -> (serde_json::Map<String, serde_json::Value>, Vec<Str
 }
 
 /// Собрать ОДИН ASS с титрами + дублированными субтитрами и записать в out_ass. Порт captions.build.
-pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Result<(), String> {
+/// Возвращает габариты подложек под нашими субтитрами (для блюр-подложки на рендере; пусто, если стиль
+/// сам даёт непрозрачную плашку или сцена плоская с cover-крышкой).
+pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Result<Vec<SubCover>, String> {
     if args.max_lines == 0 {
         args.max_lines = 2;
     }
@@ -145,8 +161,8 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
         .filter(|f| look::is_known_font(f))
         .unwrap_or_else(|| look::FONT_NAME.to_string());
 
-    // S-style строка (порт всех веток if sub_style / elif / else).
-    let s_style = build_s_style(&fontname, sub_fs, margin_v, sub_style, &p);
+    // S-style строка (порт всех веток if sub_style / elif / else). plate_opaque -> плашка уже кроет фон.
+    let (s_style, plate_opaque) = build_s_style(&fontname, sub_fs, margin_v, sub_style, &p);
 
     // head (Script Info + V4+ Styles: T/S/KP/KT).
     let head = build_head(width, height, &s_style, sub_fs, &p);
@@ -207,6 +223,12 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
         ass::font_path_for(&fontname)
     };
     let up = sub_style.map(|s| s.uppercase).unwrap_or(false);
+
+    // Блюр-подложку ПОД нашим текстом собираем, только когда стиль сам НЕ даёт непрозрачную плашку
+    // (plate_opaque) и нет cover-крышки плоской сцены — иначе фон и так закрыт. Пресеты (look_resolved)
+    // несут собственную плашку/reveal. Старые band-боксы (прячут оригинал) остаются отдельно.
+    let needs_cover = !plate_opaque && look_resolved.is_none() && cover_c.is_none();
+    let mut covers: Vec<SubCover> = Vec::new();
 
     let n = vis.len();
     for idx in 0..n {
@@ -291,12 +313,26 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
                     ass::ts(a),
                     ass::ts(b)
                 ));
+                // блюр-подложка РОВНО по габариту нарисованного текста (тот же fs_g/iw/tr/br, что и рендер).
+                if needs_cover {
+                    if let Some(y) = yy {
+                        let padx = (fs_g as f32 * 0.34) as i64;
+                        let pady = (fs_g as f32 * 0.30) as i64;
+                        let x0 = (((width / 2) as f32) - iw / 2.0 - padx as f32).max(2.0) as i64;
+                        let x1 = (((width / 2) as f32) + iw / 2.0 + padx as f32).min(width as f32 - 2.0) as i64;
+                        let y0 = (((y as f32) + tr - pady as f32).max(0.0)) as i64;
+                        let y1 = (((y as f32) + br + pady as f32).min(height as f32)) as i64;
+                        if x1 > x0 && y1 > y0 {
+                            covers.push(SubCover { x: x0, y: y0, w: x1 - x0, h: y1 - y0, t0: a, t1: b });
+                        }
+                    }
+                }
             }
         }
     }
 
     std::fs::write(out_ass, lines.join("\n")).map_err(|e| format!("запись ASS: {e}"))?;
-    Ok(())
+    Ok(covers)
 }
 
 /// Наиболее частая строка (замена max(vals, key=vals.count)).
@@ -314,18 +350,20 @@ fn mode_string(vals: &[String]) -> String {
 }
 
 /// Построить S-style строку (порт всех веток if sub_style / elif bg / elif light / else / no-style).
+/// Возвращает (строка стиля, plate_opaque) — plate_opaque=true, если стиль сам даёт НЕПРОЗРАЧНУЮ плашку
+/// (BorderStyle=3), которая уже кроет фон под текстом (тогда отдельная блюр-подложка не нужна).
 fn build_s_style(
     fontname: &str,
     sub_fs: i64,
     margin_v: i64,
     sub_style: Option<&SubStyle>,
     p: &look::PresetColors,
-) -> String {
+) -> (String, bool) {
     let Some(ss) = sub_style else {
-        return format!(
+        return (format!(
             "Style: S,{fontname},{sub_fs},{},&H000000FF,{},{},-1,0,0,0,100,100,0,0,3,11,0,2,80,80,{margin_v},1",
             p.primary, p.outline_c, p.back
-        );
+        ), true);
     };
     let txt_hex = ss.color.clone();
     let col = look::hex_ass(&txt_hex);
@@ -353,34 +391,36 @@ fn build_s_style(
                 })
                 .as_str(),
         );
-        format!(
+        // outline-only (BorderStyle=1) -> плашки нет, нужна блюр-подложка под текстом.
+        (format!(
             "Style: S,{fontname},{sub_fs},{col},&H000000FF,{soc},&H64000000,{bold},{ital},0,0,100,100,0,0,1,{},2,2,80,80,{margin_v},1",
             w.max(0)
-        )
+        ), false)
     } else if vision_band {
-        format!(
+        (format!(
             "Style: S,{fontname},{sub_fs},{col},&H000000FF,{},&H00000000,{bold},{ital},0,0,100,100,0,0,3,11,0,2,80,80,{margin_v},1",
             look::hex_ass(bg.as_deref().unwrap())
-        )
+        ), true)
     } else if look::lum(&txt_hex) > 0.45 {
         if plate_on {
             // Принудительная сплошная плашка plate_color (BorderStyle=3/Outline=11).
             let plate_hex = ss.plate_color.clone().unwrap_or_else(|| "#000000".to_string());
-            format!(
+            (format!(
                 "Style: S,{fontname},{sub_fs},{col},&H000000FF,{},&H00000000,{bold},{ital},0,0,100,100,0,0,3,11,0,2,80,80,{margin_v},1",
                 look::hex_ass(&plate_hex)
-            )
+            ), true)
         } else {
-            // Светлый текст -> тонкая чёрная обводка (captions.py 530-534).
+            // Светлый текст -> тонкая чёрная обводка (captions.py 530-534). Плашки нет -> блюр-подложка.
             let bord = ((sub_fs as f64 * 0.025).round() as i64).max(2);
-            format!(
+            (format!(
                 "Style: S,{fontname},{sub_fs},{col},&H000000FF,&H00000000,&H00000000,{bold},{ital},0,0,100,100,0,0,1,{bord},0,2,80,80,{margin_v},1"
-            )
+            ), false)
         }
     } else {
-        format!(
+        // Тёмный текст -> белая плашка (BorderStyle=3) сама кроет фон.
+        (format!(
             "Style: S,{fontname},{sub_fs},{col},&H000000FF,&H00FFFFFF,&H00F2F2F2,{bold},{ital},0,0,100,100,0,0,3,10,0,2,80,80,{margin_v},1"
-        )
+        ), true)
     }
 }
 

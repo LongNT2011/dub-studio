@@ -35,6 +35,7 @@ pub struct RenderPaths {
     pub higgs_threads: i32,
     pub max_stretch: f64,
     pub voices_dir: PathBuf,   // каталог голосов-паков + записей с микрофона
+    pub tdt_dir: PathBuf,      // TDT-модель ASR — авто-транскрипция реф-клипа пак-голоса (ref_text клона)
 }
 
 pub type Progress<'a> = dyn Fn(Value) + Send + Sync + 'a;
@@ -94,11 +95,12 @@ pub fn run(
     // ── КАПШЕНЫ ────────────────────────────────────────────────────────────────
     emit(progress, "build", "сборка ASS (титры + дублированные субтитры)");
     let ass_path = wd.join("caps.ass");
-    build_ass(proj, &ass_path, vw, vh, total)?;
+    let sub_covers = build_ass(proj, &ass_path, vw, vh, total)?;
 
     // ── BURN ───────────────────────────────────────────────────────────────────
     emit(progress, "burn", "вжигание субтитров + блюр (ffmpeg + libass, NVENC)");
-    let blur_boxes = collect_blur_boxes(proj);
+    let mut blur_boxes = collect_blur_boxes(proj);
+    blur_boxes.extend(sub_covers.iter().map(cover_to_blur)); // блюр-подложка ПОД нашим текстом
     let captioned = wd.join("captioned.mp4");
     dub_captions::burn(
         &paths.input,
@@ -181,39 +183,92 @@ fn build_dub(
     let vocals16 = wd.join("vocals16.wav");
     media::to_16k_mono(&vocals, &vocals16)?;
 
-    // 3) клон-референс. voice.mode="voice" + имя -> берём ОДИН реф из пака/записи (voices/<name>.wav|mp3)
-    //    на всех спикеров. Иначе (clone) — длиннейшая реплика КАЖДОГО спикера из вокала ролика.
-    let pack_ref: Option<PathBuf> = if proj.audio.voice.mode == "voice" {
-        proj.audio.voice.name.as_deref().and_then(|name| {
-            let name = name.split(',').next().unwrap_or(name).trim();
-            let cand = ["wav", "mp3"].iter().map(|e| paths.voices_dir.join(format!("{name}.{e}"))).find(|p| p.is_file());
-            cand.and_then(|src| {
-                let out = wd.join("ref_pack.wav");
-                // реф КАПИТСЯ до 12с (как клон-рефы): длинный реф -> Higgs не выделяет prefill-граф.
-                media::trim(&src, &out, 0.0, 12.0).ok().map(|_| out)
-            })
-        })
+    // 3) клон-референс. voice.mode="voice" -> реф из пака/записи (voices/<name>.wav|mp3) НА КАЖДОГО спикера.
+    //    Имя — CSV; позиция = отсортированный спикер (как во фронте: speaker ?? "0", лексикографически),
+    //    пустой слот берёт первое непустое имя. Иначе (clone) — длиннейшая реплика спикера из вокала.
+    let pack_refs: std::collections::BTreeMap<String, PathBuf> = if proj.audio.voice.mode == "voice" {
+        let names: Vec<&str> = proj.audio.voice.name.as_deref().unwrap_or("").split(',').map(|s| s.trim()).collect();
+        let first_named = names.iter().copied().find(|n| !n.is_empty());
+        let mut map = std::collections::BTreeMap::new();
+        if first_named.is_some() {
+            let sorted: Vec<String> = proj
+                .segments
+                .iter()
+                .map(|s| s.speaker.clone().unwrap_or_else(|| "0".to_string()))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            for (i, spk) in sorted.iter().enumerate() {
+                let nm = names.get(i).copied().filter(|s| !s.is_empty()).or(first_named).unwrap_or("");
+                let src = ["wav", "mp3"].iter().map(|e| paths.voices_dir.join(format!("{nm}.{e}"))).find(|p| p.is_file());
+                if let Some(src) = src {
+                    let out = wd.join(format!("ref_pack_{i}.wav"));
+                    // реф КАПИТСЯ до 12с (как клон-рефы): длинный реф -> Higgs не выделяет prefill-граф.
+                    if media::trim(&src, &out, 0.0, 12.0).is_ok() {
+                        map.insert(spk.clone(), out);
+                    }
+                }
+            }
+        }
+        map
     } else {
-        None
-    };
-    let spk_refs = if pack_ref.is_some() {
         std::collections::BTreeMap::new()
+    };
+    let use_pack = !pack_refs.is_empty();
+    // ref_texts: расшифровка реф-клипа НА СПИКЕРА (Higgs клонирует качественнее с ref_text). Клон-режим —
+    // src_text выбранного сегмента; пак-режим — АВТОТРАНСКРИПЦИЯ 12с-клипа (как Higgs build_speaker_reference;
+    // пак-.txt = полный 3-мин транскрипт, к 12с не подходит). ASR best-effort: сбой -> None (не хуже прежнего).
+    let (spk_refs, mut ref_texts) = if use_pack {
+        (std::collections::BTreeMap::new(), std::collections::BTreeMap::new())
     } else {
         build_speaker_refs(&segs, &vocals16, wd)?
     };
-    let first_ref = pack_ref
-        .clone()
+    if use_pack && paths.tdt_dir.is_dir() {
+        let mut asr = dub_asr::Asr::new(&paths.tdt_dir);
+        for (spk, refp) in &pack_refs {
+            if let Ok(rsegs) = asr.transcribe(refp, "auto") {
+                let txt = rsegs
+                    .iter()
+                    .map(|s| s.text.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if !txt.trim().is_empty() {
+                    ref_texts.insert(spk.clone(), txt);
+                }
+            }
+        }
+    }
+    let first_ref = pack_refs
+        .values()
+        .next()
+        .cloned()
         .or_else(|| spk_refs.values().next().cloned())
         .unwrap_or_else(|| wd.join("ref.wav"));
     let ref_of = |s: &dub_core::Segment| -> PathBuf {
-        if let Some(pr) = &pack_ref {
-            return pr.clone();
+        let key = s.speaker.as_deref().unwrap_or("0");
+        if use_pack {
+            return pack_refs.get(key).cloned().unwrap_or_else(|| first_ref.clone());
         }
         s.speaker
             .as_deref()
             .and_then(|k| spk_refs.get(k))
             .cloned()
             .unwrap_or_else(|| first_ref.clone())
+    };
+    let reftext_of = |s: &dub_core::Segment| -> Option<String> {
+        let key = s.speaker.as_deref().unwrap_or("0");
+        if let Some(t) = ref_texts.get(key) {
+            return Some(t.clone());
+        }
+        // у спикера есть СВОЁ реф-аудио, но текста нет -> None (чужой текст к чужому аудио хуже, чем без
+        // текста). Спикер без своего аудио (fit -> first_ref) берёт текст первого спикера (совпадает с ним).
+        let has_own = if use_pack { pack_refs.contains_key(key) } else { spk_refs.contains_key(key) };
+        if has_own {
+            None
+        } else {
+            ref_texts.values().next().cloned()
+        }
     };
 
     // 4) TTS каждый сегмент через Higgs (audiocpp). Кэш: seg_XXX.wav; не-dirty переиспользуются.
@@ -249,8 +304,9 @@ fn build_dub(
             .unwrap_or(true);
         let need_synth = (regen_dub && s.dirty) || !raw.is_file() || stale_ref;
         if need_synth {
+            let ref_text = reftext_of(s); // авто-расшифровка рефа -> качество клона (как Higgs)
             let (samples, sr) = engine
-                .voice_clone(tgt, &ref_wav.to_string_lossy(), None, "")
+                .voice_clone(tgt, &ref_wav.to_string_lossy(), ref_text.as_deref(), "")
                 .map_err(|e| format!("Higgs clone seg{fi}: {e}"))?;
             let wav = AudiocppEngine::encode_wav(&samples, sr, 1);
             std::fs::write(&raw, &wav).map_err(|e| format!("запись seg{fi}: {e}"))?;
@@ -293,23 +349,42 @@ fn build_dub(
     // соцсетей (-14 LUFS) без клиппинга.
     emit(progress, "mix", "нормализация громкости (EBU R128, true-peak)");
     let final_audio = wd.join("final_audio.m4a");
-    match media::loudnorm(&mixed, &final_audio, -14.0, -1.0, 11.0) {
-        Ok(()) => Ok(final_audio),
+    let normalized = match media::loudnorm(&mixed, &final_audio, -14.0, -1.0, 11.0) {
+        Ok(()) => final_audio,
         Err(e) => {
             emit(progress, "mix", &format!("loudnorm пропущен ({e})"));
-            Ok(mixed)
+            mixed
         }
+    };
+    // 8) монтажный гейн всей дорожки (если задан). Поверх нормализации — «усилить всё».
+    let gain_db = proj.audio.gain_db;
+    if gain_db.abs() > 0.05 {
+        emit(progress, "mix", &format!("гейн дорожки {gain_db:+.1} dB"));
+        let gained = wd.join("gained_audio.m4a");
+        match media::gain(&normalized, &gained, gain_db) {
+            Ok(()) => Ok(gained),
+            Err(_) => Ok(normalized),
+        }
+    } else {
+        Ok(normalized)
     }
 }
 
 /// Референс клона на КАЖДОГО спикера: {speaker -> ref_spk{N}.wav} из его длиннейшей реплики (<=12с).
 /// Порт voices.resolve clone-ветки. Спикер None -> ключ "0" (моно-ролик = один реф).
+type SpkRefs = (
+    std::collections::BTreeMap<String, PathBuf>,
+    std::collections::BTreeMap<String, String>,
+);
+
 fn build_speaker_refs(
     segs: &[(usize, &dub_core::Segment)],
     vocals16: &Path,
     wd: &Path,
-) -> Result<std::collections::BTreeMap<String, PathBuf>, String> {
+) -> Result<SpkRefs, String> {
     let mut refs: std::collections::BTreeMap<String, PathBuf> = std::collections::BTreeMap::new();
+    // ref_text клона = src_text выбранного сегмента (сегменты ≤8с -> совпадает с ≤12с реф-клипом).
+    let mut texts: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     let mut speakers: Vec<String> =
         segs.iter().map(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into())).collect();
     speakers.sort();
@@ -323,9 +398,13 @@ fn build_speaker_refs(
         let Some(cand) = cand else { continue };
         let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
         media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + 12.0))?;
-        refs.insert(spk, ref_wav);
+        refs.insert(spk.clone(), ref_wav);
+        let t = cand.src_text.trim();
+        if !t.is_empty() {
+            texts.insert(spk, t.to_string());
+        }
     }
-    Ok(refs)
+    Ok((refs, texts))
 }
 
 /// Ускорить дубль под target_dur, если он длиннее (никогда не замедлять). Порт assemble.fit_to_slot.
@@ -534,8 +613,9 @@ pub(crate) fn build_and_burn_captions(
     src_codec: &str,
 ) -> Result<(), String> {
     dub_captions::set_fonts_dir(fonts_dir);
-    build_ass(proj, out_ass, vw, vh, total)?;
-    let blur_boxes = collect_blur_boxes(proj);
+    let sub_covers = build_ass(proj, out_ass, vw, vh, total)?;
+    let mut blur_boxes = collect_blur_boxes(proj);
+    blur_boxes.extend(sub_covers.iter().map(cover_to_blur));
     dub_captions::burn(
         input,
         out_ass,
@@ -551,8 +631,14 @@ pub(crate) fn build_and_burn_captions(
     )
 }
 
-/// Собрать ASS через dub-captions из Project. Порт captions.build call-site pipeline.run.
-pub(crate) fn build_ass(proj: &Project, out_ass: &Path, vw: i64, vh: i64, total: f64) -> Result<(), String> {
+/// Блюр-подложка под нашим субтитром -> BlurBox (fill=None -> gblur). Старые band-боксы не трогаем.
+pub(crate) fn cover_to_blur(c: &dub_captions::SubCover) -> BlurBox {
+    BlurBox { x: c.x, y: c.y, w: c.w, h: c.h, t0: c.t0, t1: c.t1, fill: None }
+}
+
+/// Собрать ASS через dub-captions из Project. Порт captions.build call-site pipeline.run. Возвращает
+/// габариты подложек под дублированными субтитрами (для блюр-подложки; см. SubCover).
+pub(crate) fn build_ass(proj: &Project, out_ass: &Path, vw: i64, vh: i64, total: f64) -> Result<Vec<dub_captions::SubCover>, String> {
     let titles: Vec<CapTitle> = proj.captions.titles.iter().map(map_title).collect();
     let sub_style = proj.captions.sub_style.as_ref().map(map_sub_style);
     // sub_y дефолт vh*0.82 если не задан (как pipeline.py: не затирать edited/pinned sub_y).

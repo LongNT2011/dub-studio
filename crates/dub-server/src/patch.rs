@@ -175,6 +175,15 @@ fn op_regen_all(p: &mut Project, _edit: &Value) -> PatchResult {
     Ok(())
 }
 
+/// gain — монтажный гейн всей дорожки (dB). НЕ помечает dirty: ре-TTS не нужен, применяется на рендере
+/// поверх нормализации (сегменты берутся из кэша).
+fn op_gain(p: &mut Project, edit: &Value) -> PatchResult {
+    if let Some(g) = f(edit, "gain_db") {
+        p.audio.gain_db = g.clamp(-24.0, 24.0);
+    }
+    Ok(())
+}
+
 /// Наложить caption-поля стиля на SubStyle (типизированные — в поля, прочие — в extra passthrough).
 /// Порт edit_caption._apply: неизвестных ключей нет (Pydantic валидирует), но extra="allow" сохраняет
 /// vision-поля (background/scene_*). Здесь принимаем любые ключи стиля; типизированные кладём в поля,
@@ -536,6 +545,7 @@ pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
         "recast" => op_recast(p, edit),
         "regen" => op_regen(p, edit),
         "regen_all" => op_regen_all(p, edit),
+        "gain" => op_gain(p, edit),
         other => Err((400, format!("unknown op {other:?}"))),
     }
 }

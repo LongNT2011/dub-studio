@@ -92,7 +92,9 @@
     "g_male": "男",
     "preview": "试听",
     "narrowSearch": "缩小搜索范围以查看更多",
-    "fromSpeakers": "从说话人创建语音："
+    "fromSpeakers": "从说话人创建语音：",
+    "gain": "轨道增益",
+    "gainHint": "增强整条音轨（重新生成/导出时应用）。"
   },
   "remix": {
     "title": "改编",
@@ -143,7 +145,8 @@
     "newHint": "用新视频开始"
   },
   "play": {
-    "dub": "播放配音（画面 + 配音）"
+    "dub": "播放配音（画面 + 配音）",
+    "volume": "预览音量"
   },
   "seg": {
     "regen": "重新生成该句配音",

@@ -60,6 +60,9 @@ pub struct Audio {
     pub voice: Voice,
     #[serde(default)]
     pub rewrite: Option<String>,
+    /// Дополнительное усиление всей дорожки на монтаже, dB (0 = без изменений). Применяется на рендере.
+    #[serde(default)]
+    pub gain_db: f64,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -74,6 +77,7 @@ impl Default for Audio {
             keep_music: true,
             voice: Voice::default(),
             rewrite: None,
+            gain_db: 0.0,
             extra: Extra::new(),
         }
     }

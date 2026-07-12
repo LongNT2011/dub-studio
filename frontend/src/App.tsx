@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
-import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2 } from "lucide-react";
+import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2 } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useFloatable, dockSlot } from "./lib/useFloatable";
 import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent } from "./lib/api";
@@ -337,15 +337,19 @@ function Feature({ icon: Icon, title, desc, delay }: { icon: typeof Languages; t
   );
 }
 
+// Принимаем все распространённые видео-форматы (ffmpeg декодит их все) — не только mp4/mov.
+const VIDEO_ACCEPT = "video/*,.mp4,.mov,.mkv,.avi,.webm,.m4v,.flv,.wmv,.ts,.mpg,.mpeg,.3gp,.ogv,.mts,.m2ts,.vob,.f4v";
+
 function DropZone() {
   const { t, i18n } = useTranslation();
   const s = useStore();
   const inputRef = useRef<HTMLInputElement>(null);
+  const batchRef = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   const [tgt, setTgt] = useState<string>((i18n.language as string) || "ru");   // translate TO (default = UI lang)
   const [src, setSrc] = useState("auto");                                       // translate FROM (auto-detect)
   const [file, setFile] = useState<File | null>(null);                          // staged video — analyzed on Start, not on drop
-  const [mode, setMode] = useState<"dub" | "subtitles" | "funny">("dub");       // output mode chosen up front
+  const [mode, setMode] = useState<"dub" | "subtitles" | "funny" | "transcribe">("dub");       // output mode chosen up front
   const [funny, setFunny] = useState("");                                       // Gemma rewrite instruction (funny mode)
 
   async function run() {
@@ -355,8 +359,8 @@ function DropZone() {
     try {
       const { project_id } = await api.createProject(file);
       s.setPid(project_id);
-      const eMode = mode === "subtitles" ? "nodub" : "dub";       // subtitles = keep original audio + translated subs
-      const eSubs = mode === "subtitles" ? "translate" : "auto";
+      const eMode = mode === "subtitles" ? "nodub" : mode === "transcribe" ? "transcribe" : "dub"; // subtitles = keep original audio + translated subs; transcribe = только транскрипт+диаризация
+      const eSubs = mode === "subtitles" ? "translate" : mode === "transcribe" ? "transcribe" : "auto";
       const eRewrite = mode === "funny" ? funny.trim() : "";       // funny = rewrite the script + dub, in this pass
       const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
@@ -389,6 +393,7 @@ function DropZone() {
             <Feature icon={Languages} title={t("actions.translate")} desc={t("hero.f1")} delay={0.12} />
             <Feature icon={AudioLines} title={t("actions.dub")} desc={t("hero.f2")} delay={0.18} />
             <Feature icon={Sparkles} title={t("actions.funny")} desc={t("hero.f3")} delay={0.24} />
+            <Feature icon={FileText} title={t("actions.transcribe")} desc={t("hero.f4")} delay={0.3} />
           </div>
         </div>
 
@@ -439,8 +444,8 @@ function DropZone() {
               {LANGS.map((l) => <option key={l} value={l}>{l.toUpperCase()}</option>)}
             </select>
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-1.5">
-            {([["dub", AudioLines], ["subtitles", Captions], ["funny", Sparkles]] as const).map(([m, Icon]) => (
+          <div className="mt-3 grid grid-cols-2 gap-1.5">
+            {([["dub", AudioLines], ["subtitles", Captions], ["funny", Sparkles], ["transcribe", FileText]] as const).map(([m, Icon]) => (
               <button key={m} onClick={() => setMode(m)}
                 className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-[12px] font-medium transition-colors ${mode === m ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
                 <Icon size={14} />{t(`mode.${m}`)}</button>
@@ -453,13 +458,18 @@ function DropZone() {
           <button onClick={run} disabled={!file || (mode === "funny" && !funny.trim())}
             className="mt-2.5 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-40 hover:brightness-105 transition">
             {t("drop.start")} <ArrowRight size={16} /></button>
+          <button onClick={() => batchRef.current?.click()}
+            className="mt-2 w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] text-[13px] font-medium hover:text-[var(--color-text)] hover:border-[#3a414c] transition">
+            <FolderDown size={15} />{t("batch.open")}</button>
           <div className="mt-2 flex items-center justify-center gap-2 text-[12px] text-[var(--color-muted)]">
             <ShieldCheck size={14} className="text-[var(--color-accent-2)]" /> {t("hero.formats")}
           </div>
         </motion.div>
       </motion.div>
-      <input ref={inputRef} type="file" accept="video/mp4,video/quicktime" className="hidden"
+      <input ref={inputRef} type="file" accept={VIDEO_ACCEPT} className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f); }} />
+      <input ref={batchRef} type="file" multiple accept={VIDEO_ACCEPT} className="hidden"
+        onChange={(e) => { const fs = [...(e.target.files || [])]; if (fs.length) { batchState.files = fs; batchState.tgt = tgt; batchState.src = src; batchState.mode = mode; s.setStage("batch"); } }} />
     </div>
   );
 }
@@ -541,8 +551,8 @@ function ComparePane({ label, src }: { label: string; src: string }) {
   );
 }
 
-function WaveformTimeline({ pid, duration, scrub, segments, onSeek }: {
-  pid: string; duration: number; scrub: number; segments: Project["segments"]; onSeek: (t: number) => void;
+function WaveformTimeline({ pid, duration, scrub, segments, onSeek, gainDb = 0 }: {
+  pid: string; duration: number; scrub: number; segments: Project["segments"]; onSeek: (t: number) => void; gainDb?: number;
 }) {
   const [peaks, setPeaks] = useState<number[]>([]);
   const wrap = useRef<HTMLDivElement>(null);
@@ -550,12 +560,13 @@ function WaveformTimeline({ pid, duration, scrub, segments, onSeek }: {
   useEffect(() => { api.waveform(pid).then((r) => setPeaks(r.peaks)).catch(() => {}); }, [pid]);
   useEffect(() => { const el = wrap.current; if (!el) return; const ro = new ResizeObserver(() => setW(el.clientWidth)); ro.observe(el); return () => ro.disconnect(); }, []);
   const h = 40, dur = duration || 1, bw = peaks.length ? w / peaks.length : 1;
+  const gainLin = Math.pow(10, gainDb / 20);   // dB -> линейный коэффициент амплитуды (гейн дорожки визуально)
   return (
     <div ref={wrap} className="relative w-full overflow-hidden cursor-pointer select-none" style={{ height: h }}
       onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onSeek(Math.max(0, Math.min(dur, (e.clientX - r.left) / r.width * dur))); }}>
       <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="block">
         {peaks.map((pk, i) => {
-          const bh = Math.max(2, pk * (h - 6)), played = (i / peaks.length) * dur <= scrub;
+          const bh = Math.max(2, Math.min(h - 2, pk * gainLin * (h - 6))), played = (i / peaks.length) * dur <= scrub;
           return <rect key={i} x={(i / peaks.length) * w} y={(h - bh) / 2} width={Math.max(1, bw - 0.5)} height={bh}
                        fill={played ? "var(--color-accent)" : "#3a414c"} opacity={played ? 0.9 : 0.55} />;
         })}
@@ -622,6 +633,7 @@ function Editor() {
   const [fonts, setFonts] = useState<Record<string, string>>({});
   const [voiceList, setVoiceList] = useState<string[]>([]);
   const [spkVoiceBusy, setSpkVoiceBusy] = useState<string | null>(null);
+  const [gainDraft, setGainDraft] = useState<number | null>(null);
   const [presets, setPresets] = useState<Record<string, Record<string, unknown>>>({});
   useEffect(() => { api.fonts().then((r) => setFonts(r.fonts)).catch(() => {}); }, []);   // bundled caption fonts
   // голоса из каталога; если пусто и ещё не пробовали — тихо тянем дефолтный пак (VibeVoice, ~100МБ) в фоне
@@ -645,8 +657,10 @@ function Editor() {
   const [compare, setCompare] = useState(false);                      // before/after split preview (Topaz-style)
   const [play, setPlay] = useState(false);                            // dub playback: play TTS audio + advance preview frames + playhead
   const audioRef = useRef<HTMLAudioElement>(null);
+  const [vol, setVol] = useState<number>(() => { const s = localStorage.getItem("dub-vol"); return s ? parseFloat(s) : 1; });
   const playEndRef = useRef<number>(Infinity);                        // stop time for single-phrase playback (Infinity = full)
   const [dubRev, setDubRev] = useState(0);                            // dub-audio cache-buster — bumped ONLY when the dub track is re-rendered (regen/export), NOT on every edit, so live edits don't reload <audio> mid-playback
+  useEffect(() => { if (audioRef.current) audioRef.current.volume = vol; }, [vol, dubRev]);   // применить громкость прослушки (и при перезагрузке трека)
   // Dub playback — drive the EDITOR preview from the dub audio track (no video element): the preview frame and the
   // waveform playhead follow audio.currentTime, so you hear the dub while the future result plays frame-by-frame.
   useEffect(() => {
@@ -751,6 +765,17 @@ function Editor() {
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); bump(); setDubRev(Date.now()); setSelSegs(new Set());
     } catch (e) { console.error("bulk segment op failed", e); }
+    finally { setRegenId(null); }
+  }
+  async function doGain(gainDb: number) {                            // монтажный гейн всей дорожки: патч + лёгкий ре-рендер (ре-TTS не нужен, сегменты из кэша)
+    if (regenId) return;
+    setRegenId("__all__");
+    try {
+      await api.patch(pid, { op: "gain", gain_db: gainDb });
+      const { job_id } = await api.render(pid);
+      await api.watchJob(job_id, () => {});
+      setProject(await api.getProject(pid)); setRendered(false); setDubRev(Date.now());
+    } catch (e) { console.error("gain apply failed", e); }
     finally { setRegenId(null); }
   }
   async function doRegenAll() {                                      // re-synthesize the WHOLE dub (after switching the pack voice/speaker, or to re-roll)
@@ -1078,6 +1103,12 @@ function Editor() {
             {play ? <Pause size={15} /> : <Play size={15} />}
           </button>
           <audio ref={audioRef} src={api.dubUrl(pid, dubRev)} onEnded={() => setPlay(false)} preload="auto" className="hidden" />
+          <div className="flex items-center gap-1.5 shrink-0" title={t("play.volume")}>
+            <Music size={13} className="text-[var(--color-muted)]" />
+            <input type="range" min={0} max={1} step={0.02} value={vol}
+              onChange={(e) => { const v = parseFloat(e.target.value); setVol(v); if (audioRef.current) audioRef.current.volume = v; localStorage.setItem("dub-vol", String(v)); }}
+              className="w-16 accent-[var(--color-accent)]" />
+          </div>
           <button onClick={() => setCompare((c) => !c)} title={t("compare.toggle")}
             className={`shrink-0 p-1.5 rounded-md transition-colors ${compare ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
             <Columns2 size={15} />
@@ -1085,6 +1116,7 @@ function Editor() {
           <span className="mono text-[11px] tabnum w-24 shrink-0"><span className="text-[var(--color-accent)] font-semibold">{fmtT(scrub)}</span><span className="text-[var(--color-muted)]"> / {fmtT(p.meta.duration || 0)}</span></span>
           <div className="flex-1 min-w-0">
             <WaveformTimeline pid={pid} duration={p.meta.duration || 0} scrub={scrub} segments={p.segments}
+              gainDb={gainDraft ?? p.audio.gain_db ?? 0}
               onSeek={(t) => { setRendered(false); setScrub(t); if (audioRef.current) audioRef.current.currentTime = t; }} />
           </div>
         </div>
@@ -1226,6 +1258,17 @@ function Editor() {
                 </div>
               );
             })()}
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-[11px] mb-1">
+                <span className="text-[var(--color-muted)]">{t("voice.gain")}</span>
+                <span className="mono text-[11px] text-[var(--color-text)]">{(gainDraft ?? p.audio.gain_db ?? 0) > 0 ? "+" : ""}{(gainDraft ?? p.audio.gain_db ?? 0).toFixed(1)} dB</span>
+              </div>
+              <input type="range" min={-12} max={12} step={0.5} value={gainDraft ?? p.audio.gain_db ?? 0}
+                onChange={(e) => setGainDraft(parseFloat(e.target.value))}
+                onPointerUp={async () => { if (gainDraft != null) { await doGain(gainDraft); setGainDraft(null); } }}
+                className="w-full accent-[var(--color-accent)]" />
+              <div className="text-[10px] text-[var(--color-muted)] leading-snug mt-0.5">{t("voice.gainHint")}</div>
+            </div>
             <button onClick={doRegenAll} disabled={regenId !== null} title={t("voice.regenAll")}
               className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-50 hover:brightness-105 transition">
               {regenId === "__all__" ? <Loader2 size={15} className="animate-spin" /> : <RotateCw size={15} />}{t("voice.regenAll")}
@@ -1383,7 +1426,12 @@ function FilesPanel() {
   const exports = useStore((s) => s.exports);
   const [, force] = useState(0);
   const fl = useFloatable("files", { x: window.innerWidth - 360, y: 64 });
+  const prevLen = useRef(0);
   useEffect(() => { force((n) => n + 1); }, []); // дождаться #dock-slot
+  useEffect(() => { // первый экспорт -> раскрыть панель во float
+    if (prevLen.current === 0 && exports.length > 0 && !fl.floating) fl.pop();
+    prevLen.current = exports.length;
+  }, [exports.length]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!exports.length) return null;
   const active = exports.filter((e) => e.status === "rendering").length;
 
@@ -1591,8 +1639,208 @@ function FirstRun() {
   );
 }
 
+// Пакетная обработка: DropZone кладёт выбранные файлы + настройки сюда, BatchView читает (без раздувания стора).
+const batchState: { files: File[]; tgt: string; src: string; mode: string } = { files: [], tgt: "ru", src: "auto", mode: "dub" };
+
+type BatchItem = { name: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string };
+
+// Пакетный режим: пачка файлов -> для каждого createProject -> analyze -> (dub/funny) render, последовательно
+// (движок одно-воркерный, GPU сериализует). Переиспользует существующие эндпоинты, отдельного backend не нужно.
+function BatchView() {
+  const { t } = useTranslation();
+  const setStage = useStore((s) => s.setStage);
+  const filesRef = useRef<File[]>(batchState.files);
+  const { tgt, src, mode } = batchState;
+  const [items, setItems] = useState<BatchItem[]>(() => filesRef.current.map((f) => ({ name: f.name, status: "queued", pid: null, pct: 0 })));
+  const [running, setRunning] = useState(false);
+  const [doneN, setDoneN] = useState(0);
+
+  const eMode = mode === "subtitles" ? "nodub" : mode === "transcribe" ? "transcribe" : "dub";
+  const eSubs = mode === "subtitles" ? "translate" : mode === "transcribe" ? "transcribe" : "auto";
+  const doRender = mode === "dub" || mode === "funny";
+
+  async function start() {
+    setRunning(true);
+    for (let i = 0; i < filesRef.current.length; i++) {
+      const upd = (patch: Partial<BatchItem>) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+      try {
+        upd({ status: "analyzing", pct: 0 });
+        const { project_id } = await api.createProject(filesRef.current[i]);
+        upd({ pid: project_id });
+        const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, "");
+        await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0 }); });
+        if (doRender) {
+          upd({ status: "rendering", pct: 0 });
+          const r = await api.render(project_id);
+          await api.watchJob(r.job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0 }); });
+        }
+        upd({ status: "done", pct: 100 });
+      } catch (err) {
+        upd({ status: "error", msg: String(err) });
+      }
+      setDoneN((n) => n + 1);
+    }
+    setRunning(false);
+  }
+
+  const icon = (s: BatchItem["status"]) =>
+    s === "done" ? <Check size={15} className="text-[var(--color-accent)]" /> :
+    s === "error" ? <X size={15} className="text-[var(--color-warn)]" /> :
+    s === "queued" ? <Square size={13} className="text-[var(--color-muted)]" /> :
+    <Loader2 size={15} className="animate-spin text-[var(--color-accent)]" />;
+
+  return (
+    <main className="flex-1 min-h-0 overflow-hidden flex flex-col p-4">
+      <div className="max-w-3xl w-full mx-auto flex flex-col min-h-0">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setStage("empty")} className="text-[13px] text-[var(--color-muted)] hover:text-[var(--color-text)] inline-flex items-center gap-1"><ArrowRight size={14} className="rotate-180" />{t("batch.back")}</button>
+            <span className="text-[15px] font-semibold flex items-center gap-2"><FolderDown size={16} className="text-[var(--color-accent)]" />{t("batch.title")}</span>
+          </div>
+          <span className="text-[12px] text-[var(--color-muted)]">{doneN}/{items.length} · {items.length} {t("batch.files")}</span>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] divide-y divide-[var(--color-border)]">
+          {items.map((it, i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+              <span className="shrink-0">{icon(it.status)}</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] truncate">{it.name}</div>
+                {(it.status === "analyzing" || it.status === "rendering") && (
+                  <div className="mt-1 h-1 rounded bg-[var(--color-surface-2)] overflow-hidden">
+                    <div className="h-full bg-[var(--color-accent)] transition-all" style={{ width: `${Math.round((it.pct || 0) * 100)}%` }} />
+                  </div>
+                )}
+                {it.status === "error" && <div className="text-[10px] text-[var(--color-warn)] truncate mono">{it.msg}</div>}
+              </div>
+              <span className="text-[11px] text-[var(--color-muted)] shrink-0">{t(`batch.${it.status}`)}</span>
+              {it.status === "done" && it.pid && (
+                <a href={api.outputUrl(it.pid)} target="_blank" rel="noreferrer" className="text-[11px] text-[var(--color-accent)] inline-flex items-center gap-1 shrink-0"><ExternalLink size={12} />{t("batch.open_out")}</a>
+              )}
+            </div>
+          ))}
+        </div>
+
+        <button onClick={start} disabled={running || items.length === 0}
+          className="mt-3 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-50 hover:brightness-105 transition">
+          {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}{t("batch.start")}
+        </button>
+      </div>
+    </main>
+  );
+}
+
+// Режим «Транскрипт»: диаризованный транскрипт (analyze mode=transcribe) + создание голосов из спикеров
+// (speaker-voice, ref-текст авто-транскрибируется на рендере) + экспорт .srt/.txt. Отдельный экран, не Editor.
+const SPK_PALETTE = ["#7fb3ff", "#f79bd3", "#c6f24e", "#ffb454"];   // до 4 спикеров
+
+function TranscriptView() {
+  const { t } = useTranslation();
+  const p = useStore((s) => s.project) as Project;
+  const pid = useStore((s) => s.pid) as string;
+  const [busy, setBusy] = useState<string | null>(null);            // спикер в работе, либо "__all__"
+  const [made, setMade] = useState<Record<string, string>>({});     // спикер -> имя созданного голоса
+  const [scrub, setScrub] = useState(0);
+
+  const rows = p.segments.filter((s) => (s.src_text || "").trim());
+  const speakers = [...new Set(p.segments.map((s) => s.speaker ?? "0"))].sort();
+  const colorOf = (spk: string) => SPK_PALETTE[Math.max(0, speakers.indexOf(spk)) % SPK_PALETTE.length];
+  // активная фраза = та, чей [start,end] накрывает скраб; при смене — подсветка + автоскролл к ней
+  const activeId = rows.find((s) => scrub >= s.start && scrub < (s.end > s.start ? s.end : s.start + 3))?.id;
+  const activeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [activeId]);
+  const durOf = (spk: string) => p.segments.filter((s) => (s.speaker ?? "0") === spk).reduce((a, s) => a + Math.max(0, s.end - s.start), 0);
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+  async function makeVoice(spk: string) {
+    setBusy(spk);
+    try { const r = await api.speakerVoice(pid, spk, `${t("transcribe.speaker")} ${spk}`); if (r.ok) setMade((m) => ({ ...m, [spk]: r.name })); }
+    catch { /* ignore */ } finally { setBusy(null); }
+  }
+  async function makeAll() {
+    setBusy("__all__");
+    try { for (const spk of speakers) { const r = await api.speakerVoice(pid, spk, `${t("transcribe.speaker")} ${spk}`); if (r.ok) setMade((m) => ({ ...m, [spk]: r.name })); } }
+    catch { /* ignore */ } finally { setBusy(null); }
+  }
+
+  function dl(name: string, text: string) {
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  const srtTime = (s: number) => {
+    const ms = Math.max(0, Math.round(s * 1000)), z = (n: number, w = 2) => String(n).padStart(w, "0");
+    return `${z(Math.floor(ms / 3600000))}:${z(Math.floor((ms % 3600000) / 60000))}:${z(Math.floor((ms % 60000) / 1000))},${z(ms % 1000, 3)}`;
+  };
+  const exportSrt = () => dl("transcript.srt", rows.map((s, i) => `${i + 1}\n${srtTime(s.start)} --> ${srtTime(s.end)}\n${(s.src_text || "").trim()}\n`).join("\n"));
+  const exportTxt = () => dl("transcript.txt", rows.map((s) => `[${t("transcribe.speaker")} ${s.speaker ?? "0"}] ${(s.src_text || "").trim()}`).join("\n"));
+
+  return (
+    <main className="flex-1 min-h-0 overflow-hidden grid grid-cols-[1.4fr_1fr] gap-3 p-3">
+      <div className="min-h-0 flex flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
+        <div className="px-3 py-2 flex items-center justify-between border-b border-[var(--color-border)]">
+          <span className="text-[13px] font-medium flex items-center gap-2 min-w-0"><FileText size={15} className="text-[var(--color-accent)] shrink-0" /><span className="truncate">{p.meta.video?.split(/[\\/]/).pop() || t("transcribe.title")}</span></span>
+          <span className="text-[11px] text-[var(--color-muted)] shrink-0">{speakers.length} {t("transcribe.speakersN")}</span>
+        </div>
+        <div className="px-3 pt-2">
+          <WaveformTimeline pid={pid} duration={p.meta.duration || 0} scrub={scrub} segments={p.segments} onSeek={setScrub} />
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1.5">
+          {rows.map((s) => {
+            const spk = s.speaker ?? "0";
+            const active = s.id === activeId;
+            return (
+              <div key={s.id} ref={active ? activeRef : undefined} onClick={() => setScrub(s.start)}
+                className={`flex gap-2 items-start cursor-pointer rounded px-1.5 -mx-1.5 py-0.5 transition-colors ${active ? "bg-[color-mix(in_oklab,var(--color-accent)_16%,transparent)]" : "hover:bg-[var(--color-surface-2)]"}`}>
+                <span className="mono text-[9px] px-1.5 py-px rounded shrink-0" style={{ background: colorOf(spk), color: "#0b0c0e" }}>SPK {spk}</span>
+                <span className="mono text-[9px] text-[var(--color-muted)] pt-0.5 shrink-0 w-8">{fmt(s.start)}</span>
+                <span className="text-[13px] leading-snug">{(s.src_text || "").trim()}</span>
+              </div>
+            );
+          })}
+          {rows.length === 0 && <div className="text-[12px] text-[var(--color-muted)] py-6 text-center">{t("transcribe.empty")}</div>}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex flex-col gap-3">
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+          <div className="text-[12px] text-[var(--color-muted)] mb-2">{t("transcribe.speakers")}</div>
+          <div>
+            {speakers.map((spk) => (
+              <div key={spk} className="flex items-center justify-between py-1.5 border-b border-[var(--color-border)] last:border-0">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: colorOf(spk) }} />
+                  <div>
+                    <div className="text-[13px]">{t("transcribe.speaker")} {spk}</div>
+                    <div className="text-[10px] text-[var(--color-muted)]">{durOf(spk).toFixed(1)}{t("transcribe.sec")}{made[spk] ? ` · ${made[spk]}` : ""}</div>
+                  </div>
+                </div>
+                <button onClick={() => makeVoice(spk)} disabled={busy !== null}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[#37414d] text-[11px] text-[var(--color-accent)] hover:border-[var(--color-accent)] disabled:opacity-40">
+                  {busy === spk ? <Loader2 size={12} className="animate-spin" /> : made[spk] ? <Check size={12} /> : <Mic2 size={12} />}{t("transcribe.makeVoice")}
+                </button>
+              </div>
+            ))}
+          </div>
+          <div className="text-[10px] text-[var(--color-muted)] mt-2 flex items-center gap-1.5"><Sparkles size={11} className="text-[var(--color-accent)] shrink-0" />{t("transcribe.refHint")}</div>
+        </div>
+
+        <button onClick={makeAll} disabled={busy !== null}
+          className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-50 hover:brightness-105 transition">
+          {busy === "__all__" ? <Loader2 size={15} className="animate-spin" /> : <Users size={15} />}{t("transcribe.makeAll")}
+        </button>
+        <div className="flex gap-2">
+          <button onClick={exportSrt} className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#37414d] text-[12px] hover:border-[var(--color-accent)]"><Download size={13} />{t("transcribe.exportSrt")}</button>
+          <button onClick={exportTxt} className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#37414d] text-[12px] hover:border-[var(--color-accent)]"><FileText size={13} />{t("transcribe.exportTxt")}</button>
+        </div>
+      </div>
+    </main>
+  );
+}
+
 export default function App() {
   const stage = useStore((s) => s.stage);                 // only re-route on stage change (not on every store write)
+  const projMode = useStore((s) => (s.project as Project | null)?.mode);   // transcribe -> отдельный экран
   const setPid = useStore((s) => s.setPid);
   const setProject = useStore((s) => s.setProject);
   const setStage = useStore((s) => s.setStage);
@@ -1613,7 +1861,8 @@ export default function App() {
       {stage === "setup" && <FirstRun />}
       {stage === "empty" && <DropZone />}
       {stage === "analyzing" && <AnalyzeProgress />}
-      {stage === "editor" && <Editor />}
+      {stage === "batch" && <BatchView />}
+      {stage === "editor" && (projMode === "transcribe" ? <TranscriptView /> : <Editor />)}
       <footer className="mono h-6 px-4 flex items-center gap-2 text-[10px] text-[var(--color-muted)] border-t border-[var(--color-border)] bg-[var(--color-surface)]">
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)]" />{cap}
       </footer>

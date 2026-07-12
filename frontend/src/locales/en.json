@@ -5,7 +5,7 @@
   },
   "drop": {
     "title": "Drop a video to dub",
-    "hint": "MP4 or MOV — everything runs on your machine",
+    "hint": "MP4, MOV, MKV, WEBM, AVI and more — everything runs on your machine",
     "start": "Start processing",
     "change": "click to change",
     "browse": "Browse",
@@ -19,7 +19,8 @@
     "f1": "On-screen text, localized in place",
     "f2": "Clone, auto-cast or pack voices",
     "f3": "Rewrite the script, then re-voice",
-    "formats": "MP4 · MOV · up to 4K · nothing leaves your machine"
+    "f4": "Diarization + clean transcript, voices from speakers",
+    "formats": "MP4 · MOV · MKV · WEBM · AVI · up to 4K · nothing leaves your machine"
   },
   "analyze": {
     "title": "Analyzing your video",
@@ -45,14 +46,45 @@
     "subtitles": "Subtitles",
     "dub": "Dub",
     "funny": "Funny",
+    "transcribe": "Transcript",
     "subtitles_desc": "Original audio + translated subtitles",
     "dub_desc": "Re-voiced into the target language",
     "funny_desc": "Gemma rewrites the script, then re-dubs"
+  },
+  "batch": {
+    "open": "Batch of files",
+    "title": "Batch processing",
+    "queue": "Queue",
+    "start": "Start",
+    "files": "files",
+    "queued": "queued",
+    "analyzing": "analyzing",
+    "rendering": "rendering",
+    "done": "done",
+    "error": "error",
+    "open_out": "Open",
+    "back": "Back",
+    "add": "Add files"
+  },
+  "transcribe": {
+    "title": "Transcript and diarization",
+    "speakers": "Speakers · create voices",
+    "speaker": "Speaker",
+    "makeVoice": "Voice",
+    "makeAll": "Create all voices",
+    "made": "Done",
+    "refHint": "reference text is auto-transcribed (like Higgs)",
+    "sec": "s ref",
+    "exportSrt": "Export .srt",
+    "exportTxt": "Export .txt",
+    "empty": "No lines in the transcript",
+    "speakersN": "speakers"
   },
   "actions": {
     "translate": "Translate",
     "dub": "Full dub",
     "funny": "Funny remix",
+    "transcribe": "Transcript and voices",
     "dubFile": "Dub any file"
   },
   "style": {
@@ -92,7 +124,9 @@
     "g_male": "M",
     "preview": "Preview",
     "narrowSearch": "Narrow the search to see more",
-    "fromSpeakers": "Voice from speaker:"
+    "fromSpeakers": "Voice from speaker:",
+    "gain": "Track gain",
+    "gainHint": "Boost the whole track (applied on regen/export)."
   },
   "remix": {
     "title": "Remix",
@@ -143,7 +177,8 @@
     "newHint": "Start with a new video"
   },
   "play": {
-    "dub": "Play the dub (video + voiceover)"
+    "dub": "Play the dub (video + voiceover)",
+    "volume": "Preview volume"
   },
   "seg": {
     "regen": "Regenerate this line's voiceover",

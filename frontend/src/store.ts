@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Project } from "./lib/api";
 
-type Stage = "boot" | "setup" | "empty" | "analyzing" | "editor";
+type Stage = "boot" | "setup" | "empty" | "analyzing" | "editor" | "batch";
 export type ExportItem = { id: string; name: string; status: "rendering" | "done" | "error"; msg: string; url?: string };
 
 type State = {

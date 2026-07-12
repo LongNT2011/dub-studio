@@ -92,7 +92,9 @@
     "g_male": "M",
     "preview": "Ouvir",
     "narrowSearch": "Refine a busca",
-    "fromSpeakers": "Voz do falante:"
+    "fromSpeakers": "Voz do falante:",
+    "gain": "Ganho",
+    "gainHint": "Amplificar toda a faixa (ao regenerar/exportar)."
   },
   "remix": {
     "title": "Remix",
@@ -143,7 +145,8 @@
     "newHint": "Começar com um novo vídeo"
   },
   "play": {
-    "dub": "Reproduzir a dublagem (vídeo + voz)"
+    "dub": "Reproduzir a dublagem (vídeo + voz)",
+    "volume": "Volume"
   },
   "seg": {
     "regen": "Regenerar a voz desta frase",

@@ -25,10 +25,11 @@ pub fn preview_frame(
     let vh = proj.meta.height;
     let total = proj.meta.duration;
     let ass_p = work_dir.join("_preview.ass");
-    build_ass(proj, &ass_p, vw, vh, total)?;
+    let sub_covers = build_ass(proj, &ass_p, vw, vh, total)?;
 
-    // blur-боксы = project.captions.blur_boxes (hidden исключаются) — как collect_blur_boxes рендера.
-    let blur_boxes: Vec<dub_captions::BlurBox> = proj
+    // blur-боксы = project.captions.blur_boxes (hidden исключаются) + подложки под нашими субтитрами
+    // (WYSIWYG: превью показывает ту же блюр-подложку, что и финальный рендер).
+    let mut blur_boxes: Vec<dub_captions::BlurBox> = proj
         .captions
         .blur_boxes
         .iter()
@@ -43,6 +44,7 @@ pub fn preview_frame(
             fill: b.fill.clone(),
         })
         .collect();
+    blur_boxes.extend(sub_covers.iter().map(crate::render::cover_to_blur));
 
     let png = work_dir.join("_preview.png");
     dub_captions::burn_frame(

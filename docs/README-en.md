@@ -28,6 +28,7 @@ This is **v2 — a fully native rewrite**. The previous version dragged along an
 
 - **Dub any clip with a cloned voice** — the original timbre is cloned and speaks the new language ([Higgs Audio v3](https://huggingface.co/bosonai) native engine, GGUF Q8_0). Auto-cast per speaker or pick a pack voice
 - **Speaker diarization** — who speaks when (NVIDIA **Sortformer** v2, up to 4 voices), a different voice per speaker
+- **Transcript + diarization mode** — a dedicated screen: audio/video → a clean transcript laid out by speaker (click a line to move the playhead and vice versa), and **one click turns each speaker into a voice** — the reference is cleaned by vocal separation and auto-transcribed into reference text (like Higgs). Export `.srt` / `.txt`
 - **Translation + vision style analysis** — the whole transcript is translated locally by **Gemma-4 12B** (QAT q4_0 GGUF, llama.cpp), and a vision pass reads the frame layout: caption style, titles, brands, text zones
 - **SOTA vocal separation** — **Mel-Band Roformer** (native BSRoformer.cpp on CUDA) splits voice from music: the clip's background is **preserved**, the clone locks onto clean speech
 - **On-screen-text localization** — OCR detects text on the frame (**PP-OCR** ONNX), **blurs the original**, and prints a localized title on top in the matched style — a wedge no other tool owns
@@ -35,10 +36,18 @@ This is **v2 — a fully native rewrite**. The previous version dragged along an
 - **Live editor** — edit transcript, voices, caption style, blur boxes, titles; **preview at 0.17 s/frame**, every edit visible at once
 - **Smart dirty-regen** — export re-voices and recomputes **only the edited segments**, not the whole clip
 - **Funny remix** — give a theme ("as a pirate", "as a news report") → the model rewrites the whole script → re-dub
+- **Batch processing** — a queue of several files, each run with the same settings, per-file progress
 - **Before / after** — original and dub side by side
 - **Auto-download everything** — models, engines, CUDA/VC++ runtime, ffmpeg pulled with a button on first run, all inside the app folder
 - **6 dubbing languages** — EN / RU / ZH / ES / PT / FR, source language auto-detected
+- **Any video format** — MP4, MOV, MKV, WEBM, AVI and more (decoded via ffmpeg)
 - **Fully portable** — nothing written to the user profile; delete the folder, no trace left
+
+### Transcript mode
+
+A diarized transcript laid out by speaker, with clean voices created from each speaker in one click.
+
+![Dub Studio transcript mode](screenshot-transcribe.png)
 
 ## System requirements
 
