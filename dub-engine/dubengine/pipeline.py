@@ -612,7 +612,48 @@ def run(cfg):
                                     if abs((r[2] + r[4] / 2.0) - yc) <= vh * 0.13
                                     and min(range(len(_ycs)), key=lambda j: abs(_ycs[j] - (r[2] + r[4] / 2.0))) == ti]
                             shared = [ri for ri in cand if tw & _rowwords[ri]]
-                            near = [localize_ocr[ri] for ri in (shared or cand)]
+                            # a MULTI-LINE title is ONE vertically-stacked block, but OCR can glue a whole line
+                            # into a spaceless token ("tomyplacelineonaSlavic") -> that line shares NO word with
+                            # the title text and drops out of `shared`, leaving its bbox short so the ORIGINAL
+                            # middle line LEAKS under the drawn title. Grow the picked set to the title's OWN
+                            # contiguous stack: any cand row that vertically abuts + horizontally overlaps a
+                            # picked row (same v_adjacent && h_overlap group_captions uses) AND is on screen
+                            # DURING THE TITLE'S OWN TIME (overlaps the ANCHOR span = the word-matched shared
+                            # rows' t0..t1). The anchor-time gate (not a transitive per-pair one) is essential:
+                            # a recurring bottom caption at t3,t6,…t27 each overlaps the previous, so a per-pair
+                            # gate would BRIDGE a t1.5-3s tagline all the way to a t27 scene label and stretch a
+                            # grey plate over the whole video. Bounded to cand (yc±13%vh, nearest-title==this)
+                            # so it never reaches the subtitle band; shared is the anchor so unrelated same-
+                            # height captions from OTHER scenes stay excluded when not vertically contiguous.
+                            # anchor = word-matched rows; if OCR glued the title line into a spaceless token so
+                            # NONE match (Explained by Ducks -> "ExplainedbyDucks"), fall back to the SINGLE cand
+                            # row nearest the title's yc (that IS the title's own line) — NOT all of cand, which
+                            # would drag a far same-column scene label into the anchor span and over-blur.
+                            if shared:
+                                anchor = shared
+                            else:
+                                anchor = [min(cand, key=lambda ri: abs(
+                                    (localize_ocr[ri][2] + localize_ocr[ri][4] / 2.0) - yc))]
+                            a_t0 = min(localize_ocr[ri][5] for ri in anchor)
+                            a_t1 = max(localize_ocr[ri][6] for ri in anchor)
+                            picked = set(anchor)
+                            grew = True
+                            while grew:
+                                grew = False
+                                for ri in cand:
+                                    if ri in picked:
+                                        continue
+                                    rc = localize_ocr[ri]
+                                    if not (min(rc[6], a_t1) > max(rc[5], a_t0)):
+                                        continue                 # not on screen during the title's own time
+                                    for pj in list(picked):
+                                        rp = localize_ocr[pj]
+                                        v_adjacent = (rc[2] <= rp[2] + rp[4] + rc[4]
+                                                      and rc[2] + rc[4] >= rp[2] - rc[4])
+                                        h_overlap = rc[1] < rp[1] + rp[3] and rc[1] + rc[3] > rp[1]
+                                        if v_adjacent and h_overlap:
+                                            picked.add(ri); grew = True; break
+                            near = [localize_ocr[ri] for ri in sorted(picked)]
                             if near:
                                 x0 = min(r[1] for r in near); y0 = min(r[2] for r in near)
                                 x1 = max(r[1] + r[3] for r in near); y1 = max(r[2] + r[4] for r in near)

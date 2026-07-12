@@ -212,7 +212,63 @@ pub fn run(
                 .collect();
             let shared: Vec<usize> =
                 cand.iter().copied().filter(|&ri| !tw.is_disjoint(&rowwords[ri])).collect();
-            let near_idx: &[usize] = if !shared.is_empty() { &shared } else { &cand };
+            // МУЛЬТИ-СТРОЧНЫЙ титр — ОДИН вертикально-стопочный блок, но OCR может слепить целую строку
+            // в бесшовный токен ("tomyplacelineonaSlavic") -> она НЕ делит слово с текстом титра и выпадает
+            // из shared, оставляя bbox коротким -> ОРИГИНАЛ средней строки ПРОСВЕЧИВАЕТ под нарисованным
+            // титром. Дорастить набор до СОБСТВЕННОЙ contiguous-стопки титра: любой cand-бокс, вертикально
+            // примыкающий + горизонтально пересекающий уже выбранный (тот же v_adjacent && h_overlap, что и в
+            // group_captions) И присутствующий НА ЭКРАНЕ ВО ВРЕМЯ САМОГО ТИТРА (overlap с ЯКОРНЫМ спаном =
+            // t0..t1 word-matched shared-строк). Якорный тайм-гейт (НЕ транзитивный попарный) критичен:
+            // повторяющийся нижний капшен на t3,t6,…t27 каждый перекрывает предыдущий -> попарный гейт
+            // ПРОТЯНУЛ бы таглайн t1.5-3с до scene-label t27 и растянул серую плашку на всё видео. Ограничено
+            // cand (yc±13%vh, nearest-title==this) -> не дотянется до субтитр-полосы; shared — якорь: чужие
+            // капшены той же высоты из ДРУГИХ сцен отсекаются при отсутствии вертикальной связности.
+            // anchor = word-matched строки; если OCR слепил строку титра в бесшовный токен и НИ ОДНА не
+            // матчится ("ExplainedbyDucks"), fallback на ЕДИНСТВЕННЫЙ cand-бокс, ближайший к yc титра (это и
+            // есть СОБСТВЕННАЯ строка титра) — НЕ весь cand, иначе далёкий scene-label той же колонки утянул
+            // бы якорный спан и дал over-blur.
+            let anchor: Vec<usize> = if !shared.is_empty() {
+                shared.clone()
+            } else {
+                cand.iter()
+                    .copied()
+                    .min_by(|&a, &b| {
+                        let da = ((loc[a].y + loc[a].h / 2.0) - yc).abs();
+                        let db = ((loc[b].y + loc[b].h / 2.0) - yc).abs();
+                        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .into_iter()
+                    .collect()
+            };
+            let a_t0 = anchor.iter().map(|&ri| loc[ri].t0).fold(f32::MAX, f32::min);
+            let a_t1 = anchor.iter().map(|&ri| loc[ri].t1).fold(f32::MIN, f32::max);
+            let mut picked: std::collections::BTreeSet<usize> = anchor.iter().copied().collect();
+            let mut grew = true;
+            while grew {
+                grew = false;
+                for &ri in &cand {
+                    if picked.contains(&ri) {
+                        continue;
+                    }
+                    let rc = &loc[ri];
+                    if !(rc.t1.min(a_t1) > rc.t0.max(a_t0)) {
+                        continue; // не на экране во время самого титра
+                    }
+                    let joins = picked.iter().any(|&pj| {
+                        let rp = &loc[pj];
+                        let v_adjacent =
+                            rc.y <= rp.y + rp.h + rc.h && rc.y + rc.h >= rp.y - rc.h;
+                        let h_overlap = rc.x < rp.x + rp.w && rc.x + rc.w > rp.x;
+                        v_adjacent && h_overlap
+                    });
+                    if joins {
+                        picked.insert(ri);
+                        grew = true;
+                    }
+                }
+            }
+            let near_vec: Vec<usize> = picked.into_iter().collect();
+            let near_idx: &[usize] = &near_vec;
             let (x0, y0, x1, y1, st, en, lh);
             if !near_idx.is_empty() {
                 let near: Vec<&R> = near_idx.iter().map(|&ri| &loc[ri]).collect();
@@ -776,6 +832,124 @@ mod tests {
             assert_eq!(bbox.len(), 4, "bbox из 4 элементов");
             assert!(bbox[2] > 0 && bbox[3] > 0, "ненулевые w/h: {bbox:?}");
         }
+    }
+
+    // РЕГРЕСС БЛЮР-БЛИД (боris, финальный прогон 2026-07-12): 4-строчный EN-титр на ярком небе. Gemma
+    // отдала ОДИН титр y_frac=0.17 (верхняя строка). OCR детектил все строки, но СРЕДНЮЮ склеил в
+    // бесшовный токен "tomyplacelineonaSlavic" — она НЕ делит слово с текстом титра -> выпадала из shared,
+    // titr-bbox накрывал только 1-ю строку (y 162..232), а средняя (y 207..281) ПРОСВЕЧИВАЛА под русским
+    // сабом. Фикс: дорастить набор до contiguous-стопки титра (v_adjacent && h_overlap). Проверяем: ровно 1
+    // титр, его bbox накрывает ВСЮ стопку (y0<=162, y1>=281) -> средняя строка внутри блюра.
+    #[test]
+    fn boris_glued_middle_title_line_covered() {
+        let vw = 720i64;
+        let vh = 1280i64;
+        // localize из живого OCR boris (первые титр-строки; средняя — спейслес-токен).
+        let localize = vec![
+            reg("POV:Youtrythecomeback", 65, 162, 541, 70, 0.0, 28.5),
+            reg("tomyplacelineonaSlavic", 79, 207, 513, 74, 0.0, 28.5),
+            reg("gir", 287, 250, 98, 81, 0.0, 2.25),
+            // субтитр-полоса — НЕ должна попасть в титр-стопку (вне yc±13%vh).
+            reg("NICE,ExPENSIVEDINNER", 231, 865, 257, 52, 0.5, 1.5),
+        ];
+        let mut proj = Project::default();
+        proj.mode = "dub".into();
+        proj.tgt_lang = "ru".into();
+        proj.raw_ctx.insert(
+            "titles".into(),
+            serde_json::json!([{
+                "text": "POV: You try the \"come back to my place\" line on a Slavic girl",
+                "tgt": "POV: Ты пытаешься затащить славянку к себе домой.",
+                "y_frac": 0.17, "color": "#FFFFFF", "bg": null, "solid": false,
+                "align": "center", "bold": true, "italic": false, "font": "Oswald"
+            }]),
+        );
+        let paths = dummy_paths();
+        let ctx = ComposeCtx {
+            vw, vh, total: 28.54, do_translate: true, fresh_subs: false,
+            src_lang: "en", paths: &paths,
+        };
+        let noop: Box<Progress> = Box::new(|_| {});
+        run(&mut proj, &localize, &[], &[], &ctx, &noop);
+
+        assert_eq!(proj.captions.titles.len(), 1, "ровно 1 нарисованный титр");
+        let t = &proj.captions.titles[0];
+        let bbox = t.bbox.as_ref().expect("bbox не null");
+        let (y0, h) = (bbox[1], bbox[3]);
+        let y1 = y0 + h;
+        assert!(y0 <= 162, "верх стопки накрыт: y0={y0} (ожидалось <=162)");
+        assert!(
+            y1 >= 281,
+            "НИЗ стопки накрыт (средняя строка y207..281 не просвечивает): y1={y1} (ожидалось >=281)"
+        );
+        // средняя строка (cy=244) обязана лежать внутри блюр-бокса титра.
+        assert!(
+            proj.captions.blur_boxes.iter().any(|b| {
+                let by1 = b.y + b.h;
+                b.y <= 207 && by1 >= 281 && b.x <= 79 && b.x + b.w >= 79 + 513
+            }),
+            "блюр-бокс накрывает средную строку целиком; боксы={:?}",
+            proj.captions
+                .blur_boxes
+                .iter()
+                .map(|b| (b.x, b.y, b.w, b.h))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    // РЕГРЕСС OVER-BLUR (autistic, регресс-прогон 2026-07-12): стопка-расширение НЕ должна цеплять ПОЗЖЕ
+    // появившийся капшен/лейбл той же колонки. Два реальных случая autistic:
+    //  (1) титр "Autistic Boyfriend" (t0..3.25, стопка y144/232) + позже "I Love You..." (t50, та же
+    //      вертикаль) -> не тянуть спан к t50 (word-anchor overlap режет).
+    //  (2) титр "Explained by Ducks" на t1.5-3.25, но OCR слепил строку в "ExplainedbyDucks" -> shared
+    //      ПУСТ, а рядом scene-label "SWETCHILL" на t27 в той же колонке. Раньше пустой shared делал
+    //      anchor=ВЕСЬ cand (t1.5..28.25) -> спан растягивался до 28.25с (плашка на всё видео). Fallback
+    //      на ЕДИНСТВЕННЫЙ ближайший к yc cand-ряд оставляет спан 1.5-3.25.
+    #[test]
+    fn later_same_column_caption_not_chained() {
+        let vw = 720i64;
+        let vh = 1280i64;
+        let localize = vec![
+            reg("Autistic", 215, 144, 301, 89, 0.0, 3.25),
+            reg("Boyfriend", 196, 232, 372, 111, 0.0, 3.25),
+            // titr2 «Explained by Ducks» — OCR слепил в бесшовный токен (shared будет ПУСТ).
+            reg("ExplainedbyDucks", 89, 826, 576, 111, 1.5, 3.25),
+            // scene-label той же колонки на t27 — НЕ часть titr2.
+            reg("SWETCHILL", 285, 732, 147, 58, 27.0, 28.25),
+            // ПОЗЖЕ (t50) под titr1 — НЕ часть титра.
+            reg("ILoveYou", 319, 227, 256, 79, 50.5, 51.25),
+        ];
+        let mut proj = Project::default();
+        proj.mode = "dub".into();
+        proj.raw_ctx.insert(
+            "titles".into(),
+            serde_json::json!([
+                {"text": "Autistic Boyfriend", "tgt": "Аутичный парень",
+                 "y_frac": 232.0 / 1280.0, "color": "#FFFFFF", "solid": false},
+                {"text": "Explained by Ducks", "tgt": "Объясняют утки",
+                 "y_frac": 826.0 / 1280.0, "color": "#FFFFFF", "solid": false}
+            ]),
+        );
+        let paths = dummy_paths();
+        let ctx = ComposeCtx {
+            vw, vh, total: 61.0, do_translate: false, fresh_subs: false,
+            src_lang: "en", paths: &paths,
+        };
+        let noop: Box<Progress> = Box::new(|_| {});
+        run(&mut proj, &localize, &[], &[], &ctx, &noop);
+        assert_eq!(proj.captions.titles.len(), 2, "два титра");
+        // titr1: накрывает обе строки (y144..343), НЕ тянется к t50.
+        let t1 = proj.captions.titles.iter().find(|t| t.bbox.as_ref().unwrap()[1] < 500).unwrap();
+        let b1 = t1.bbox.as_ref().unwrap();
+        assert!(b1[1] <= 144 && b1[1] + b1[3] >= 343, "titr1 накрывает обе строки: {b1:?}");
+        assert!(t1.end <= 3.5, "titr1 спан НЕ растянут: end={}", t1.end);
+        // titr2 (glued-token, shared пуст): спан 1.5-3.25, НЕ растянут до t27 SWETCHILL.
+        let t2 = proj.captions.titles.iter().find(|t| t.bbox.as_ref().unwrap()[1] >= 500).unwrap();
+        assert!(
+            t2.end <= 3.5,
+            "titr2 (склеенный токен) спан НЕ растянут scene-label t27: end={} (ожидалось <=3.5)",
+            t2.end
+        );
     }
 
     // white-card fallback: sub_style без scene_color + solid светлый (lum>0.7) титр -> scene_color=#FFFFFF.
