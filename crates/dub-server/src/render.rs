@@ -180,9 +180,17 @@ fn build_dub(
     let vocals16 = wd.join("vocals16.wav");
     media::to_16k_mono(&vocals, &vocals16)?;
 
-    // 3) клон-референс: самый длинный сегмент с текстом (voices.resolve clone-ветка, x_vector_only).
-    //    Higgs-клон использует РЕФ-WAV; ref_text опускаем (x-vector, чтоб исходный язык не блидил акцент).
-    let ref_wav = pick_reference(&segs, &vocals16, wd, total)?;
+    // 3) клон-референс НА КАЖДОГО спикера: длиннейшая реплика спикера -> ref_spk{N}.wav (voices.resolve
+    //    clone). Мультиспикер-ролик озвучивается голосом своего диаризованного спикера.
+    let spk_refs = build_speaker_refs(&segs, &vocals16, wd)?;
+    let first_ref = spk_refs.values().next().cloned().unwrap_or_else(|| wd.join("ref.wav"));
+    let ref_of = |s: &dub_core::Segment| -> PathBuf {
+        s.speaker
+            .as_deref()
+            .and_then(|k| spk_refs.get(k))
+            .cloned()
+            .unwrap_or_else(|| first_ref.clone())
+    };
 
     // 4) TTS каждый сегмент через Higgs (audiocpp). Кэш: seg_XXX.wav; не-dirty переиспользуются.
     emit(progress, "tts", &format!("синтез {} сегментов (Higgs clone)", segs.len()));
@@ -206,8 +214,16 @@ fn build_dub(
     for &(fi, s) in segs.iter() {
         let tgt = s.tgt_text.trim();
         let raw = wd.join(format!("seg_{:03}.wav", fi));
-        // регенерация: синтез если dirty ИЛИ кэша нет ИЛИ полный regen выключен но файла нет.
-        let need_synth = regen_dub && s.dirty || !raw.is_file();
+        let ref_wav = ref_of(s);
+        // синтез: dirty ИЛИ нет кэша ИЛИ кэш старше рефа спикера (реф пересобран -> голос сменился).
+        let stale_ref = raw
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .zip(ref_wav.metadata().and_then(|m| m.modified()).ok())
+            .map(|(seg_t, ref_t)| seg_t < ref_t)
+            .unwrap_or(true);
+        let need_synth = (regen_dub && s.dirty) || !raw.is_file() || stale_ref;
         if need_synth {
             let (samples, sr) = engine
                 .voice_clone(tgt, &ref_wav.to_string_lossy(), None, "")
@@ -250,20 +266,30 @@ fn build_dub(
     }
 }
 
-/// Референс клона: самый длинный сегмент с текстом -> trim из вокала (<=12с). Порт _pick_reference.
-fn pick_reference(
+/// Референс клона на КАЖДОГО спикера: {speaker -> ref_spk{N}.wav} из его длиннейшей реплики (<=12с).
+/// Порт voices.resolve clone-ветки. Спикер None -> ключ "0" (моно-ролик = один реф).
+fn build_speaker_refs(
     segs: &[(usize, &dub_core::Segment)],
     vocals16: &Path,
     wd: &Path,
-    _total: f64,
-) -> Result<PathBuf, String> {
-    let (_, cand) = segs
-        .iter()
-        .max_by(|(_, a), (_, b)| (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap())
-        .unwrap();
-    let ref_wav = wd.join("ref.wav");
-    media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + 12.0))?;
-    Ok(ref_wav)
+) -> Result<std::collections::BTreeMap<String, PathBuf>, String> {
+    let mut refs: std::collections::BTreeMap<String, PathBuf> = std::collections::BTreeMap::new();
+    let mut speakers: Vec<String> =
+        segs.iter().map(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into())).collect();
+    speakers.sort();
+    speakers.dedup();
+    for spk in speakers {
+        let cand = segs
+            .iter()
+            .filter(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into()) == spk)
+            .max_by(|(_, a), (_, b)| (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap())
+            .map(|(_, s)| *s);
+        let Some(cand) = cand else { continue };
+        let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
+        media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + 12.0))?;
+        refs.insert(spk, ref_wav);
+    }
+    Ok(refs)
 }
 
 /// Ускорить дубль под target_dur, если он длиннее (никогда не замедлять). Порт assemble.fit_to_slot.
