@@ -83,7 +83,15 @@
     "recordName": "Voice name",
     "downloadPack": "Download voice pack",
     "packDownloading": "Downloading pack…",
-    "recordHint": "Record your own voice — it appears in the list and can be picked in “Voice from pack”."
+    "recordHint": "Record your own voice — it appears in the list and can be picked in “Voice from pack”.",
+    "more": "More voices",
+    "packTitle": "Voice library",
+    "search": "Search voice…",
+    "g_all": "All",
+    "g_female": "F",
+    "g_male": "M",
+    "preview": "Preview",
+    "narrowSearch": "Narrow the search to see more"
   },
   "remix": {
     "title": "Remix",

@@ -83,7 +83,15 @@
     "recordName": "语音名称",
     "downloadPack": "下载语音包",
     "packDownloading": "下载中…",
-    "recordHint": "录制你自己的声音——它会出现在列表中。"
+    "recordHint": "录制你自己的声音——它会出现在列表中。",
+    "more": "更多语音",
+    "packTitle": "语音库",
+    "search": "搜索语音…",
+    "g_all": "全部",
+    "g_female": "女",
+    "g_male": "男",
+    "preview": "试听",
+    "narrowSearch": "缩小搜索范围以查看更多"
   },
   "remix": {
     "title": "改编",

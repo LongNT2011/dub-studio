@@ -83,7 +83,15 @@
     "recordName": "Nome da voz",
     "downloadPack": "Baixar pack de vozes",
     "packDownloading": "Baixando…",
-    "recordHint": "Grave sua voz — aparecerá na lista."
+    "recordHint": "Grave sua voz — aparecerá na lista.",
+    "more": "Mais vozes",
+    "packTitle": "Biblioteca de vozes",
+    "search": "Buscar voz…",
+    "g_all": "Todas",
+    "g_female": "F",
+    "g_male": "M",
+    "preview": "Ouvir",
+    "narrowSearch": "Refine a busca"
   },
   "remix": {
     "title": "Remix",

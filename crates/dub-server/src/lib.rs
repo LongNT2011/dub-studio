@@ -282,6 +282,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/record/start", post(record_start))
         .route("/record/stop", post(record_stop))
         .route("/voices/download-pack", post(voices_download_pack))
+        .route("/voices/catalog", get(voices_catalog))
+        .route("/voices/get", post(voices_get))
+        .route("/voices/rename", post(voices_rename))
+        .route("/voices/delete", post(voices_delete))
         .route("/fonts", get(endpoints::fonts))
         .route("/voices", get(voices_list))
         .route("/presets", get(endpoints::presets))
@@ -455,6 +459,45 @@ async fn record_stop(State(st): State<AppState>) -> Json<Value> {
         _ => None,
     };
     Json(json!({ "name": name, "voices": list_voice_names(&st.voices_dir) }))
+}
+
+/// GET /voices/catalog — каталог доп-голосов (HF датасет Slait/russia_voices): имя, пол, URL-превью.
+async fn voices_catalog() -> Json<Value> {
+    Json(tokio::task::spawn_blocking(record::catalog).await.unwrap_or_else(|_| json!({ "voices": [] })))
+}
+
+/// POST /voices/get {name} — скачать один голос (mp3+txt) из датасета в каталог голосов.
+async fn voices_get(State(st): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
+    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let dir = st.voices_dir.clone();
+    let ok = tokio::task::spawn_blocking(move || record::fetch_voice(&dir, &name)).await;
+    match ok {
+        Ok(Ok(())) => Json(json!({ "ok": true, "voices": list_voice_names(&st.voices_dir) })),
+        Ok(Err(e)) => Json(json!({ "ok": false, "error": e })),
+        Err(e) => Json(json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+/// POST /voices/rename {from, to} — переименовать голос (mp3/wav + txt).
+async fn voices_rename(State(st): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
+    let from = sanitize_voice_name(body.get("from").and_then(|v| v.as_str()).unwrap_or(""));
+    let to = sanitize_voice_name(body.get("to").and_then(|v| v.as_str()).unwrap_or(""));
+    for ext in ["wav", "mp3", "txt"] {
+        let src = st.voices_dir.join(format!("{from}.{ext}"));
+        if src.is_file() {
+            let _ = std::fs::rename(&src, st.voices_dir.join(format!("{to}.{ext}")));
+        }
+    }
+    Json(json!({ "voices": list_voice_names(&st.voices_dir) }))
+}
+
+/// POST /voices/delete {name} — удалить голос.
+async fn voices_delete(State(st): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
+    let name = sanitize_voice_name(body.get("name").and_then(|v| v.as_str()).unwrap_or(""));
+    for ext in ["wav", "mp3", "txt"] {
+        let _ = std::fs::remove_file(st.voices_dir.join(format!("{name}.{ext}")));
+    }
+    Json(json!({ "voices": list_voice_names(&st.voices_dir) }))
 }
 
 /// POST /voices/download-pack — скачать пак голосов (VibeVoice) и распаковать в каталог голосов.

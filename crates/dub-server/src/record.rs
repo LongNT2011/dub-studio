@@ -157,6 +157,68 @@ pub fn stop() -> Result<std::path::PathBuf, String> {
 const VOICE_PACK_URL: &str =
     "https://huggingface.co/datasets/nerualdreming/VibeVoice/resolve/main/voice-pack.zip";
 
+// Датасет доп-голосов (mp3+txt пары), поиск/фильтр/прослушка/скачка в поп-апе.
+const VOICES_DATASET: &str = "Slait/russia_voices";
+
+fn hf_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("http: {e}"))
+}
+
+/// Каталог доп-голосов из HF-датасета: [{name, gender, url}]. Кэшируется в статике на время процесса.
+pub fn catalog() -> serde_json::Value {
+    static CACHE: OnceLock<serde_json::Value> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let url = format!("https://huggingface.co/api/datasets/{VOICES_DATASET}/tree/main?recursive=1");
+            let Ok(client) = hf_client() else { return serde_json::json!({ "voices": [] }) };
+            let Ok(resp) = client.get(&url).send() else { return serde_json::json!({ "voices": [] }) };
+            let Ok(txt) = resp.text() else { return serde_json::json!({ "voices": [] }) };
+            let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(&txt) else { return serde_json::json!({ "voices": [] }) };
+            let mut voices = Vec::new();
+            for it in items {
+                let path = it.get("path").and_then(|v| v.as_str()).unwrap_or("");
+                if !path.ends_with(".mp3") {
+                    continue;
+                }
+                let name = path.trim_end_matches(".mp3");
+                let gender = if name.contains("Female") { "female" } else if name.contains("Male") { "male" } else { "?" };
+                voices.push(serde_json::json!({
+                    "name": name,
+                    "gender": gender,
+                    "url": format!("https://huggingface.co/datasets/{VOICES_DATASET}/resolve/main/{path}"),
+                }));
+            }
+            serde_json::json!({ "voices": voices })
+        })
+        .clone()
+}
+
+/// Скачать один голос датасета (mp3 + txt) в каталог голосов.
+pub fn fetch_voice(dir: &std::path::Path, name: &str) -> Result<(), String> {
+    use std::io::Write;
+    if name.is_empty() || name.contains("..") || name.contains('/') || name.contains('\\') {
+        return Err("плохое имя".into());
+    }
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let client = hf_client()?;
+    for ext in ["mp3", "txt"] {
+        let url = format!("https://huggingface.co/datasets/{VOICES_DATASET}/resolve/main/{name}.{ext}");
+        let resp = client.get(&url).send().map_err(|e| format!("GET {ext}: {e}"))?;
+        if !resp.status().is_success() {
+            if ext == "txt" { continue; } // txt может отсутствовать — не критично
+            return Err(format!("HTTP {} для {name}.{ext}", resp.status().as_u16()));
+        }
+        let bytes = resp.bytes().map_err(|e| format!("тело {ext}: {e}"))?;
+        let base = std::path::Path::new(name).file_name().and_then(|s| s.to_str()).unwrap_or(name);
+        let mut f = std::fs::File::create(dir.join(format!("{base}.{ext}"))).map_err(|e| e.to_string())?;
+        f.write_all(&bytes).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Скачать пак голосов (VibeVoice) и распаковать в `dir` (плоско, .mp3+.txt пары). Прогресс -> cb.
 pub fn download_pack(dir: &std::path::Path, cb: &dyn Fn(serde_json::Value)) -> Result<serde_json::Value, String> {
     use std::io::{Read, Write};

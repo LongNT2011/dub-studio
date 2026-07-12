@@ -95,7 +95,7 @@ function ModelsSection() {
     const [pick, setPick] = useState<string>(installed?.id ?? variants[0]?.id ?? "");
     const c = get(pick);
     if (!c) return null;
-    const quant = (v: SetupComponent) => (v.name.match(/\(([^)]+)\)\s*$/)?.[1] ?? v.name);
+    const quant = (v: SetupComponent) => (v.name.match(/\b(q\d[\w]*|int8|fp32|f16)\b/i)?.[1] ?? v.name);
     const active = prog?.id === c.id;
     return (
       <div className="px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
@@ -152,7 +152,10 @@ function ModelsSection() {
       <Group label={t("settings.roleAsr")}>
         <VariantPicker base="Parakeet-TDT 0.6B v3" ids={["parakeet", "parakeet-fp32"]} />
       </Group>
-      <Group label={t("settings.roleMt")}>{rowOf("gemma")}{rowOf("llama")}</Group>
+      <Group label={t("settings.roleMt")}>
+        <VariantPicker base="Gemma-4 12B QAT + vision" ids={["gemma", "gemma-q5_0", "gemma-q6_k", "gemma-q8_0"]} />
+        {rowOf("llama")}
+      </Group>
       <Group label={t("settings.roleSep")}>
         <VariantPicker base="Mel-Band Roformer voc_fv6" ids={["roformer", "roformer-q5", "roformer-q4"]} />
         {rowOf("bsroformer-engine")}
@@ -1201,18 +1204,88 @@ function Editor() {
   );
 }
 
-// Запись своего голоса с микрофона + скачка пака голосов. onDone(name) — новый голос готов.
+// Поп-ап доп-голосов (HF-датасет): поиск, фильтр по полу, прослушка (play mp3), скачка в каталог.
+function VoicePackModal({ have, onVoices, onClose }: { have: string[]; onVoices: (v: string[]) => void; onClose: () => void }) {
+  const { t } = useTranslation();
+  const [all, setAll] = useState<{ name: string; gender: string; url: string }[] | null>(null);
+  const [q, setQ] = useState("");
+  const [gender, setGender] = useState<"all" | "female" | "male">("all");
+  const [playing, setPlaying] = useState<string | null>(null);
+  const [getting, setGetting] = useState<string | null>(null);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => { api.voicesCatalog().then((r) => setAll(r.voices)).catch(() => setAll([])); }, []);
+  useEffect(() => () => { audio.current?.pause(); }, []);
+
+  const play = (url: string, name: string) => {
+    audio.current?.pause();
+    if (playing === name) { setPlaying(null); return; }
+    const a = new Audio(url); audio.current = a; setPlaying(name);
+    a.onended = () => setPlaying(null); a.play().catch(() => setPlaying(null));
+  };
+  const get = async (name: string) => {
+    setGetting(name);
+    try { const r = await api.voicesGet(name); if (r.ok && r.voices) onVoices(r.voices); } catch { /* ignore */ } finally { setGetting(null); }
+  };
+  const pretty = (n: string) => n.replace(/^RU_(Female|Male)_/, "").replace(/_/g, " ");
+  const filtered = (all || []).filter((v) =>
+    (gender === "all" || v.gender === gender) &&
+    (!q.trim() || pretty(v.name).toLowerCase().includes(q.trim().toLowerCase()))
+  );
+
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center glass-scrim anim-fade" onClick={onClose}>
+      <div className="w-[min(94vw,560px)] h-[min(82vh,640px)] flex flex-col rounded-xl glass-panel anim-pop p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <span className="font-semibold">{t("voice.packTitle")} {all && <span className="mono text-[11px] text-[var(--color-muted)]">{filtered.length}/{all.length}</span>}</span>
+          <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={16} /></button>
+        </div>
+        <div className="flex items-center gap-2 mb-3">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("voice.search")} autoFocus
+            className="flex-1 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[13px] focus:border-[var(--color-accent)] focus:outline-none" />
+          <div className="flex rounded-lg border border-[var(--color-border)] overflow-hidden text-[12px]">
+            {(["all", "female", "male"] as const).map((g) => (
+              <button key={g} onClick={() => setGender(g)}
+                className={`px-2.5 py-1.5 ${gender === g ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>{t(`voice.g_${g}`)}</button>
+            ))}
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto -mr-2 pr-2 space-y-1">
+          {all === null ? <div className="mono text-[11px] text-[var(--color-muted)]">…</div> :
+           filtered.slice(0, 300).map((v) => {
+            const owned = have.includes(v.name) || have.includes(v.name.split("/").pop() || v.name);
+            return (
+              <div key={v.name} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${v.gender === "female" ? "bg-pink-400" : "bg-sky-400"}`} />
+                <span className="text-[12px] truncate flex-1">{pretty(v.name)}</span>
+                <button onClick={() => play(v.url, v.name)} title={t("voice.preview")}
+                  className="shrink-0 p-1 rounded-md text-[var(--color-muted)] hover:text-[var(--color-accent)]">{playing === v.name ? <Pause size={14} /> : <Play size={14} />}</button>
+                {owned ? <Check size={14} className="text-[var(--color-accent)] shrink-0 w-7 text-center" /> :
+                  <button onClick={() => get(v.name)} disabled={!!getting} title={t("setup.downloadOne")}
+                    className="shrink-0 p-1 rounded-md text-[var(--color-accent-2)] hover:text-[var(--color-accent)] disabled:opacity-40">
+                    {getting === v.name ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                  </button>}
+              </div>
+            );
+          })}
+          {all !== null && filtered.length > 300 && <div className="mono text-[10px] text-[var(--color-muted)] text-center py-2">{t("voice.narrowSearch")}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Запись своего голоса с микрофона (авто-нейминг) + доп-голоса. onDone(name) — новый голос готов.
 function VoiceRecorder({ voiceList, onVoices, onDone }: { voiceList: string[]; onVoices: (v: string[]) => void; onDone: (name: string) => void }) {
   const { t } = useTranslation();
   const [rec, setRec] = useState(false);
   const [level, setLevel] = useState(0);
-  const [name, setName] = useState("");
-  const [packMsg, setPackMsg] = useState<string | null>(null);
+  const [pack, setPack] = useState(false);
+  const [rename, setRename] = useState<{ from: string; to: string } | null>(null);
   const lvlTimer = useRef<number | null>(null);
 
   const start = async () => {
-    const nm = (name.trim() || `Мой голос ${voiceList.length + 1}`);
-    const r = await api.recordStart(nm).catch(() => null);
+    const auto = `Голос ${voiceList.length + 1}`; // авто-имя, переименовать можно после
+    const r = await api.recordStart(auto).catch(() => null);
     if (!r || !r.ok) return;
     setRec(true);
     lvlTimer.current = window.setInterval(async () => {
@@ -1223,43 +1296,47 @@ function VoiceRecorder({ voiceList, onVoices, onDone }: { voiceList: string[]; o
     if (lvlTimer.current) window.clearInterval(lvlTimer.current);
     setRec(false); setLevel(0);
     const r = await api.recordStop().catch(() => null);
-    if (r) { onVoices(r.voices); if (r.name) onDone(r.name); setName(""); }
+    if (r) { onVoices(r.voices); if (r.name) { onDone(r.name); setRename({ from: r.name, to: r.name }); } }
   };
-  const downloadPack = async () => {
-    setPackMsg(t("voice.packDownloading"));
-    try {
-      const { job_id } = await api.voicesDownloadPack();
-      await api.watchJob(job_id, (e) => { if (e.type === "progress") setPackMsg(`${e.msg ?? ""} ${e.pct ? Math.round(e.pct) + "%" : ""}`); });
-      const v = await api.voices(); onVoices(v.voices);
-    } catch { /* ignore */ } finally { setPackMsg(null); }
+  const applyRename = async () => {
+    if (!rename || !rename.to.trim() || rename.to === rename.from) { setRename(null); return; }
+    const r = await api.voicesRename(rename.from, rename.to).catch(() => null);
+    if (r) { onVoices(r.voices); onDone(rename.to.trim()); }
+    setRename(null);
   };
 
   return (
     <div className="mt-2 space-y-2">
       <div className="flex items-center gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)} disabled={rec} placeholder={t("voice.recordName")}
-          className="flex-1 min-w-0 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[12px] focus:border-[var(--color-accent)] focus:outline-none" />
         {rec ? (
-          <button onClick={stop} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-warn,#ef4444)] text-white text-[12px] font-semibold">
+          <button onClick={stop} className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-danger,#ef4444)] text-white text-[12px] font-semibold">
             <Square size={13} />{t("voice.recordStop")}
           </button>
         ) : (
-          <button onClick={start} title={t("voice.record")} className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-[12px] font-medium hover:border-[var(--color-accent)]">
+          <button onClick={start} title={t("voice.record")} className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-[12px] font-medium hover:border-[var(--color-accent)]">
             <span className="w-2 h-2 rounded-full bg-[var(--color-danger,#ef4444)]" />{t("voice.record")}
           </button>
         )}
+        <button onClick={() => setPack(true)} title={t("voice.packTitle")}
+          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] text-[12px] text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)]">
+          <Download size={13} />{t("voice.more")}
+        </button>
       </div>
       {rec && (
         <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
           <div className="h-full bg-[var(--color-accent)] transition-[width] duration-100" style={{ width: `${Math.min(100, level * 140)}%` }} />
         </div>
       )}
-      {voiceList.length === 0 && !rec && (
-        <button onClick={downloadPack} disabled={!!packMsg}
-          className="w-full inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg border border-dashed border-[var(--color-border)] text-[12px] text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] disabled:opacity-50">
-          {packMsg ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}{packMsg || t("voice.downloadPack")}
-        </button>
+      {rename && !rec && (
+        <div className="flex items-center gap-2">
+          <input value={rename.to} onChange={(e) => setRename({ ...rename, to: e.target.value })} autoFocus
+            onKeyDown={(e) => { if (e.key === "Enter") applyRename(); }}
+            placeholder={t("voice.recordName")}
+            className="flex-1 min-w-0 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[12px] focus:border-[var(--color-accent)] focus:outline-none" />
+          <button onClick={applyRename} className="shrink-0 px-2.5 py-1.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[12px] font-semibold"><Check size={13} /></button>
+        </div>
       )}
+      {pack && <VoicePackModal have={voiceList} onVoices={onVoices} onClose={() => setPack(false)} />}
     </div>
   );
 }
