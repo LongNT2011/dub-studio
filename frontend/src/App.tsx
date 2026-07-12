@@ -298,6 +298,7 @@ function TopBar() {
         <span className="text-sm text-[var(--color-muted)] hidden sm:inline">{t("app.tagline")}</span>
       </div>
       <div className="flex items-center gap-2">
+        <div id="dock-slot" className="flex items-center gap-2" />
         {stage !== "empty" && (
           <button onClick={newProject} title={t("nav.newHint")}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors">
