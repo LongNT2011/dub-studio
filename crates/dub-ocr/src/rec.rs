@@ -57,17 +57,16 @@ impl RecDict {
     }
 }
 
-/// Распознать текст в кропе бокса. Порт rec-части _lines (PP-OCR rec + CTC greedy). Билинейный ресайз
-/// к высоте 48 (ширина пропорц.), нормализация [-1,1].
-pub fn recognize(model: &mut OnnxModel, dict: &RecDict, img: &RgbImage) -> Result<(String, f32), String> {
+/// Ресайз кропа к высоте REC_H (ширина пропорц., мин.16), нормализация [-1,1]. Возвращает (rw, канал-планы
+/// [3][REC_H*rw]-flat в порядке CHW). Билинейный ресемпл.
+fn preprocess(img: &RgbImage) -> Option<(usize, Vec<f32>)> {
     let (cw, ch) = (img.width() as usize, img.height() as usize);
     if cw == 0 || ch == 0 {
-        return Ok((String::new(), 0.0));
+        return None;
     }
-    // ширина пропорционально высоте 48, ограничение снизу разумным минимумом.
     let ratio = cw as f32 / ch as f32;
     let rw = ((REC_H as f32 * ratio).ceil() as usize).max(16);
-    let mut input = Array4::<f32>::zeros((1, 3, REC_H, rw));
+    let mut plane = vec![0.0f32; 3 * REC_H * rw];
     let sx = cw as f32 / rw as f32;
     let sy = ch as f32 / REC_H as f32;
     for oy in 0..REC_H {
@@ -85,19 +84,15 @@ pub fn recognize(model: &mut OnnxModel, dict: &RecDict, img: &RgbImage) -> Resul
                 let top = s(x0, y0) * (1.0 - wx) + s(x1, y0) * wx;
                 let bot = s(x0, y1) * (1.0 - wx) + s(x1, y1) * wx;
                 let v = (top * (1.0 - wy) + bot * wy) / 255.0;
-                input[[0, c, oy, ox]] = (v - 0.5) / 0.5;
+                plane[c * REC_H * rw + oy * rw + ox] = (v - 0.5) / 0.5;
             }
         }
     }
+    Some((rw, plane))
+}
 
-    let (shape, flat) = model.run(input)?;
-    // форма (1, T, C): C = размер словаря.
-    if shape.len() != 3 {
-        return Ok((String::new(), 0.0));
-    }
-    let t = shape[1];
-    let c = shape[2];
-
+/// CTC-greedy декод одного выхода [T,C] (blank=0, пропуск повторов). Возвращает (текст, ср.скор).
+fn ctc_decode(flat: &[f32], t: usize, c: usize, dict: &RecDict) -> (String, f32) {
     let mut text = String::new();
     let mut scores: Vec<f32> = Vec::new();
     let mut prev_idx = usize::MAX;
@@ -112,19 +107,74 @@ pub fn recognize(model: &mut OnnxModel, dict: &RecDict, img: &RgbImage) -> Resul
                 best = ci;
             }
         }
-        // CTC: пропускаем blank(0) и повтор предыдущего индекса.
         if best != 0 && best != prev_idx {
             text.push_str(dict.ch(best));
             scores.push(best_v);
         }
         prev_idx = best;
     }
-    let score = if scores.is_empty() {
-        0.0
-    } else {
-        scores.iter().sum::<f32>() / scores.len() as f32
-    };
-    Ok((text, score))
+    let score = if scores.is_empty() { 0.0 } else { scores.iter().sum::<f32>() / scores.len() as f32 };
+    (text, score)
+}
+
+/// Распознать текст в одном кропе (PP-OCR rec + CTC greedy). Билинейный ресайз к высоте 48, [-1,1].
+pub fn recognize(model: &mut OnnxModel, dict: &RecDict, img: &RgbImage) -> Result<(String, f32), String> {
+    let Some((rw, plane)) = preprocess(img) else { return Ok((String::new(), 0.0)) };
+    let mut input = Array4::<f32>::zeros((1, 3, REC_H, rw));
+    for c in 0..3 {
+        for oy in 0..REC_H {
+            for ox in 0..rw {
+                input[[0, c, oy, ox]] = plane[c * REC_H * rw + oy * rw + ox];
+            }
+        }
+    }
+    let (shape, flat) = model.run(input)?;
+    if shape.len() != 3 {
+        return Ok((String::new(), 0.0));
+    }
+    Ok(ctc_decode(&flat, shape[1], shape[2], dict))
+}
+
+/// Распознать ПАЧКУ кропов за один инференс: [N,3,48,Wmax] (правый zero-pad до Wmax; лишние столбцы
+/// декодятся как blank). Один вызов ORT вместо N — экономит оверхед на кадр. Пустой вход -> пусто.
+pub fn recognize_batch(
+    model: &mut OnnxModel,
+    dict: &RecDict,
+    imgs: &[RgbImage],
+) -> Result<Vec<(String, f32)>, String> {
+    if imgs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pre: Vec<Option<(usize, Vec<f32>)>> = imgs.iter().map(preprocess).collect();
+    let w_max = pre.iter().flatten().map(|(w, _)| *w).max().unwrap_or(0).max(16);
+    let n = imgs.len();
+    let mut input = Array4::<f32>::zeros((n, 3, REC_H, w_max));
+    for (i, p) in pre.iter().enumerate() {
+        let Some((rw, plane)) = p else { continue };
+        for c in 0..3 {
+            for oy in 0..REC_H {
+                let src = c * REC_H * rw + oy * rw;
+                for ox in 0..*rw {
+                    input[[i, c, oy, ox]] = plane[src + ox];
+                }
+            }
+        }
+    }
+    let (shape, flat) = model.run(input)?;
+    if shape.len() != 3 {
+        return Ok(vec![(String::new(), 0.0); n]);
+    }
+    let (t, c) = (shape[1], shape[2]);
+    let per = t * c;
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        if pre[i].is_none() {
+            out.push((String::new(), 0.0));
+        } else {
+            out.push(ctc_decode(&flat[i * per..(i + 1) * per], t, c, dict));
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

@@ -24,7 +24,7 @@ pub use rec::RecDict;
 use det::detect;
 use image::RgbImage;
 use ort_engine::OnnxModel;
-use rec::recognize;
+use rec::recognize_batch;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -277,9 +277,9 @@ pub fn detect_regions(
             Ok(im) => im.to_rgb8(),
             Err(_) => continue,
         };
-        // det -> боксы; (опц. cls) -> rec каждый бокс.
+        // det -> боксы; (опц. cls) -> кропы -> rec ПАЧКОЙ (один инференс на кадр).
         let boxes = detect(&mut det_model, &img, &det_params)?;
-        let mut lines_raw: Vec<(String, f32, f32, f32, f32)> = Vec::new();
+        let mut crops: Vec<RgbImage> = Vec::with_capacity(boxes.len());
         for b in &boxes {
             let mut crop = crop_rgb(&img, b.x, b.y, b.w, b.h);
             if let Some(cls_model) = cls_model.as_mut() {
@@ -287,7 +287,11 @@ pub fn detect_regions(
                     crop = image::imageops::rotate180(&crop);
                 }
             }
-            let (txt, score) = recognize(&mut rec_model, &dict, &crop)?;
+            crops.push(crop);
+        }
+        let results = recognize_batch(&mut rec_model, &dict, &crops)?;
+        let mut lines_raw: Vec<(String, f32, f32, f32, f32)> = Vec::new();
+        for (b, (txt, score)) in boxes.iter().zip(results) {
             if std::env::var_os("DUB_OCR_DEBUG").is_some() {
                 eprintln!(
                     "  t={t:.2} [{score:.2}] {:?} @({:.0},{:.0} {:.0}x{:.0})",
