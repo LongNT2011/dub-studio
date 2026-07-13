@@ -169,7 +169,8 @@
   },
   "files": {
     "title": "Files",
-    "download": "Download",
+    "download": "Save",
+    "downloaded": "Saved",
     "open": "Open"
   },
   "nav": {

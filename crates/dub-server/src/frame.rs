@@ -25,13 +25,11 @@ pub fn preview_frame(
     let vh = proj.meta.height;
     let total = proj.meta.duration;
     let ass_p = work_dir.join("_preview.ass");
-    // covers НЕ добавляем в живое превью — лишний per-frame gblur тормозил скраб (оригинал их в preview не
-    // гонял). Блюр-подложка под субтитром рисуется только в финальном рендере (render.rs) -> видна в
-    // навигируемом output.mp4, а покадровое превью редактора остаётся быстрым.
-    build_ass(proj, &ass_p, vw, vh, total)?;
+    let sub_covers = build_ass(proj, &ass_p, vw, vh, total)?;
 
-    // blur-боксы = project.captions.blur_boxes (hidden исключаются).
-    let blur_boxes: Vec<dub_captions::BlurBox> = proj
+    // blur-боксы = project.captions.blur_boxes (hidden исключаются) + подложки под нашими субтитрами
+    // (WYSIWYG: превью показывает ту же блюр-подложку, что и финальный рендер).
+    let mut blur_boxes: Vec<dub_captions::BlurBox> = proj
         .captions
         .blur_boxes
         .iter()
@@ -46,6 +44,7 @@ pub fn preview_frame(
             fill: b.fill.clone(),
         })
         .collect();
+    blur_boxes.extend(sub_covers.iter().map(crate::render::cover_to_blur));
 
     let png = work_dir.join("_preview.png");
     dub_captions::burn_frame(

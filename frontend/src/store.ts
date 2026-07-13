@@ -2,7 +2,7 @@ import { create } from "zustand";
 import type { Project } from "./lib/api";
 
 type Stage = "boot" | "setup" | "empty" | "analyzing" | "editor" | "batch";
-export type ExportItem = { id: string; name: string; status: "rendering" | "done" | "error"; msg: string; url?: string };
+export type ExportItem = { id: string; name: string; status: "rendering" | "done" | "error"; msg: string; url?: string; pid?: string };
 
 type State = {
   stage: Stage;
@@ -55,7 +55,7 @@ export const useStore = create<State>((set, get) => ({
   })),
   setRendered: (rendered) => set({ rendered }),
   setRendering: (rendering) => set({ rendering }),
-  addExport: (e) => set((s) => ({ exports: [e, ...s.exports] })),
+  addExport: (e) => set((s) => ({ exports: [e, ...s.exports.filter((x) => x.id !== e.id)] })),   // дедуп по id: повторный экспорт того же проекта заменяет запись, а не плодит дубли
   updateExport: (id, patch) => set((s) => ({ exports: s.exports.map((x) => (x.id === id ? { ...x, ...patch } : x)) })),
   pushHistory: (p) => set((s) => {
     // no-op if the snapshot matches the current head: callers may re-snapshot the same

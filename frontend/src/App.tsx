@@ -842,9 +842,9 @@ function Editor() {
     return () => window.removeEventListener("keydown", h);
   }, [pid]);   // eslint-disable-line react-hooks/exhaustive-deps
   async function doExport() {
-    const exId = `${pid}-${Date.now()}`;
+    const exId = `export-${pid}`;   // одна запись на проект (повторный экспорт заменяет её, а не плодит дубли)
     const name = (p.meta.video || pid).split(/[\\/]/).pop() || pid;
-    addExport({ id: exId, name, status: "rendering", msg: t("common.rendering") });   // queue entry -> Files panel (no screen block)
+    addExport({ id: exId, name, status: "rendering", msg: t("common.rendering"), pid });   // queue entry -> Files panel (no screen block)
     setRendering(true);
     try {
       const { job_id } = await api.render(pid);
@@ -1449,6 +1449,8 @@ function FilesPanel() {
   const { t } = useTranslation();
   const exports = useStore((s) => s.exports);
   const [, force] = useState(0);
+  const [dled, setDled] = useState<string | null>(null);       // id только что скачанного -> показать «Сохранено» (обратная связь)
+  const [opening, setOpening] = useState<string | null>(null); // id открываемого файла
   const fl = useFloatable("files", { x: window.innerWidth - 360, y: 64 });
   const prevLen = useRef(0);
   useEffect(() => { force((n) => n + 1); }, []); // дождаться #dock-slot
@@ -1501,8 +1503,15 @@ function FilesPanel() {
                 )}
                 {e.status === "done" && e.url && (
                   <div className="mt-2 flex gap-1.5">
-                    <a href={`${e.url}&dl=1`} className="flex-1 inline-flex items-center justify-center gap-1.5 text-[12px] py-1 rounded-md bg-[var(--color-accent)] text-[var(--color-on-accent)] font-semibold"><Download size={13} /> {t("files.download")}</a>
-                    <a href={e.url} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"><ExternalLink size={13} /> {t("files.open")}</a>
+                    <a href={`${e.url}&dl=1`} download
+                       onClick={() => { setDled(e.id); window.setTimeout(() => setDled((c) => (c === e.id ? null : c)), 2500); }}
+                       className="flex-1 inline-flex items-center justify-center gap-1.5 text-[12px] py-1 rounded-md bg-[var(--color-accent)] text-[var(--color-on-accent)] font-semibold">
+                      {dled === e.id ? <><Check size={13} /> {t("files.downloaded")}</> : <><Download size={13} /> {t("files.download")}</>}
+                    </a>
+                    <button onClick={async () => { if (!e.pid) return; setOpening(e.id); try { await api.openOutput(e.pid); } catch { /* ignore */ } finally { window.setTimeout(() => setOpening((c) => (c === e.id ? null : c)), 800); } }}
+                       className="inline-flex items-center justify-center gap-1.5 text-[12px] px-2.5 py-1 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]">
+                      {opening === e.id ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />} {t("files.open")}
+                    </button>
                   </div>
                 )}
                 {e.status === "error" && <div className="mt-1 mono text-[10px] text-[var(--color-warn)] truncate">{e.msg}</div>}
@@ -1807,7 +1816,7 @@ function BatchView() {
               </div>
               <span className="text-[11px] text-[var(--color-muted)] shrink-0">{t(`batch.${it.status}`)}</span>
               {it.status === "done" && it.pid && (
-                <a href={api.outputUrl(it.pid)} target="_blank" rel="noreferrer" className="text-[11px] text-[var(--color-accent)] inline-flex items-center gap-1 shrink-0"><ExternalLink size={12} />{t("batch.open_out")}</a>
+                <button onClick={() => it.pid && api.openOutput(it.pid).catch(() => {})} className="text-[11px] text-[var(--color-accent)] inline-flex items-center gap-1 shrink-0 hover:underline"><ExternalLink size={12} />{t("batch.open_out")}</button>
               )}
             </div>
           ))}

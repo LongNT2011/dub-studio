@@ -301,6 +301,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects/{pid}/waveform", get(endpoints::waveform))
         .route("/projects/{pid}/preview", get(endpoints::preview))
         .route("/projects/{pid}/output", get(output))
+        .route("/projects/{pid}/open", post(open_output))
         // /original?t= отдаёт ОДИН PNG-кадр оригинала (порт app.py.original -> source_frame),
         // фронт (ComparePane) вставляет его как <img src>. Range-раздача сырого видео — /dub.
         .route("/projects/{pid}/original", get(endpoints::original_frame))
@@ -832,6 +833,32 @@ async fn output(
     let dl = q.get("dl").map(|v| v == "1").unwrap_or(false);
     let filename = if dl { Some(format!("{pid}_dub.mp4")) } else { None };
     serve_file_range(&f, req, filename).await
+}
+
+/// POST /projects/{pid}/open — открыть готовый output.mp4 в СИСТЕМНОМ плеере (на машине пользователя).
+/// Нужно, т.к. в нативном Tauri-webview <a target="_blank"> внешний плеер не открывает.
+async fn open_output(State(st): State<AppState>, AxPath(pid): AxPath<String>) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let f = dir.join("output.mp4");
+    if !f.is_file() {
+        return (StatusCode::NOT_FOUND, "not rendered").into_response();
+    }
+    let path = f.to_string_lossy().to_string();
+    let _ = tokio::task::spawn_blocking(move || {
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("cmd").args(["/C", "start", "", &path]).spawn();
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+        }
+    })
+    .await;
+    Json(json!({ "ok": true })).into_response()
 }
 
 async fn dub_video(

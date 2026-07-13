@@ -169,7 +169,8 @@
   },
   "files": {
     "title": "Файлы",
-    "download": "Скачать",
+    "download": "Сохранить",
+    "downloaded": "Сохранено",
     "open": "Открыть"
   },
   "nav": {

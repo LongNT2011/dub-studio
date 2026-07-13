@@ -115,6 +115,7 @@ export const api = {
   originalUrl: (pid: string, t: number) => `${BASE}/projects/${pid}/original?t=${t}`,
   waveform: (pid: string) => fetch(`${BASE}/projects/${pid}/waveform`).then(j<{ peaks: number[] }>),
   outputUrl: (pid: string) => `${BASE}/projects/${pid}/output`,
+  openOutput: (pid: string) => fetch(`${BASE}/projects/${pid}/open`, { method: "POST" }).then(j<{ ok: boolean }>),   // открыть output.mp4 в системном плеере (нативный webview не открывает target=_blank)
   dubUrl: (pid: string, rev = 0) => `${BASE}/projects/${pid}/dub?rev=${rev}`,   // playable dubbed video (frames + dub audio)
   // SSE job progress -> onEvent per message; resolves on done, rejects on error
   watchJob: (jobId: string, onEvent: (e: JobEvent) => void) =>
