@@ -219,18 +219,7 @@ pub fn mix(voice: &Path, music: &Path, out: &Path) -> Result<(), String> {
     ])
 }
 
-/// Финальная нормализация программы по EBU R128 (ffmpeg loudnorm): интегральная громкость к I LUFS
-/// + true-peak лимитер к TP dBTP. Ставится последним шагом на смиксованную дорожку.
-pub fn loudnorm(src: &Path, dst: &Path, i: f64, tp: f64, lra: f64) -> Result<(), String> {
-    let af = format!("loudnorm=I={i}:TP={tp}:LRA={lra}");
-    run_ff(&[
-        OsStr::new("-y"), OsStr::new("-i"), src.as_os_str(),
-        OsStr::new("-af"), OsStr::new(&af),
-        OsStr::new("-c:a"), OsStr::new("aac"), OsStr::new("-b:a"), OsStr::new("192k"), dst.as_os_str(),
-    ])
-}
-
-/// Усилить всю дорожку на `gain_db` dB (монтажный гейн поверх нормализации). Перекодирование в aac.
+/// Усилить всю дорожку на `gain_db` dB (монтажный гейн, наша opt-in фича). Перекодирование в aac.
 pub fn gain(src: &Path, dst: &Path, gain_db: f64) -> Result<(), String> {
     let af = format!("volume={gain_db}dB");
     run_ff(&[

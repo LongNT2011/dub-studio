@@ -88,10 +88,22 @@ fn detect_regions_aspect_filter_drops_tall_box() {
 
 #[test]
 fn detect_regions_short_track_dropped() {
-    // трек короче min_dur=0.3 (один кадр) -> отброшен
+    // Отбрасывается трек короче min_dur ДАЖЕ С хвостом +1/fps (питон text_detect.py:126:
+    // t1-t0+1/fps>=min_dur). При fps=2 один кадр = длительность 0 + хвост 0.5; чтобы РЕАЛЬНО отбросить,
+    // min_dur должен быть > 0.5 -> берём 0.6.
+    let frames = vec![(0.0, vec![("hi there text".into(), 50.0, 700.0, 120.0, 25.0)])];
+    let (regions, _) = detect_regions_frames(&frames, FPS, 0.6, 0.3, 8, 20.0);
+    assert_eq!(regions.len(), 0);
+}
+
+#[test]
+fn detect_regions_single_frame_kept_with_tail() {
+    // ПАРИТЕТ С ПИТОНОМ: гейт t1-t0+1/fps>=min_dur -> один кадр (0 + хвост 0.5) при min_dur=0.3 ПРОХОДИТ
+    // и трек СОХРАНЯЕТСЯ. Раньше Rust считал t1-t0>=min_dur (0>=0.3=false) и выкидывал — расхождение.
     let frames = vec![(0.0, vec![("hi there text".into(), 50.0, 700.0, 120.0, 25.0)])];
     let (regions, _) = detect_regions_frames(&frames, FPS, 0.3, 0.3, 8, 20.0);
-    assert_eq!(regions.len(), 0);
+    assert_eq!(regions.len(), 1);
+    assert!((regions[0].t1 - 0.5).abs() < 1e-3, "t1 got {}", regions[0].t1);
 }
 
 #[test]

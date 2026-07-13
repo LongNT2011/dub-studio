@@ -921,7 +921,8 @@ mod tests {
         normalize_voice(&mut loud, sr);
         normalize_voice(&mut quiet, sr);
         let (rl, rq) = (rms(&loud), rms(&quiet));
-        // после выравнивания уровни должны сойтись (dialog-gated нормализация); пики ловит лимитер.
+        // после выравнивания уровни должны сойтись (dialog-gated нормализация); пики держит пофразный
+        // клип gain=min(gain,0.985/peak) в самой normalize_voice (финального loudnorm в порте нет).
         assert!((rl - rq).abs() / rl.max(1e-9) < 0.15, "уровни должны сойтись: loud={rl:.4} quiet={rq:.4}");
     }
 

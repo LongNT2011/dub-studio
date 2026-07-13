@@ -455,9 +455,10 @@ pub fn emit_title(out: &mut Vec<String>, b: &Title, width: i64, height: i64) {
     // направленная тень (порт captions.py:466 — ВНЕ outline-блока, гейт по shadow_dir): dist=ow|fs*0.10,
     // цвет = outline редактора либо чёрный.
     let sh_dist = ow.unwrap_or_else(|| ((fs as f32 * 0.10) as i64).max(2));
+    // питон truthy-guard (captions.py:468): пустая строка outline -> чёрный дефолт, не белый c6(hex_ass("")).
     let sh_col = match &b.outline {
-        Some(o) => look::c6(&look::hex_ass(o)),
-        None => "&H000000&".to_string(),
+        Some(o) if !o.is_empty() => look::c6(&look::hex_ass(o)),
+        _ => "&H000000&".to_string(),
     };
     out_tags.push_str(&look::dir_shadow_tags(b.shadow_dir, sh_dist, &sh_col));
     out.push(format!(

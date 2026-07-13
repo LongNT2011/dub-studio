@@ -111,9 +111,11 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
 
     // 3) диаризация. merge_gap=0.8, min_speaker_dur=2.5 — дефолты diarize.turns питона (asr.py-контракт).
     //    Если модель sortformer недоступна ИЛИ вернула <2 спикеров -> single-speaker (штатная ветка).
-    //    ГЕЙТ как питон (pipeline.py:169 `cfg.dub and _per_spk`): диаризуем при dub/auto (дефолт-голос=clone,
-    //    per_spk) И при transcribe (режим «транскрипт+диаризация»). При nodub (только субтитры) НЕ диаризуем —
-    //    питон там whole-clip, иначе diarize-first порезал бы субтитры по спикерам иначе, чем оригинал.
+    //    ГЕЙТ. Два случая: (1) dub/auto — ПАРИТЕТ с питоном (pipeline.py:169 `cfg.dub and _per_spk`; голос по
+    //    умолчанию clone -> _per_spk=true, поэтому диаризуем). (2) transcribe — НАМЕРЕННОЕ РАСШИРЕНИЕ порта:
+    //    в питоне transcribe ставит cfg.dub=False и НЕ диаризует, но у нас это отдельный режим «транскрипт+
+    //    диаризация» (спикеры показываются в UI), поэтому диаризуем. nodub (только субтитры) — НЕ диаризуем
+    //    (как питон whole-clip; иначе diarize-first порезал бы субтитры по спикерам иначе, чем оригинал).
     let want_diar = args.mode != "nodub";
     emit(progress, "diarize", "диаризация (Sortformer)");
     let diar = if want_diar && paths.sortformer_onnx.is_file() {

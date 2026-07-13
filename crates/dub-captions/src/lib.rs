@@ -177,6 +177,7 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
             .unwrap_or(((sub_fs as f64 * 0.06) as i64).max(2));
         let col = sub_style
             .and_then(|s| s.outline.clone())
+            .filter(|o| !o.is_empty()) // питон truthy-guard: пустая строка outline -> чёрный дефолт, не белый
             .map(|o| look::c6(&look::hex_ass(&o)))
             .unwrap_or_else(|| "&H000000&".to_string());
         look::dir_shadow_tags(sd, dist, &col)

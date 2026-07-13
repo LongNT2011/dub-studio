@@ -699,8 +699,19 @@ pub fn analyze_layout(
         distinct_texts(rs) >= 3 && (spoken.is_empty() || spoken_frac(rs) > 0.0)
     };
 
-    let lines: Vec<i64> = bands
-        .keys()
+    // Порядок бэндов = ПЕРВОЕ ПОЯВЛЕНИЕ при скане band_src (как питон-defaultdict `[b for b in bands]`),
+    // НЕ случайный HashMap-порядок и НЕ cy. Так и детерминизм, и tie-break richest-полосы совпадает с
+    // питоновским `max(lines, key=...)` (первый по порядку на ничьей distinct_texts).
+    let mut band_order: Vec<i64> = Vec::new();
+    let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    for r in &band_src {
+        let b = ((r.2 + r.4 / 2.0) / band_h) as i64;
+        if seen.insert(b) {
+            band_order.push(b);
+        }
+    }
+    let lines: Vec<i64> = band_order
+        .iter()
         .copied()
         .filter(|&b| band_cy(b) >= lower_from * frame_h as f32 && is_sub_line(b))
         .collect();
@@ -708,13 +719,11 @@ pub fn analyze_layout(
         return (ocr.to_vec(), Vec::new(), None);
     }
     let centers: Vec<f32> = lines.iter().map(|&b| band_cy(b)).collect();
-    // сорт по cy ПЕРЕД выбором -> детерминизм (ключи HashMap-полос идут в случайном порядке; max_by_key
-    // без сортировки давал бы разную полосу на ничьей distinct_texts). Порт: питон-dict хранит порядок.
-    let mut lines_ord = lines.clone();
-    lines_ord.sort_by(|&a, &b| band_cy(a).partial_cmp(&band_cy(b)).unwrap_or(std::cmp::Ordering::Equal));
-    let richest = *lines_ord
+    // richest = ПЕРВЫЙ по порядку появления с макс. distinct_texts (питон max() -> первый на ничьей; reduce
+    // меняет best лишь на СТРОГО больший, поэтому ранний выигрывает при равенстве).
+    let richest = *lines
         .iter()
-        .max_by_key(|&&b| distinct_texts(&bands[&b]))
+        .reduce(|best, b| if distinct_texts(&bands[b]) > distinct_texts(&bands[best]) { b } else { best })
         .unwrap();
     let sub_y = band_cy(richest) as i64;
 

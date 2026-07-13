@@ -47,20 +47,6 @@ pub fn strip_think(s: &str) -> String {
     out.trim().to_string()
 }
 
-fn utf8_len(b: u8) -> usize {
-    if b < 0x80 {
-        1
-    } else if b >> 5 == 0b110 {
-        2
-    } else if b >> 4 == 0b1110 {
-        3
-    } else if b >> 3 == 0b11110 {
-        4
-    } else {
-        1
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -492,21 +492,23 @@ fn auto_fill_boxes(
             })
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         let Some((dom, frac)) = best else { continue };
-        // порт _auto_fill_boxes (pipeline.py:83-86): g_flat (Gemma: плоская подложка) -> ВСЕГДА solid,
-        // предпочесть scene-цвет g_col безусловно, иначе доминанту; без хинта -> solid только если бокс
-        // подавляюще одноцветный (frac>=0.72), иначе fill остаётся None (блюр).
-        if g_flat {
-            b.fill = Some(g_col.clone().unwrap_or(dom));
-        } else if frac >= 0.72 {
-            b.fill = Some(dom);
+        if let Some(fill) = fill_choice(g_flat, g_col.as_deref(), &dom, frac as f64) {
+            b.fill = Some(fill);
         }
     }
 }
 
-/// Каналы двух "#rrggbb" различаются не сильнее шага квантования.
-fn colour_close(a: &str, b: &str) -> bool {
-    let px = |s: &str, i: usize| u8::from_str_radix(&s[1 + i * 2..3 + i * 2], 16).unwrap_or(0);
-    (0..3).all(|i| (px(a, i) as i32 - px(b, i) as i32).abs() < 24)
+/// Решение авто-заливки бокса (чистая функция, тестируемая без ffmpeg). Порт _auto_fill_boxes (pipeline.py:83-86):
+/// g_flat (Gemma: плоская подложка) -> ВСЕГДА solid, предпочесть scene-цвет g_col безусловно, иначе доминанту;
+/// без хинта -> solid лишь если бокс подавляюще одноцветный (frac>=0.72), иначе None (блюр).
+fn fill_choice(g_flat: bool, g_col: Option<&str>, dom: &str, frac: f64) -> Option<String> {
+    if g_flat {
+        Some(g_col.map(|c| c.to_string()).unwrap_or_else(|| dom.to_string()))
+    } else if frac >= 0.72 {
+        Some(dom.to_string())
+    } else {
+        None
+    }
 }
 
 /// Цвет фона бокса в момент t: доминанта верхней+нижней полос ROI ("#rrggbb", доля). Сбой -> None.
@@ -875,6 +877,18 @@ fn translate_taglines(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn fill_choice_matches_python() {
+        // g_flat -> ВСЕГДА solid, scene-цвет g_col предпочтителен даже при низком frac
+        assert_eq!(fill_choice(true, Some("#123456"), "#ffffff", 0.1), Some("#123456".into()));
+        // g_flat без g_col -> доминанта, даже при низком frac
+        assert_eq!(fill_choice(true, None, "#abcdef", 0.1), Some("#abcdef".into()));
+        // не flat, frac>=0.72 -> доминанта
+        assert_eq!(fill_choice(false, None, "#222222", 0.72), Some("#222222".into()));
+        // не flat, frac<0.72 -> None (блюр), g_col игнорируется
+        assert_eq!(fill_choice(false, Some("#123456"), "#222222", 0.5), None);
+    }
 
     #[test]
     fn substring_title_dupe_dropped_adhd() {
