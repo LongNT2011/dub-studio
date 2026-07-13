@@ -204,14 +204,15 @@ pub fn time_stretch(src: &Path, dst: &Path, factor: f64) -> Result<(), String> {
     ])
 }
 
-/// Свести дубль-вокал поверх фона. Порт media.mix 1:1: фон (2-й вход) приглушается volume=0.45, затем
-/// amix БЕЗ normalize=0 (питон-дефолт normalize=1 делит входы пополам). aformat=cl=stereo снимает
-/// нестандартный mono channel layout нашего hound-дубляжа (уровень не меняет). Финального loudnorm нет —
-/// как в питоновском _build_dub; баланс держит именно это приглушение + пофразный normalize_voice.
+/// Свести дубль-вокал поверх фона. МУЗЫКУ НЕ ГЛУШИМ (прямой приказ юзера, многократно): вокал уже вырезан
+/// сепарацией, поэтому инструментал = чистый реальный фон и звучит в ПОЛНЫЙ уровень (1.0) — дублированный
+/// голос заменяет вырезанный вокал, фон остаётся как в оригинале. amix normalize=0 НЕ делит входы пополам
+/// (питон-дефолт=1 занизил бы фон ~в 0.5). aformat=cl=stereo снимает нестандартный mono layout hound-дубляжа
+/// (уровень не меняет). Пики/итоговую громкость держит финальный loudnorm на смиксованной дорожке.
 pub fn mix(voice: &Path, music: &Path, out: &Path) -> Result<(), String> {
     let fc = "[0:a]aformat=channel_layouts=stereo[v];\
-              [1:a]aformat=channel_layouts=stereo,volume=0.45[m];\
-              [v][m]amix=inputs=2:duration=longest:dropout_transition=0[a]";
+              [1:a]aformat=channel_layouts=stereo[m];\
+              [v][m]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a]";
     run_ff(&[
         OsStr::new("-y"), OsStr::new("-i"), voice.as_os_str(), OsStr::new("-i"), music.as_os_str(),
         OsStr::new("-filter_complex"), OsStr::new(fc), OsStr::new("-map"), OsStr::new("[a]"),
