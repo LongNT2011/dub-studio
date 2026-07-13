@@ -139,11 +139,14 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
     let style_name = args.preset.filter(|p| look::preset(p).is_some()).unwrap_or(look::ROTATION[0]);
     let p = look::preset(style_name).unwrap();
 
-    // sub_fs: размер оригинала (sub_px*1.25) либо size_frac*height либо height/16, клампы.
+    // sub_fs: размер оригинала (sub_px*1.25) либо size_frac*height либо height/16, клампы. Порт captions.py:496-501.
     let szf = sub_style.and_then(|s| s.size_frac);
-    let explicit = sub_style.and_then(|s| s.size_px);
+    // size_px==0 -> auto-fit (питон: `if _explicit:` — 0 falsy), НЕ «явные 20».
+    let explicit = sub_style.and_then(|s| s.size_px).filter(|&e| e > 0);
+    let h5 = (height as f64 / 5.0).round() as i64;
+    let h10 = (height as f64 / 10.0).round() as i64;
     let sub_fs: i64 = if let Some(e) = explicit {
-        e.clamp(20, (height as f64 / 5.0).round() as i64).max(20)
+        e.min(h5).max(20) // max(20, min(size_px, height/5))
     } else {
         let seed = if let Some(px) = args.sub_px {
             (px as f64 * 1.25).round() as i64
@@ -152,7 +155,8 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
         } else {
             (height as f64 / 16.0).round() as i64
         };
-        seed.clamp(44, (height as f64 / 10.0).round() as i64).max(44)
+        // min(max(44, seed), height/10): frame-cap выигрывает на МАЛОМ кадре (h10<44) -> без паники clamp.
+        seed.max(44).min(h10)
     };
     let margin_v = (height as f64 * 0.13).round() as i64;
 
@@ -163,6 +167,21 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
 
     // S-style строка (порт всех веток if sub_style / elif / else). plate_opaque -> плашка уже кроет фон.
     let (s_style, plate_opaque) = build_s_style(&fontname, sub_fs, margin_v, sub_style, &p);
+
+    // Направленная тень субтитра (порт captions.py:593): вычисляем ОДИН раз, префиксом к каждой S-строке.
+    // dist = outline_w редактора либо max(2, sub_fs*0.06); цвет = outline редактора либо чёрный.
+    let subdir = {
+        let sd = sub_style.and_then(|s| s.shadow_dir);
+        let dist = sub_style
+            .and_then(|s| s.outline_w)
+            .unwrap_or(((sub_fs as f64 * 0.06) as i64).max(2));
+        let col = sub_style
+            .and_then(|s| s.outline.clone())
+            .map(|o| look::c6(&look::hex_ass(&o)))
+            .unwrap_or_else(|| "&H000000&".to_string());
+        look::dir_shadow_tags(sd, dist, &col)
+    };
+    let subdir_tag = if subdir.is_empty() { String::new() } else { format!("{{{subdir}}}") };
 
     // head (Script Info + V4+ Styles: T/S/KP/KT).
     let head = build_head(width, height, &s_style, sub_fs, &p);
@@ -309,7 +328,7 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
                     ));
                 }
                 lines.push(format!(
-                    "Dialogue: 1,{},{},S,,0,0,0,,{ptag}{body}",
+                    "Dialogue: 1,{},{},S,,0,0,0,,{ptag}{subdir_tag}{body}",
                     ass::ts(a),
                     ass::ts(b)
                 ));

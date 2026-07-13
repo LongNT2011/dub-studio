@@ -20,6 +20,7 @@ pub struct Title {
     pub size_px: Option<i64>,
     pub outline: Option<String>,
     pub outline_w: Option<i64>,
+    pub shadow_dir: Option<i64>, // направленная тень (градусы, screen-y-down)
     pub uppercase: bool,
 }
 
@@ -30,6 +31,7 @@ pub struct SubStyle {
     pub background: Option<String>,
     pub outline: Option<String>,
     pub outline_w: Option<i64>,
+    pub shadow_dir: Option<i64>, // направленная тень (градусы, screen-y-down)
     pub bold: bool,
     pub italic: bool,
     pub uppercase: bool,
@@ -55,6 +57,7 @@ impl Default for SubStyle {
             background: None,
             outline: None,
             outline_w: None,
+            shadow_dir: None,
             bold: false,
             italic: false,
             uppercase: false,

@@ -91,14 +91,20 @@ fn glossary(
     // counts по \b[A-Z][a-z]{2,}\b
     let re = Regex::new(r"\b[A-Z][a-z]{2,}\b").unwrap();
     let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut order: Vec<String> = Vec::new(); // порядок ПЕРВОГО появления (Counter сохраняет вставку)
     for t in texts {
         for m in re.find_iter(t) {
-            *counts.entry(m.as_str().to_string()).or_insert(0) += 1;
+            let w = m.as_str().to_string();
+            let e = counts.entry(w.clone()).or_insert(0);
+            if *e == 0 {
+                order.push(w);
+            }
+            *e += 1;
         }
     }
-    // most_common(6), c>=3
-    let mut items: Vec<(String, usize)> = counts.into_iter().collect();
-    items.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    // most_common(6), c>=3 — по счёту убыв.; ничья -> порядок появления (стабильная сортировка), НЕ алфавит
+    let mut items: Vec<(String, usize)> = order.iter().map(|w| (w.clone(), counts[w])).collect();
+    items.sort_by(|a, b| b.1.cmp(&a.1));
     let terms: Vec<String> = items.into_iter().take(6).filter(|(_, c)| *c >= 3).map(|(w, _)| w).collect();
 
     let mut gloss: Vec<(String, String)> = Vec::new();

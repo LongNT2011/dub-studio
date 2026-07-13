@@ -233,7 +233,7 @@ fn build_dub(
                 if let Some(src) = src {
                     let out = wd.join(format!("ref_pack_{i}.wav"));
                     // реф КАПИТСЯ до 12с (как клон-рефы): длинный реф -> Higgs не выделяет prefill-граф.
-                    if media::trim(&src, &out, 0.0, 12.0).is_ok() {
+                    if media::trim(&src, &out, 0.0, 12.0, 16_000).is_ok() {
                         map.insert(spk.clone(), out);
                     }
                 }
@@ -322,13 +322,10 @@ fn build_dub(
     for &(fi, s) in segs.iter() {
         let raw = wd.join(format!("seg_{:03}.wav", fi));
         // 'оставить оригинал': вырезаем ИСХОДНУЮ речь сюда, без TTS и без atempo-подгонки (порт _build_dub keep-ветки).
-        // Ресемпл в 24к моно (как питон media.trim(..., sr=24000)) — timeline кладёт по sr ПЕРВОГО файла (TTS=24к),
-        // без ресемпла; 44.1к-вырез играл бы не на той скорости.
+        // Режем СРАЗУ в 24к моно (питон media.trim(..., sr=24000)) — timeline кладёт по sr ПЕРВОГО файла (TTS=24к),
+        // без ресемпла; 44.1к-вырез играл бы не на той скорости. Без промежуточного 16к (не терять ВЧ).
         if seg_keep(s) {
-            let cut = wd.join(format!("keep_{:03}.wav", fi));
-            media::trim(&vocals, &cut, s.start, s.end)?;
-            media::extract_audio(&cut, &raw, 24_000, 1)?;
-            let _ = std::fs::remove_file(&cut);
+            media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
             let at = s.start.max(cursor);
             cursor = at + media::duration(&raw)?;
             placed.push((at, raw));
@@ -386,29 +383,20 @@ fn build_dub(
     } else {
         dub
     };
-    // 7) финальная нормализация программы EBU R128 + true-peak лимитер (-1 dBTP). Пофразное
-    // выравнивание уже сделало спикеров равными; здесь программа приводится к целевой громкости
-    // соцсетей (-14 LUFS) без клиппинга.
-    emit(progress, "mix", "нормализация громкости (EBU R128, true-peak)");
-    let final_audio = wd.join("final_audio.m4a");
-    let normalized = match media::loudnorm(&mixed, &final_audio, -14.0, -1.0, 11.0) {
-        Ok(()) => final_audio,
-        Err(e) => {
-            emit(progress, "mix", &format!("loudnorm пропущен ({e})"));
-            mixed
-        }
-    };
-    // 8) монтажный гейн всей дорожки (если задан). Поверх нормализации — «усилить всё».
+    // 7) монтажный гейн всей дорожки (если задан) — ЕДИНСТВЕННАЯ пост-стадия сверх питона (наша фича
+    // «усилить всё»; дефолт 0 dB = no-op = ровно как питон). В питоновском _build_dub/_regen_dub НЕТ ни
+    // loudnorm, ни gain: баланс уже задан пофразным normalize_voice (+12 dB кап, пик 0.985) и mix-приглушением
+    // фона до 0.45. mux сам кодирует WAV->aac, так что отдельная конверсия не нужна.
     let gain_db = proj.audio.gain_db;
     if gain_db.abs() > 0.05 {
         emit(progress, "mix", &format!("гейн дорожки {gain_db:+.1} dB"));
         let gained = wd.join("gained_audio.m4a");
-        match media::gain(&normalized, &gained, gain_db) {
+        match media::gain(&mixed, &gained, gain_db) {
             Ok(()) => Ok(gained),
-            Err(_) => Ok(normalized),
+            Err(_) => Ok(mixed),
         }
     } else {
-        Ok(normalized)
+        Ok(mixed)
     }
 }
 
@@ -439,7 +427,7 @@ fn build_speaker_refs(
             .map(|(_, s)| *s);
         let Some(cand) = cand else { continue };
         let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
-        media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + 12.0))?;
+        media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + 12.0), 16_000)?;
         refs.insert(spk.clone(), ref_wav);
         let t = cand.src_text.trim();
         if !t.is_empty() {
@@ -511,8 +499,8 @@ fn timeline(placed: &[(f64, PathBuf)], total_dur: f64, out_wav: &Path) -> Result
 
 /// Выровнять ОДНУ фразу к общей громкости, чтобы все спикеры звучали одинаково громко (dialog-gated
 /// нормализация): интегральная громкость BS.1770 к -16 LUFS; короткие/тихие фразы — RMS к -18 dBFS.
-/// Пики НЕ ограничиваем — их ловит финальный true-peak лимитер (media::loudnorm) на смиксованной
-/// дорожке; здесь только выравнивание уровня. Сани-кап +40 dB (не раздувать почти-тишину).
+/// Порт assemble.normalize_voice 1:1: буст-кап +12 dB (не раздувать шум на тихих) И пик-защита
+/// gain=min(gain, 0.985/peak) — фраза НИКОГДА не клиппирует (в питоне финального loudnorm нет).
 fn normalize_voice(x: &mut [f32], sr: u32) {
     if x.is_empty() {
         return;
@@ -546,7 +534,8 @@ fn normalize_voice(x: &mut [f32], sr: u32) {
         .max(1e-9);
         10f64.powf(-18.0 / 20.0) / rms
     });
-    let gain = gain.min(10f64.powf(40.0 / 20.0)); // сани-кап, пики ловит финальный лимитер
+    let gain = gain.min(10f64.powf(12.0 / 20.0)); // кап буста +12 dB (assemble.py:36)
+    let gain = gain.min(0.985 / peak as f64); // пик-защита -> без клиппинга (assemble.py:37)
     for v in x.iter_mut() {
         *v = (*v as f64 * gain) as f32;
     }
@@ -817,6 +806,7 @@ fn map_title(t: &CoreTitle) -> CapTitle {
         size_px: t.size_px,
         outline: t.outline.clone(),
         outline_w: t.outline_w,
+        shadow_dir: t.shadow_dir,
         uppercase: t.uppercase,
     }
 }
@@ -834,6 +824,7 @@ fn map_sub_style(s: &CoreSubStyle) -> CapSubStyle {
         background: bg,
         outline: Some(s.outline.clone()),
         outline_w: s.outline_w,
+        shadow_dir: s.shadow_dir,
         bold: s.bold,
         italic: s.italic,
         uppercase: s.uppercase,

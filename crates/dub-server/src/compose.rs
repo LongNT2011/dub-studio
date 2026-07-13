@@ -146,7 +146,7 @@ pub fn run(
         })
         .map(|r| (r.text.clone(), r.x, r.y, r.w, r.h, r.t0, r.t1))
         .collect();
-    let mut groups: Vec<CaptionGroup> = group_captions(&title_src, 0.0, 0.0)
+    let mut groups: Vec<CaptionGroup> = group_captions(&title_src, 1.0, 0.0)
         .into_iter()
         .filter(|g| alpha_count(&g.text) >= 4)
         .collect();
@@ -492,10 +492,13 @@ fn auto_fill_boxes(
             })
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
         let Some((dom, frac)) = best else { continue };
-        if frac >= 0.72 {
-            let close_to_scene = g_flat
-                && g_col.as_deref().is_some_and(|g| colour_close(g, &dom));
-            b.fill = Some(if close_to_scene { g_col.clone().unwrap() } else { dom });
+        // порт _auto_fill_boxes (pipeline.py:83-86): g_flat (Gemma: плоская подложка) -> ВСЕГДА solid,
+        // предпочесть scene-цвет g_col безусловно, иначе доминанту; без хинта -> solid только если бокс
+        // подавляюще одноцветный (frac>=0.72), иначе fill остаётся None (блюр).
+        if g_flat {
+            b.fill = Some(g_col.clone().unwrap_or(dom));
+        } else if frac >= 0.72 {
+            b.fill = Some(dom);
         }
     }
 }
@@ -705,6 +708,7 @@ fn locblock_to_title(b: &LocBlock) -> Title {
         size_px: None,
         outline: None,
         outline_w: None,
+        shadow_dir: None,
         uppercase: false,
         extra: Default::default(),
     }
@@ -735,7 +739,9 @@ fn ensure_sub_style_mirror(
         for v in &vals {
             *counts.entry(v).or_insert(0) += 1;
         }
-        counts.into_iter().max_by_key(|(_, c)| *c).map(|(v, _)| v.clone()).unwrap()
+        // детерминизм как Counter.most_common: ничья -> первый по появлению (не HashMap-порядок)
+        let maxc = counts.values().copied().max().unwrap_or(0);
+        vals.iter().find(|v| counts[v] == maxc).cloned().unwrap_or_else(|| d.to_string())
     };
     // cap_px: медиана высот центр-нижних OCR-боксов (центр X, cy > 0.40*vh). Порт _caph.
     let mut caph: Vec<f32> = loc

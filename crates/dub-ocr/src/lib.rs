@@ -435,7 +435,9 @@ pub fn detect_regions_frames(
     // финализация треков -> Region (most-frequent текст, pad).
     let mut regions = Vec::new();
     for tr in &tracks {
-        if tr.t1 - tr.t0 >= min_dur && !tr.texts.is_empty() {
+        // +1.0/fps в гейте (как питон text_detect.py:126): трек реально длится t1-t0+1/кадр (см. t1 ниже),
+        // без хвоста одиночные/короткие треки выкидывались, хотя питон их держит.
+        if tr.t1 - tr.t0 + 1.0 / fps as f32 >= min_dur && !tr.texts.is_empty() {
             let (x, y, w, h) = tr.bx;
             let text = most_common(&tr.texts);
             regions.push(Region {
@@ -464,15 +466,16 @@ fn crop_rgb(img: &RgbImage, x: f32, y: f32, w: f32, h: f32) -> RgbImage {
 }
 
 fn most_common(v: &[String]) -> String {
+    if v.is_empty() {
+        return String::new();
+    }
     let mut counts: HashMap<&str, usize> = HashMap::new();
     for s in v {
         *counts.entry(s.as_str()).or_insert(0) += 1;
     }
-    counts
-        .into_iter()
-        .max_by_key(|(_, c)| *c)
-        .map(|(s, _)| s.to_string())
-        .unwrap_or_default()
+    // детерминизм как Counter.most_common: ничья -> первый по появлению (не HashMap-порядок)
+    let maxc = counts.values().copied().max().unwrap_or(0);
+    v.iter().find(|s| counts[s.as_str()] == maxc).cloned().unwrap_or_default()
 }
 
 // ─── compose.py порт (layout: субтитр-полоса vs титры) ───────────────────────
@@ -705,7 +708,11 @@ pub fn analyze_layout(
         return (ocr.to_vec(), Vec::new(), None);
     }
     let centers: Vec<f32> = lines.iter().map(|&b| band_cy(b)).collect();
-    let richest = *lines
+    // сорт по cy ПЕРЕД выбором -> детерминизм (ключи HashMap-полос идут в случайном порядке; max_by_key
+    // без сортировки давал бы разную полосу на ничьей distinct_texts). Порт: питон-dict хранит порядок.
+    let mut lines_ord = lines.clone();
+    lines_ord.sort_by(|&a, &b| band_cy(a).partial_cmp(&band_cy(b)).unwrap_or(std::cmp::Ordering::Equal));
+    let richest = *lines_ord
         .iter()
         .max_by_key(|&&b| distinct_texts(&bands[&b]))
         .unwrap();

@@ -338,7 +338,8 @@ pub fn emit_title(out: &mut Vec<String>, b: &Title, width: i64, height: i64) {
     };
     // SIZE: seed от line height оригинала, кап, перенос по ширине бокса.
     let n_src = (b.text.matches('\n').count() as i64 + 1).max(1);
-    let lh0 = b.lh.unwrap_or(h).max(1);
+    // lh==0 -> откат на h (питон `int(b.get("lh") or h)`); было Some(0)->1, теперь Some(0)->h.
+    let lh0 = b.lh.filter(|&l| l != 0).unwrap_or(h).max(1);
     // КЕГЛЬ — от ВЫСОТЫ СТРОКИ (lh), НЕ от bbox.h. bbox af95837 растянут на всю contiguous-СТОПКУ
     // (для блюра — дыра не возвращается), но h стопки НЕ равно высоте титр-ТЕКСТА: у boris блюр-стопка
     // 169px против строки ~70px: h стопки для кегля непригоден —
@@ -347,7 +348,8 @@ pub fn emit_title(out: &mut Vec<String>, b: &Title, width: i64, height: i64) {
     // n_src*lh, round((n_src*lh)/lh)+1 = n_src+1 — стопка блюра на кегль больше не влияет.
     let max_lines = (n_src + 1).max(2);
     let fs_cap = (height as f64 * 0.085) as i64;
-    let szpx = b.size_px;
+    // size_px==0 -> auto-fit (питон `if _szpx:` — 0 falsy), НЕ явные 12.
+    let szpx = b.size_px.filter(|&s| s > 0);
     let mut fs = match szpx {
         Some(s) => s.max(12),
         None => fs_cap.min(lh0.max(22)),
@@ -450,6 +452,14 @@ pub fn emit_title(out: &mut Vec<String>, b: &Title, width: i64, height: i64) {
         };
         out_tags.push_str(&format!("\\bord{bw}\\3c{oc}\\4c{oc}"));
     }
+    // направленная тень (порт captions.py:466 — ВНЕ outline-блока, гейт по shadow_dir): dist=ow|fs*0.10,
+    // цвет = outline редактора либо чёрный.
+    let sh_dist = ow.unwrap_or_else(|| ((fs as f32 * 0.10) as i64).max(2));
+    let sh_col = match &b.outline {
+        Some(o) => look::c6(&look::hex_ass(o)),
+        None => "&H000000&".to_string(),
+    };
+    out_tags.push_str(&look::dir_shadow_tags(b.shadow_dir, sh_dist, &sh_col));
     out.push(format!(
         "Dialogue: 1,{},{},KT,,0,0,0,,{{\\an{}\\pos({},{}) \\fn{}\\fs{}{}{}{}\\1c{}}}{}",
         ts(b.start),

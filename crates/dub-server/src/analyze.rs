@@ -111,8 +111,12 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
 
     // 3) диаризация. merge_gap=0.8, min_speaker_dur=2.5 — дефолты diarize.turns питона (asr.py-контракт).
     //    Если модель sortformer недоступна ИЛИ вернула <2 спикеров -> single-speaker (штатная ветка).
+    //    ГЕЙТ как питон (pipeline.py:169 `cfg.dub and _per_spk`): диаризуем при dub/auto (дефолт-голос=clone,
+    //    per_spk) И при transcribe (режим «транскрипт+диаризация»). При nodub (только субтитры) НЕ диаризуем —
+    //    питон там whole-clip, иначе diarize-first порезал бы субтитры по спикерам иначе, чем оригинал.
+    let want_diar = args.mode != "nodub";
     emit(progress, "diarize", "диаризация (Sortformer)");
-    let diar = if paths.sortformer_onnx.is_file() {
+    let diar = if want_diar && paths.sortformer_onnx.is_file() {
         match dub_asr::turns(&vocals16, &paths.sortformer_onnx, 0.8, 2.5) {
             Ok(d) => Some(d),
             Err(e) => {
@@ -128,7 +132,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         emit(
             progress,
             "diarize",
-            "sortformer-модель не найдена; single-speaker путь",
+            if !want_diar { "субтитры: без диаризации (whole-clip, как питон)" } else { "sortformer-модель не найдена; single-speaker путь" },
         );
         None
     };

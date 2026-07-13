@@ -218,6 +218,7 @@ fn apply_substyle_fields(st: &mut SubStyle, fields: &serde_json::Map<String, Val
             "n_lines" => st.n_lines = v.as_i64(),
             "size_px" => st.size_px = v.as_i64(),
             "outline_w" => st.outline_w = v.as_i64(),
+            "shadow_dir" => st.shadow_dir = v.as_i64(), // null -> None (снять тень), int -> угол
             // Прочее (background, size_frac, solid, plate, plate_color, …) — в extra passthrough.
             _ => {
                 st.extra.insert(k.clone(), v.clone());
@@ -469,6 +470,8 @@ fn op_title(p: &mut Project, edit: &Value) -> PatchResult {
     if edit.get("font").is_some() { t.font = edit.get("font").and_then(|v| v.as_str()).map(|x| x.to_string()); }
     if edit.get("color").is_some() { t.color = edit.get("color").and_then(|v| v.as_str()).map(|x| x.to_string()); }
     if edit.get("bg").is_some() { t.bg = edit.get("bg").and_then(|v| v.as_str()).map(|x| x.to_string()); }
+    if edit.get("outline").is_some() { t.outline = edit.get("outline").and_then(|v| v.as_str()).map(|x| x.to_string()); }
+    if edit.get("shadow_dir").is_some() { t.shadow_dir = edit.get("shadow_dir").and_then(|v| v.as_i64()); } // null->None
     if let Some(a) = edit.get("align").and_then(|v| v.as_str()) { t.align = a.to_string(); }
     if let Some(st) = f(edit, "start") { t.start = st; }
     if let Some(en) = f(edit, "end") { t.end = en; }

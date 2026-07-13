@@ -139,7 +139,8 @@ numbering, match tone/slang/intent. Use ALL the context below (what the words al
     let mut by_n: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
     for c in re.captures_iter(&raw) {
         if let Ok(n) = c[1].parse::<usize>() {
-            by_n.entry(n).or_insert_with(|| c[2].trim().to_string());
+            // дубль номера строки: держим ПОСЛЕДНЕЕ вхождение (питон dict-comprehension), НЕ первое (or_insert)
+            by_n.insert(n, c[2].trim().to_string());
         }
     }
     for (i, s) in segs.iter_mut().enumerate() {

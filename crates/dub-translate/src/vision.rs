@@ -72,6 +72,26 @@ fn frame_b64(video: &Path, t: f64, tmp: &Path) -> Result<String, TranslateError>
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
+/// Коэрсинг числа: Gemma иногда шлёт число СТРОКОЙ ("0.5"). Питон float()/int() это принимает; голый
+/// as_f64/as_i64 у serde роняет Value::String в None. Порт неявной коэрсии float()/int().
+fn num_f64(v: Option<&Value>) -> Option<f64> {
+    match v {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+fn num_i64(v: Option<&Value>) -> Option<i64> {
+    match v {
+        Some(Value::Number(n)) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
+        Some(Value::String(s)) => {
+            let t = s.trim();
+            t.parse::<i64>().ok().or_else(|| t.parse::<f64>().ok().map(|f| f as i64))
+        }
+        _ => None,
+    }
+}
+
 /// Стилевой блок для одного текстового элемента (title/caption) в dict рендерера. Порт _style_block.
 fn style_block(d: &Value, txt: &str) -> Value {
     let bg_solid = d.get("background").and_then(|x| x.as_str()) == Some("solid");
@@ -79,7 +99,7 @@ fn style_block(d: &Value, txt: &str) -> Value {
     let align = if ["left", "center", "right"].contains(&align) { align } else { "center" };
     serde_json::json!({
         "text": txt,
-        "y_frac": d.get("y_frac"),
+        "y_frac": num_f64(d.get("y_frac")),   // коэрсинг строки-числа -> f64 (иначе compose.yfrac дропнет)
         "color": hex_opt(d.get("color")),
         "bg": if bg_solid { hex_opt(d.get("background_color")) } else { None },
         "solid": bg_solid,
@@ -102,11 +122,17 @@ pub struct Layout {
 }
 
 fn most_common<T: Clone + Eq + std::hash::Hash>(items: &[T]) -> Option<T> {
+    // Детерминизм как Counter.most_common(1): при ничьей — ПЕРВЫЙ по порядку появления (не HashMap-порядок,
+    // который у Rust недетерминирован и давал бы «последнего»). Считаем -> берём первый item с макс. счётом.
+    if items.is_empty() {
+        return None;
+    }
     let mut counts: std::collections::HashMap<&T, usize> = std::collections::HashMap::new();
     for it in items {
         *counts.entry(it).or_insert(0) += 1;
     }
-    counts.into_iter().max_by_key(|(_, c)| *c).map(|(v, _)| v.clone())
+    let maxc = counts.values().copied().max().unwrap_or(0);
+    items.iter().find(|it| counts[*it] == maxc).cloned()
 }
 
 /// Одно image-сообщение к Gemma (кадр + текстовый промпт). Порт imsg.
@@ -255,7 +281,7 @@ If there are no subtitle words at all, return {{}}."
             o = Value::Object(Map::new());
         }
 
-        if let Some(y) = sub.get("y_frac").and_then(|x| x.as_f64()) {
+        if let Some(y) = num_f64(sub.get("y_frac")) {
             subs_y.push(y * vh);
         }
         if let Some(c) = hex_opt(sub.get("color")) {
@@ -271,12 +297,12 @@ If there are no subtitle words at all, return {{}}."
         itals.push(sub_ital || ["italic", "oblique", "slant"].iter().any(|w| lt.contains(w)));
         cond.push(["condensed", "narrow", "tall"].iter().any(|w| lt.contains(w)));
         ups.push(sub.get("uppercase").and_then(|x| x.as_bool()).unwrap_or(false));
-        if let Some(sz) = sub.get("size_frac").and_then(|x| x.as_f64()) {
+        if let Some(sz) = num_f64(sub.get("size_frac")) {
             if sz > 0.0 && sz < 1.0 {
                 szs.push(sz);
             }
         }
-        if let Some(nl) = sub.get("n_lines").and_then(|x| x.as_i64()) {
+        if let Some(nl) = num_i64(sub.get("n_lines")) {
             if (1..=4).contains(&nl) {
                 nlines.push(nl);
             }
@@ -319,7 +345,7 @@ If there are no subtitle words at all, return {{}}."
                     continue;
                 }
                 if ti.get("kind").and_then(|x| x.as_str()) == Some("brand") {
-                    brands.push(serde_json::json!({"text": txt, "y_frac": ti.get("y_frac")}));
+                    brands.push(serde_json::json!({"text": txt, "y_frac": num_f64(ti.get("y_frac"))}));
                 } else {
                     let lower = txt.to_lowercase();
                     let dup = titles.iter().any(|t| {

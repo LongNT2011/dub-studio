@@ -27,25 +27,23 @@ pub enum LlmError {
 /// Обрезать блок рассуждений <think>...</think> — как re.sub(r"<think>.*?</think>", "", ...) в питоне.
 /// Нужно на КАЖДОМ ответе Gemma (translate.py делает это везде).
 pub fn strip_think(s: &str) -> String {
+    // 1:1 с питоном: re.sub(r"<think>.*?</think>", "", DOTALL).strip() — РЕГИСТРОЗАВИСИМО, нежадно.
+    // Убираем только ЗАКРЫТЫЕ пары; незакрытый <think> (нет </think>) НЕ матчится -> остаётся как есть,
+    // текст после него сохраняется (Rust раньше выбрасывал хвост и был регистронезависим — обе ошибки).
     let mut out = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let lower = s.to_ascii_lowercase();
-    let mut i = 0;
-    while i < s.len() {
-        if lower[i..].starts_with("<think>") {
-            if let Some(end) = lower[i..].find("</think>") {
-                i += end + "</think>".len();
-                continue;
-            } else {
-                // незакрытый <think> — отбрасываем остаток (как нежадный .*? не сматчил бы, но безопаснее убрать)
-                break;
-            }
+    let mut rest = s;
+    while let Some(open) = rest.find("<think>") {
+        let after_open = &rest[open + "<think>".len()..];
+        if let Some(close) = after_open.find("</think>") {
+            out.push_str(&rest[..open]); // текст до блока
+            rest = &after_open[close + "</think>".len()..]; // продолжаем после блока
+        } else {
+            // нет закрытия -> не матч; отдаём всё до и включая '<think>', сканируем дальше
+            out.push_str(&rest[..open + "<think>".len()]);
+            rest = after_open;
         }
-        // копируем один UTF-8 символ целиком
-        let ch_len = utf8_len(bytes[i]);
-        out.push_str(&s[i..i + ch_len]);
-        i += ch_len;
     }
+    out.push_str(rest);
     out.trim().to_string()
 }
 
@@ -78,5 +76,16 @@ mod tests {
     fn strip_think_keeps_unicode() {
         assert_eq!(strip_think("<think>y</think>привет"), "привет");
         assert_eq!(strip_think("こんにちは"), "こんにちは");
+    }
+
+    #[test]
+    fn strip_think_parity_with_python() {
+        // незакрытый <think> НЕ матчится питон-регексом -> остаётся вместе с хвостом
+        assert_eq!(strip_think("<think>no close here"), "<think>no close here");
+        assert_eq!(strip_think("keep <think>tail"), "keep <think>tail");
+        // регистрозависимо: <THINK> питон (без re.I) не трогает
+        assert_eq!(strip_think("<THINK>x</THINK>hi"), "<THINK>x</THINK>hi");
+        // закрытая пара всё ещё убирается даже если рядом есть незакрытый ниже
+        assert_eq!(strip_think("a<think>b</think>c<think>d"), "ac<think>d");
     }
 }

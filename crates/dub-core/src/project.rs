@@ -151,6 +151,8 @@ pub struct SubStyle {
     pub size_px: Option<i64>,
     #[serde(default)]
     pub outline_w: Option<i64>,
+    #[serde(default)]
+    pub shadow_dir: Option<i64>, // направленная тень (градусы, screen-y-down); None = нет тени
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -180,6 +182,7 @@ impl Default for SubStyle {
             align: center(),
             size_px: None,
             outline_w: None,
+            shadow_dir: None,
             extra: Extra::new(),
         }
     }
@@ -239,6 +242,8 @@ pub struct Title {
     #[serde(default)]
     pub outline_w: Option<i64>,
     #[serde(default)]
+    pub shadow_dir: Option<i64>, // направленная тень (градусы, screen-y-down); None = нет тени
+    #[serde(default)]
     pub uppercase: bool,
     #[serde(flatten)]
     pub extra: Extra,
@@ -263,6 +268,7 @@ impl Default for Title {
             size_px: None,
             outline: None,
             outline_w: None,
+            shadow_dir: None,
             uppercase: false,
             extra: Extra::new(),
         }

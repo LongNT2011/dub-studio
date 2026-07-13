@@ -158,6 +158,22 @@ pub fn c6(ass: &str) -> String {
     format!("&H{h}&")
 }
 
+/// Направленная тень: жёсткий сдвиг тени на `dist` px под углом `shadow_dir`° цветом `color_ass`.
+/// None -> "" (равномерная тень остаётся). screen-y-down: 0=вправо, 45=вниз-вправо, 90=вниз, 270=вверх.
+/// Порт captions._dir_shadow_tags 1:1.
+pub fn dir_shadow_tags(shadow_dir: Option<i64>, dist: i64, color_ass: &str) -> String {
+    let Some(deg) = shadow_dir else {
+        return String::new();
+    };
+    let r = (deg as f64).to_radians();
+    let d = dist.max(1);
+    format!(
+        "\\shad{d}\\xshad{}\\yshad{}\\4c{color_ass}",
+        (d as f64 * r.cos()).round() as i64,
+        (d as f64 * r.sin()).round() as i64
+    )
+}
+
 /// True если #RRGGBB — явный цвет (не бело/серо/чёрный): (max-min)>=60 (порт _is_vivid).
 pub fn is_vivid(hexstr: &str) -> bool {
     let h = hexstr.trim_start_matches('#');

@@ -204,14 +204,14 @@ pub fn time_stretch(src: &Path, dst: &Path, factor: f64) -> Result<(), String> {
     ])
 }
 
-/// Свести дубль-вокал поверх инструментала. Голос вырезан сепарацией, поэтому инструментал = реальный
-/// фон и звучит в ПОЛНЫЙ уровень (1.0, не занижаем — фон должен остаться как в оригинале); amix с
-/// normalize=0 НЕ делит входы пополам (иначе фон уходил ~в 0.22 от реального). Итоговый баланс/пик держит
-/// финальный loudnorm. aformat=cl=stereo снимает нестандартный mono channel layout нашего hound-дубляжа.
+/// Свести дубль-вокал поверх фона. Порт media.mix 1:1: фон (2-й вход) приглушается volume=0.45, затем
+/// amix БЕЗ normalize=0 (питон-дефолт normalize=1 делит входы пополам). aformat=cl=stereo снимает
+/// нестандартный mono channel layout нашего hound-дубляжа (уровень не меняет). Финального loudnorm нет —
+/// как в питоновском _build_dub; баланс держит именно это приглушение + пофразный normalize_voice.
 pub fn mix(voice: &Path, music: &Path, out: &Path) -> Result<(), String> {
     let fc = "[0:a]aformat=channel_layouts=stereo[v];\
-              [1:a]aformat=channel_layouts=stereo[m];\
-              [v][m]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a]";
+              [1:a]aformat=channel_layouts=stereo,volume=0.45[m];\
+              [v][m]amix=inputs=2:duration=longest:dropout_transition=0[a]";
     run_ff(&[
         OsStr::new("-y"), OsStr::new("-i"), voice.as_os_str(), OsStr::new("-i"), music.as_os_str(),
         OsStr::new("-filter_complex"), OsStr::new(fc), OsStr::new("-map"), OsStr::new("[a]"),
@@ -246,19 +246,20 @@ pub fn gain(src: &Path, dst: &Path, gain_db: f64) -> Result<(), String> {
 pub fn mux(video: &Path, audio: &Path, out: &Path) -> Result<(), String> {
     run_ff(&[
         OsStr::new("-y"), OsStr::new("-i"), video.as_os_str(), OsStr::new("-i"), audio.as_os_str(),
-        OsStr::new("-map"), OsStr::new("0:v:0"), OsStr::new("-map"), OsStr::new("1:a:0"),
+        OsStr::new("-map"), OsStr::new("0:v:0"), OsStr::new("-map"), OsStr::new("1:a:0?"),
         OsStr::new("-af"), OsStr::new("aformat=channel_layouts=stereo"),
         OsStr::new("-c:v"), OsStr::new("copy"), OsStr::new("-c:a"), OsStr::new("aac"), out.as_os_str(),
     ])
 }
 
-/// Вырезать [start,end] в mono 16k (для клон-референса). Порт media.trim.
-pub fn trim(src: &Path, dst: &Path, start: f64, end: f64) -> Result<(), String> {
+/// Вырезать [start,end] в mono @ sr Гц. Порт media.trim(..., sr=16000): реф-клипы 16к, keep-сплайс 24к.
+pub fn trim(src: &Path, dst: &Path, start: f64, end: f64, sr: u32) -> Result<(), String> {
     let ss = format!("{:.3}", start);
     let to = format!("{:.3}", end);
+    let ar = sr.to_string();
     run_ff(&[
         OsStr::new("-y"), OsStr::new("-ss"), OsStr::new(&ss), OsStr::new("-to"), OsStr::new(&to),
         OsStr::new("-i"), src.as_os_str(), OsStr::new("-ac"), OsStr::new("1"),
-        OsStr::new("-ar"), OsStr::new("16000"), dst.as_os_str(),
+        OsStr::new("-ar"), OsStr::new(&ar), dst.as_os_str(),
     ])
 }

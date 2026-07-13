@@ -504,7 +504,7 @@ async fn speaker_voice(
         std::fs::create_dir_all(&voices_dir).ok();
         std::fs::create_dir_all(&tmp).ok();
         let raw = tmp.join("cut.wav");
-        media::trim(&input, &raw, start, end)?;
+        media::trim(&input, &raw, start, end, 16_000)?;
         // очистка голоса: вокал-сепарация (Mel-Band Roformer) убирает фон/музыку из рефа (как voiceclean в
         // Higgs) — клон цепляется за чистый голос. Движку нужен 44.1к; без установленного движка -> сырой клип.
         let src_for_ref = if cli.is_file() && model.is_file() {
