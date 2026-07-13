@@ -168,11 +168,15 @@ fn build_dub(
     // ПОЛНОМ списке proj.segments — слот next.start считается по индексу i+1 полного списка (порт
     // pipeline.py:207: nxt = segs[i+1].start, где segs — весь транскрипт, пустые пропускаются continue,
     // но индекс i+1 идёт по полному списку).
+    // Порт project.write_artifacts: HIDDEN строки исключаются целиком (нет ни дубляжа, ни субтитра);
+    // keep_original — остаются (сплайсим оригинал, без TTS), даже если tgt непустой.
+    let seg_hidden = |s: &dub_core::Segment| s.extra.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+    let seg_keep = |s: &dub_core::Segment| s.extra.get("keep_original").and_then(|v| v.as_bool()).unwrap_or(false);
     let segs: Vec<(usize, &dub_core::Segment)> = proj
         .segments
         .iter()
         .enumerate()
-        .filter(|(_, s)| !s.tgt_text.trim().is_empty())
+        .filter(|(_, s)| !seg_hidden(s) && (seg_keep(s) || !s.tgt_text.trim().is_empty()))
         .collect();
     if segs.is_empty() {
         emit(progress, "tts", "нет строк с переводом -> тишина, оригинальная дорожка");
@@ -316,8 +320,16 @@ fn build_dub(
     let mut cursor = 0.0f64;
     let n_all = proj.segments.len();
     for &(fi, s) in segs.iter() {
-        let tgt = s.tgt_text.trim();
         let raw = wd.join(format!("seg_{:03}.wav", fi));
+        // 'оставить оригинал': вырезаем ИСХОДНУЮ речь сюда, без TTS и без atempo-подгонки (порт _build_dub keep-ветки).
+        if seg_keep(s) {
+            media::trim(&vocals, &raw, s.start, s.end)?;
+            let at = s.start.max(cursor);
+            cursor = at + media::duration(&raw)?;
+            placed.push((at, raw));
+            continue;
+        }
+        let tgt = s.tgt_text.trim();
         let ref_wav = ref_of(s);
         // синтез: dirty ИЛИ нет кэша ИЛИ кэш старше рефа спикера (реф пересобран -> голос сменился).
         let stale_ref = raw
@@ -728,6 +740,10 @@ pub(crate) fn build_ass(proj: &Project, out_ass: &Path, vw: i64, vh: i64, total:
     let subs: Vec<Sub> = proj
         .segments
         .iter()
+        .filter(|s| {   // hidden -> нет субтитра; keep_original -> играет оригинал, субтитра нет (порт write_artifacts)
+            !s.extra.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false)
+                && !s.extra.get("keep_original").and_then(|v| v.as_bool()).unwrap_or(false)
+        })
         .map(|s| {
             let tgt = match overrides.get(s.id.as_str()) {
                 Some(t) => t.to_string(),
