@@ -373,7 +373,8 @@ function DropZone() {
           const r = await api.render(project_id);   // полный дубляж на экране ЗАГРУЗКИ (1:1 питон: analyze -> analyzed.mp4): TTS+микс+бёрн+mux -> output.mp4
           await api.watchJob(r.job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "voicing", e.msg || "", e.pct ?? null); });
           s.setProject(await api.getProject(project_id));
-          s.setRendered(true);   // редактор открывается на ГОТОВОМ видео (кадры+аудио синхронно, плавно), не чёрный экран
+          // rendered ОСТАЁТСЯ false: покадровое превью <img> (редактирование), а /dub отдаёт готовый дуб
+          // (output.mp4) -> плей играет озвучку и двигает скраб -> кадры следуют (1:1 оригинал).
         } catch { /* рендер не удался -> редактор откроется на покадровом превью */ }
       }
       s.setStage("editor");
@@ -790,7 +791,7 @@ function Editor() {
       await api.patch(pid, { op: "gain", gain_db: gainDb });
       const { job_id } = await api.render(pid);
       await api.watchJob(job_id, () => {});
-      setProject(await api.getProject(pid)); setRendered(true); setDubRev(Date.now());   // готовое видео -> плавная прослушка
+      setProject(await api.getProject(pid)); setRendered(false); setDubRev(Date.now());   // покадровое превью; /dub обновлён -> плей играет новый дуб
     } catch (e) { console.error("gain apply failed", e); }
     finally { setRegenId(null); }
   }
@@ -801,7 +802,7 @@ function Editor() {
       await api.patch(pid, { op: "regen_all" });                    // mark every segment dirty
       const { job_id } = await api.render(pid);                     // re-TTS all dirty segs + re-mux -> fresh dub
       await api.watchJob(job_id, () => {});
-      setProject(await api.getProject(pid)); setRendered(true); bump(); setDubRev(Date.now());   // готовое видео -> плавная прослушка
+      setProject(await api.getProject(pid)); setRendered(false); bump(); setDubRev(Date.now());   // покадровое превью; /dub обновлён -> плей играет новый дуб
     } catch (e) { console.error("regen all TTS failed", e); }
     finally { setRegenId(null); }
   }
