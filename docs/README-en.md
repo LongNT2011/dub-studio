@@ -12,7 +12,7 @@
 [![Release](https://img.shields.io/github/v/release/timoncool/dub-studio?include_prereleases&style=flat-square)](https://github.com/timoncool/dub-studio/releases)
 [![Downloads](https://img.shields.io/github/downloads/timoncool/dub-studio/total?style=flat-square)](https://github.com/timoncool/dub-studio/releases)
 
-![Dub Studio](screenshot.png)
+![Dub Studio](screenshot-en.png)
 
 **[Русский](../README.md)** · **English**
 
@@ -47,11 +47,11 @@ This is **v2 — a fully native rewrite**. The previous version dragged along an
 
 Home — four modes (dub / subtitles / funny / transcript), language pickers, any video format accepted:
 
-![Dub Studio home](screenshot-home.png)
+![Dub Studio home](screenshot-home-en.png)
 
 Transcript mode — a diarized transcript laid out by speaker, with clean voices created from each speaker in one click:
 
-![Dub Studio transcript mode](screenshot-transcribe.png)
+![Dub Studio transcript mode](screenshot-transcribe-en.png)
 
 ## System requirements
 
