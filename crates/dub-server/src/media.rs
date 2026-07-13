@@ -205,12 +205,12 @@ pub fn time_stretch(src: &Path, dst: &Path, factor: f64) -> Result<(), String> {
 }
 
 /// Свести дубль-вокал поверх инструментала. Голос вырезан сепарацией, поэтому инструментал = реальный
-/// фон и звучит почти в полный уровень (0.9); amix с normalize=0 НЕ делит входы пополам (иначе фон уходил
-/// ~в 0.22 от реального). Итоговый баланс/пик держит финальный loudnorm. aformat=cl=stereo снимает
-/// нестандартный mono channel layout нашего hound-дубляжа (AAC иначе -22).
+/// фон и звучит в ПОЛНЫЙ уровень (1.0, не занижаем — фон должен остаться как в оригинале); amix с
+/// normalize=0 НЕ делит входы пополам (иначе фон уходил ~в 0.22 от реального). Итоговый баланс/пик держит
+/// финальный loudnorm. aformat=cl=stereo снимает нестандартный mono channel layout нашего hound-дубляжа.
 pub fn mix(voice: &Path, music: &Path, out: &Path) -> Result<(), String> {
     let fc = "[0:a]aformat=channel_layouts=stereo[v];\
-              [1:a]aformat=channel_layouts=stereo,volume=0.9[m];\
+              [1:a]aformat=channel_layouts=stereo[m];\
               [v][m]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a]";
     run_ff(&[
         OsStr::new("-y"), OsStr::new("-i"), voice.as_os_str(), OsStr::new("-i"), music.as_os_str(),

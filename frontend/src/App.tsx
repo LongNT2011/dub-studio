@@ -365,6 +365,7 @@ function DropZone() {
       const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       s.setProject(await api.getProject(project_id));
+      s.setJustAnalyzed(mode === "dub" || mode === "funny");   // редактор сразу сгенерит дуб, чтобы можно было слушать (не при экспорте)
       s.setStage("editor");
     } catch (err) {
       s.setProgress("error", String(err), null);  // surface backend failure instead of hanging on "analyzing"
@@ -480,7 +481,7 @@ const ANALYZE_STEPS: { key: string; stages: string[] }[] = [
   { key: "separating",  stages: ["extract_audio", "separate"] },
   { key: "diarizing",   stages: ["diarize"] },
   { key: "recognizing", stages: ["asr"] },
-  { key: "translating", stages: ["translate", "translate_ctx", "rewrite", "rewrite_ctx"] },
+  { key: "translating", stages: ["translate", "translate_ctx", "vision", "rewrite", "rewrite_ctx"] },   // "vision" = ctx-проход (vision layout + перевод транскрипта)
   { key: "voicing",     stages: ["tts", "mix"] },        // TTS synthesis + mix — runs BETWEEN translate and OCR; without this the stepper blanks (cur=-1) during voice gen
   { key: "locating",    stages: ["ocr_detect", "translate_titles", "translate_tagline", "build", "burn", "mux"] },
 ];
@@ -488,7 +489,12 @@ const ANALYZE_STEPS: { key: string; stages: string[] }[] = [
 function AnalyzeProgress() {
   const { t } = useTranslation();
   const { progress } = useStore();
-  const cur = ANALYZE_STEPS.findIndex((stp) => stp.stages.includes(progress.stage));
+  const matched = ANALYZE_STEPS.findIndex((stp) => stp.stages.includes(progress.stage));
+  // монотонно: неизвестная/незамапленная стадия (напр. промежуточный лог) НЕ гасит прогресс — держим
+  // самый дальний достигнутый шаг. Компонент перемонтируется на каждый прогон, поэтому ref сбрасывается.
+  const maxStep = useRef(-1);
+  if (matched > maxStep.current) maxStep.current = matched;
+  const cur = maxStep.current;
   const dl = progress.stage === "download";
   const pct = progress.pct;
   return (
@@ -619,6 +625,8 @@ function Editor() {
   const setSelBlur = useStore((s) => s.setSelBlur);
   const rendering = useStore((s) => s.rendering);
   const setRendering = useStore((s) => s.setRendering);
+  const justAnalyzed = useStore((s) => s.justAnalyzed);
+  const setJustAnalyzed = useStore((s) => s.setJustAnalyzed);
   const addExport = useStore((s) => s.addExport);
   const updateExport = useStore((s) => s.updateExport);
   const pushHistory = useStore((s) => s.pushHistory);
@@ -673,6 +681,22 @@ function Editor() {
     }, 150);
     return () => window.clearInterval(id);
   }, [play]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Свежий анализ (dub/funny): ОДИН раз авто-генерим дуб, чтобы озвучку можно было сразу СЛУШАТЬ в
+  // редакторе (не дожидаясь экспорта). После рендера /dub отдаёт output.mp4 с Higgs-дорожкой.
+  useEffect(() => {
+    if (!justAnalyzed) return;
+    setJustAnalyzed(false);
+    (async () => {
+      setRendering(true); setRendered(false);
+      try {
+        const { job_id } = await api.render(pid);
+        await api.watchJob(job_id, () => {});
+        setProject(await api.getProject(pid));
+        setDubRev(Date.now()); setRendered(true);
+      } catch (e) { console.error("auto-dub after analyze failed", e); }
+      finally { setRendering(false); }
+    })();
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const [regenId, setRegenId] = useState<string | null>(null);        // segment whose TTS is being re-generated
   const [remixText, setRemixText] = useState("");                     // funny-remix theme/instruction for Gemma
   const [remixing, setRemixing] = useState(false);
@@ -1499,6 +1523,15 @@ function fmtBytes(n: number) {
   return `${n} B`;
 }
 
+// Семейства квантов: разные варианты ОДНОЙ модели (выбор одного, «ИЛИ»). Явная карта по id — надёжнее
+// префикса (higgs — квант TTS, higgs-engine — движок, это РАЗНЫЕ вещи). Остальные компоненты — одиночные.
+const QUANT_GROUP: Record<string, string> = {
+  higgs: "higgs", "higgs-q6_k": "higgs", "higgs-q4_k_m": "higgs",
+  gemma: "gemma", "gemma-q5_0": "gemma", "gemma-q6_k": "gemma", "gemma-q8_0": "gemma",
+  parakeet: "parakeet", "parakeet-fp32": "parakeet",
+  roformer: "roformer", "roformer-q5": "roformer", "roformer-q4": "roformer",
+};
+
 // ── «Первый запуск»: панель автозакачки компонентов (модели/движки/системные библиотеки) ──
 function FirstRun() {
   const { t } = useTranslation();
@@ -1541,6 +1574,23 @@ function FirstRun() {
   const reqLabel = (r: string) => (r === "required" ? t("setup.required") : t("setup.recommended"));
   const deliveryNote = (c: SetupComponent) =>
     c.delivery === "bundled" ? t("setup.reinstallHint") : c.delivery === "external" ? t("setup.external") : "";
+  const GROUP_LABEL: Record<string, string> = { higgs: t("setup.grpHiggs"), gemma: t("setup.grpGemma"), parakeet: t("setup.grpParakeet"), roformer: t("setup.grpRoformer") };
+  const pickOne = (id: string, group: string) => setSel((prev) => {   // radio внутри семейства: выбрать этот квант, снять остальные того же семейства
+    const n = new Set(prev);
+    Object.entries(QUANT_GROUP).forEach(([cid, g]) => { if (g === group) n.delete(cid); });
+    n.add(id);
+    return n;
+  });
+  const comps = status?.components ?? [];
+  const gseen = new Set<string>();
+  type SetupRow = { kind: "one"; c: SetupComponent } | { kind: "group"; group: string; members: SetupComponent[] };
+  const rows: SetupRow[] = comps.flatMap((c): SetupRow[] => {   // одиночные компоненты + по одной группе квантов (на первом её члене)
+    const g = QUANT_GROUP[c.id];
+    if (!g) return [{ kind: "one", c }];
+    if (gseen.has(g)) return [];
+    gseen.add(g);
+    return [{ kind: "group", group: g, members: comps.filter((x) => QUANT_GROUP[x.id] === g) }];
+  });
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto grid place-items-center px-6 py-10">
@@ -1558,8 +1608,50 @@ function FirstRun() {
           </div>
         )}
 
-        <div className="mt-6 space-y-2">
-          {status?.components.map((c) => {
+        <div className="mt-4 rounded-lg border border-[var(--color-accent)]/30 bg-[color-mix(in_oklab,var(--color-accent)_8%,transparent)] px-3.5 py-2.5 text-[12.5px] leading-snug text-[var(--color-text)]">
+          <span className="font-semibold text-[var(--color-accent)]">{t("setup.pickNoteTitle")}</span> {t("setup.pickNote")}
+        </div>
+
+        <div className="mt-4 space-y-2">
+          {rows.map((row) => {
+            if (row.kind === "group") {
+              const { group, members } = row;
+              return (
+                <div key={group} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[13px] font-semibold">{GROUP_LABEL[group]}</span>
+                    <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-[color-mix(in_oklab,var(--color-accent)_16%,transparent)] text-[var(--color-accent)]">{t("setup.pickOneQuant")}</span>
+                  </div>
+                  <div className="space-y-0.5">
+                    {members.map((c) => {
+                      const isDefault = c.requirement !== "optional";
+                      const checked = sel.has(c.id);
+                      const active = prog && prog.id === c.id;
+                      return (
+                        <label key={c.id} className={`flex items-center gap-2.5 rounded-lg px-2 py-1.5 ${c.installed ? "" : "cursor-pointer hover:bg-[var(--color-surface-2)]"} ${checked && !c.installed ? "bg-[color-mix(in_oklab,var(--color-accent)_8%,transparent)]" : ""}`}>
+                          {c.installed
+                            ? <span className="w-4 h-4 shrink-0 grid place-items-center text-[var(--color-accent)]"><Check size={15} strokeWidth={3} /></span>
+                            : <input type="radio" name={`grp-${group}`} checked={checked} onChange={() => pickOne(c.id, group)} disabled={busy} className="w-4 h-4 accent-[var(--color-accent)] shrink-0" />}
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[13px] truncate">{c.name}</span>
+                              {isDefault
+                                ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-[color-mix(in_oklab,var(--color-accent)_16%,transparent)] text-[var(--color-accent)] uppercase tracking-wide shrink-0">{t("setup.default")}</span>
+                                : <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-surface-2)] text-[var(--color-muted)] uppercase tracking-wide shrink-0">{t("setup.alt")}</span>}
+                              {c.installed && <span className="text-[10px] text-[var(--color-accent)] shrink-0">{t("setup.installed")}</span>}
+                            </div>
+                            {active && <div className="mt-1 h-1 rounded-full bg-[var(--color-surface-2)] overflow-hidden"><div className="h-full bg-[var(--color-accent)]" style={{ width: `${prog!.pct}%` }} /></div>}
+                          </div>
+                          <span className="mono text-[11px] text-[var(--color-muted)] shrink-0">{fmtBytes(c.size)}{c.vram ? ` · ${fmtBytes(c.vram)} VRAM` : ""}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-1.5 text-[10px] text-[var(--color-muted)]">{t("setup.quantHint")}</div>
+                </div>
+              );
+            }
+            const c = row.c;
             const active = prog && prog.id === c.id;
             const canPick = c.delivery === "download" && !c.installed;
             return (
