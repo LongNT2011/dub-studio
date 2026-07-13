@@ -43,9 +43,13 @@ This is **v2 — a fully native rewrite**. The previous version dragged along an
 - **Any video format** — MP4, MOV, MKV, WEBM, AVI and more (decoded via ffmpeg)
 - **Fully portable** — nothing written to the user profile; delete the folder, no trace left
 
-### Transcript mode
+## Screenshots
 
-A diarized transcript laid out by speaker, with clean voices created from each speaker in one click.
+Home — four modes (dub / subtitles / funny / transcript), language pickers, any video format accepted:
+
+![Dub Studio home](screenshot-home.png)
+
+Transcript mode — a diarized transcript laid out by speaker, with clean voices created from each speaker in one click:
 
 ![Dub Studio transcript mode](screenshot-transcribe.png)
 
