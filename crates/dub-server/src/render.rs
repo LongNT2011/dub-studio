@@ -383,20 +383,30 @@ fn build_dub(
     } else {
         dub
     };
-    // 7) монтажный гейн всей дорожки (если задан) — ЕДИНСТВЕННАЯ пост-стадия сверх питона (наша фича
-    // «усилить всё»; дефолт 0 dB = no-op = ровно как питон). В питоновском _build_dub/_regen_dub НЕТ ни
-    // loudnorm, ни gain: баланс уже задан пофразным normalize_voice (+12 dB кап, пик 0.985) и mix-приглушением
-    // фона до 0.45. mux сам кодирует WAV->aac, так что отдельная конверсия не нужна.
+    // 7) финальная нормализация программы EBU R128 + true-peak лимитер (-1 dBTP). РЕШЕНИЕ ЮЗЕРА
+    // (best-practice, НЕ питон — приказ 2026-07-12): пофразный normalize_voice выровнял спикеров, здесь
+    // программа приводится к целевой громкости соцсетей (-14 LUFS) БЕЗ клиппинга. Пики держит именно этот
+    // лимитер (поэтому normalize_voice без пофразного peak-клэмпа — он мешал дожать тихие фразы).
+    emit(progress, "mix", "нормализация громкости (EBU R128, true-peak)");
+    let final_audio = wd.join("final_audio.m4a");
+    let normalized = match media::loudnorm(&mixed, &final_audio, -14.0, -1.0, 11.0) {
+        Ok(()) => final_audio,
+        Err(e) => {
+            emit(progress, "mix", &format!("loudnorm пропущен ({e})"));
+            mixed
+        }
+    };
+    // 8) монтажный гейн всей дорожки (если задан) — наша opt-in фича «усилить всё» поверх нормализации.
     let gain_db = proj.audio.gain_db;
     if gain_db.abs() > 0.05 {
         emit(progress, "mix", &format!("гейн дорожки {gain_db:+.1} dB"));
         let gained = wd.join("gained_audio.m4a");
-        match media::gain(&mixed, &gained, gain_db) {
+        match media::gain(&normalized, &gained, gain_db) {
             Ok(()) => Ok(gained),
-            Err(_) => Ok(mixed),
+            Err(_) => Ok(normalized),
         }
     } else {
-        Ok(mixed)
+        Ok(normalized)
     }
 }
 
@@ -499,8 +509,9 @@ fn timeline(placed: &[(f64, PathBuf)], total_dur: f64, out_wav: &Path) -> Result
 
 /// Выровнять ОДНУ фразу к общей громкости, чтобы все спикеры звучали одинаково громко (dialog-gated
 /// нормализация): интегральная громкость BS.1770 к -16 LUFS; короткие/тихие фразы — RMS к -18 dBFS.
-/// Порт assemble.normalize_voice 1:1: буст-кап +12 dB (не раздувать шум на тихих) И пик-защита
-/// gain=min(gain, 0.985/peak) — фраза НИКОГДА не клиппирует (в питоне финального loudnorm нет).
+/// РЕШЕНИЕ ЮЗЕРА (EBU R128 best-practice, НЕ копия питона — «гугли best practices, не повторяй за мной»,
+/// приказ 2026-07-12): БЕЗ пофразного peak-клэмпа (он мешал дожать тихую фразу) — пики держит финальный
+/// true-peak лимитер media::loudnorm на смиксованной дорожке. Сани-кап +40 dB (не раздувать почти-тишину).
 fn normalize_voice(x: &mut [f32], sr: u32) {
     if x.is_empty() {
         return;
@@ -534,8 +545,7 @@ fn normalize_voice(x: &mut [f32], sr: u32) {
         .max(1e-9);
         10f64.powf(-18.0 / 20.0) / rms
     });
-    let gain = gain.min(10f64.powf(12.0 / 20.0)); // кап буста +12 dB (assemble.py:36)
-    let gain = gain.min(0.985 / peak as f64); // пик-защита -> без клиппинга (assemble.py:37)
+    let gain = gain.min(10f64.powf(40.0 / 20.0)); // сани-кап +40 dB; пики ловит финальный loudnorm (НЕ пофразно)
     for v in x.iter_mut() {
         *v = (*v as f64 * gain) as f32;
     }
@@ -921,8 +931,8 @@ mod tests {
         normalize_voice(&mut loud, sr);
         normalize_voice(&mut quiet, sr);
         let (rl, rq) = (rms(&loud), rms(&quiet));
-        // после выравнивания уровни должны сойтись (dialog-gated нормализация); пики держит пофразный
-        // клип gain=min(gain,0.985/peak) в самой normalize_voice (финального loudnorm в порте нет).
+        // после выравнивания уровни должны сойтись (dialog-gated нормализация); пики держит финальный
+        // media::loudnorm true-peak лимитер на смиксованной дорожке (пофразного клэмпа нет — решение юзера).
         assert!((rl - rq).abs() / rl.max(1e-9) < 0.15, "уровни должны сойтись: loud={rl:.4} quiet={rq:.4}");
     }
 
