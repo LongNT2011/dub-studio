@@ -24,6 +24,18 @@
 
 This is **v2 — a fully native rewrite**. The previous version dragged along an embeddable Python, torch, CUDA wheels, and llama-cpp-python — gigabytes of setup and a fragile install. Now the whole pipeline is rewritten in **Rust + native C++/CUDA engines (GGUF/ONNX)**: one process, fast startup, low VRAM, **zero Python at runtime**. Everything heavy — models, engines, CUDA/VC++ DLLs, ffmpeg — the app **downloads and installs itself with a button** on first run. The only manual step is the NVIDIA driver.
 
+## What's new in this version
+
+- **Transcript + diarization mode** — a new standalone screen: a clean transcript laid out by speaker + one-click voice creation from each speaker, export `.srt` / `.txt`
+- **Speaker voices are cleaned and auto-transcribed** — the reference is run through vocal separation (no background/music) and gets reference text automatically, like Higgs → a better clone
+- **A different voice per speaker** in pack mode — each diarized speaker is assigned its own voice
+- **Reference text in the dubbing clone** — Higgs gets the transcript of the reference (auto-transcribed clip) → cleaner timbre
+- **Blur backing sized exactly to the subtitle** — the original is hidden and the translation sits entirely on its own blurred plate (not half on clean video)
+- **Master gain + volume** — boosting the whole track is visible right on the waveform; a separate preview-volume slider
+- **Timeline ↔ transcript sync** — click a line to move the playhead; scrubbing highlights and scrolls the active line
+- **Batch processing** — a queue of several files in one run
+- **Any video format** — MP4, MOV, MKV, WEBM, AVI and more
+
 ## Features
 
 - **Dub any clip with a cloned voice** — the original timbre is cloned and speaks the new language ([Higgs Audio v3](https://huggingface.co/bosonai) native engine, GGUF Q8_0). Auto-cast per speaker or pick a pack voice
