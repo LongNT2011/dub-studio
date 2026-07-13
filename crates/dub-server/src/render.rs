@@ -322,8 +322,13 @@ fn build_dub(
     for &(fi, s) in segs.iter() {
         let raw = wd.join(format!("seg_{:03}.wav", fi));
         // 'оставить оригинал': вырезаем ИСХОДНУЮ речь сюда, без TTS и без atempo-подгонки (порт _build_dub keep-ветки).
+        // Ресемпл в 24к моно (как питон media.trim(..., sr=24000)) — timeline кладёт по sr ПЕРВОГО файла (TTS=24к),
+        // без ресемпла; 44.1к-вырез играл бы не на той скорости.
         if seg_keep(s) {
-            media::trim(&vocals, &raw, s.start, s.end)?;
+            let cut = wd.join(format!("keep_{:03}.wav", fi));
+            media::trim(&vocals, &cut, s.start, s.end)?;
+            media::extract_audio(&cut, &raw, 24_000, 1)?;
+            let _ = std::fs::remove_file(&cut);
             let at = s.start.max(cursor);
             cursor = at + media::duration(&raw)?;
             placed.push((at, raw));
