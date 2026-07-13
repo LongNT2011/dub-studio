@@ -302,6 +302,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects/{pid}/preview", get(endpoints::preview))
         .route("/projects/{pid}/output", get(output))
         .route("/projects/{pid}/open", post(open_output))
+        .route("/projects/{pid}/dub-audio", post(dub_audio_project))
         // /original?t= отдаёт ОДИН PNG-кадр оригинала (порт app.py.original -> source_frame),
         // фронт (ComparePane) вставляет его как <img src>. Range-раздача сырого видео — /dub.
         .route("/projects/{pid}/original", get(endpoints::original_frame))
@@ -814,6 +815,50 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
     Json(json!({ "job_id": job_id })).into_response()
 }
 
+/// POST /projects/{pid}/dub-audio — сгенерить ТОЛЬКО озвучку (без сборки видео) -> dub_audio.m4a.
+/// Фронт вызывает сразу после анализа, чтобы дуб можно было слушать в редакторе (плей играет /dub),
+/// не дожидаясь и не собирая финальное видео. Тот же job-паттерн, что и render_project.
+async fn dub_audio_project(State(st): State<AppState>, AxPath(pid): AxPath<String>) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let proj_path = dir.join("project.json");
+    if !proj_path.is_file() {
+        return (StatusCode::CONFLICT, "project not analyzed yet").into_response();
+    }
+    let input = match std::fs::read_to_string(dir.join("source.txt")) {
+        Ok(s) => PathBuf::from(s.trim()),
+        Err(_) => return (StatusCode::CONFLICT, "no source uploaded").into_response(),
+    };
+    let paths = render::RenderPaths {
+        input,
+        work_dir: dir.clone(),
+        output: dir.join("output.mp4"),
+        bsroformer_cli: st.bsroformer_cli.clone(),
+        bsroformer_model: st.bsroformer_model.clone(),
+        higgs_dll: st.higgs_dll.clone(),
+        higgs_model_root: st.higgs_model_root.clone(),
+        fonts_dir: st.fonts_dir.clone(),
+        higgs_backend: st.opts.device.clone(),
+        higgs_device: 0,
+        higgs_threads: st.opts.num_threads,
+        max_stretch: st.opts.max_stretch as f64,
+        voices_dir: st.voices_dir.clone(),
+        tdt_dir: st.tdt_dir.clone(),
+    };
+    let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
+        let cb = |ev: Value| progress(ev);
+        let text = std::fs::read_to_string(&proj_path).map_err(|e| e.to_string())?;
+        let proj = Project::from_json(&text).map_err(|e| e.to_string())?;
+        let regen = proj.segments.iter().any(|s| s.dirty);
+        let out = render::dub_audio(&proj, &paths, regen, &cb)?;
+        Ok(json!({ "audio": out.to_string_lossy() }))
+    });
+    let job_id = st.jobs.enqueue(job).await;
+    Json(json!({ "job_id": job_id })).into_response()
+}
+
 // ─── GET /projects/{pid}/output ; /original ; /dub (Range-раздача файла) ─────
 
 async fn output(
@@ -870,13 +915,17 @@ async fn dub_video(
         Ok(d) => d,
         Err(resp) => return resp,
     };
-    // Проигрываемое видео: output.mp4, иначе analyzed.mp4.
+    // Что играет <audio>: собранный output.mp4 (после рендера), иначе dub_audio.m4a (озвучка после
+    // анализа — слушать дуб, не собирая видео), иначе analyzed.mp4 (оригинальная дорожка).
     let mut f = dir.join("output.mp4");
+    if !f.is_file() {
+        f = dir.join("dub_audio.m4a");
+    }
     if !f.is_file() {
         f = dir.join("analyzed.mp4");
     }
     if !f.is_file() {
-        return (StatusCode::NOT_FOUND, "no dubbed video yet").into_response();
+        return (StatusCode::NOT_FOUND, "no dubbed audio yet").into_response();
     }
     serve_file_range(&f, req, None).await
 }

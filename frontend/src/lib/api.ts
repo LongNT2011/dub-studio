@@ -109,6 +109,7 @@ export const api = {
     return _patchChain as Promise<Project>;
   },
   render: (pid: string) => fetch(`${BASE}/projects/${pid}/render`, { method: "POST" }).then(j<{ job_id: string }>),
+  dubAudio: (pid: string) => fetch(`${BASE}/projects/${pid}/dub-audio`, { method: "POST" }).then(j<{ job_id: string }>),   // сгенерить только озвучку (без сборки видео) — слушать дуб в редакторе
   remix: (pid: string, instruction: string) =>
     fetch(`${BASE}/projects/${pid}/remix?instruction=${encodeURIComponent(instruction)}`, { method: "POST" }).then(j<{ job_id: string }>),
   previewUrl: (pid: string, t: number, rev = 0) => `${BASE}/projects/${pid}/preview?t=${t}&rev=${rev}`,

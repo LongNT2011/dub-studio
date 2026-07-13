@@ -129,6 +129,31 @@ pub fn run(
     Ok(RenderResult { output: paths.output.clone() })
 }
 
+/// Только ДУБ-АУДИО (без бёрна субтитров и mux видео): TTS+fit+timeline+mix -> work_dir/dub_audio.m4a.
+/// Нужно, чтобы озвучку можно было СЛУШАТЬ в редакторе сразу после анализа, НЕ собирая финальное видео
+/// (само видео на превью не нужно — кадры показывает per-frame preview). Порт _build_dub-ветки без бёрна.
+pub fn dub_audio(
+    proj: &Project,
+    paths: &RenderPaths,
+    regen_dub: bool,
+    progress: &Progress,
+) -> Result<PathBuf, String> {
+    let wd = &paths.work_dir;
+    std::fs::create_dir_all(wd).map_err(|e| e.to_string())?;
+    let meta = media::probe(&paths.input)?;
+    let total = if proj.meta.duration > 0.0 { proj.meta.duration } else { meta.duration };
+    let src: PathBuf = if proj.mode == "dub" {
+        build_dub(proj, paths, total, proj.audio.keep_music, regen_dub, progress)?
+    } else {
+        paths.input.clone() // nodub/transcribe -> оригинальная дорожка
+    };
+    let out = wd.join("dub_audio.m4a");
+    // привести к browser-playable aac/m4a (build_dub уже даёт m4a; nodub -> извлечь звук из оригинала).
+    media::extract_audio(&src, &out, 44_100, 2)?;
+    emit(progress, "done", "дуб-аудио готово");
+    Ok(out)
+}
+
 /// Полный аудио-конвейер дубляжа -> путь к new_audio. Порт _build_dub/_regen_dub (TTS+fit+timeline+mix).
 fn build_dub(
     proj: &Project,

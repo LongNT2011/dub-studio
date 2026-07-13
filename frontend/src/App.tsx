@@ -365,7 +365,17 @@ function DropZone() {
       const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       s.setProject(await api.getProject(project_id));
-      s.setJustAnalyzed(mode === "dub" || mode === "funny");   // редактор сразу сгенерит дуб, чтобы можно было слушать (не при экспорте)
+      // Озвучку готовим ЗДЕСЬ, на экране загрузки (не собирая видео — кадры даёт per-frame preview),
+      // чтобы редактор открылся с готовым дубом (плей сразу играет). Иначе рендер блокировал бы превью
+      // после открытия -> чёрный экран, и слушать дуб можно было бы только после экспорта.
+      if (mode === "dub" || mode === "funny") {
+        try {
+          const r = await api.render(project_id);   // полный дубляж на экране ЗАГРУЗКИ (1:1 питон: analyze -> analyzed.mp4): TTS+микс+бёрн+mux -> output.mp4
+          await api.watchJob(r.job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "voicing", e.msg || "", e.pct ?? null); });
+          s.setProject(await api.getProject(project_id));
+          s.setRendered(true);   // редактор открывается на ГОТОВОМ видео (кадры+аудио синхронно, плавно), не чёрный экран
+        } catch { /* рендер не удался -> редактор откроется на покадровом превью */ }
+      }
       s.setStage("editor");
     } catch (err) {
       s.setProgress("error", String(err), null);  // surface backend failure instead of hanging on "analyzing"
@@ -625,8 +635,6 @@ function Editor() {
   const setSelBlur = useStore((s) => s.setSelBlur);
   const rendering = useStore((s) => s.rendering);
   const setRendering = useStore((s) => s.setRendering);
-  const justAnalyzed = useStore((s) => s.justAnalyzed);
-  const setJustAnalyzed = useStore((s) => s.setJustAnalyzed);
   const addExport = useStore((s) => s.addExport);
   const updateExport = useStore((s) => s.updateExport);
   const pushHistory = useStore((s) => s.pushHistory);
@@ -681,22 +689,6 @@ function Editor() {
     }, 150);
     return () => window.clearInterval(id);
   }, [play]);   // eslint-disable-line react-hooks/exhaustive-deps
-  // Свежий анализ (dub/funny): ОДИН раз авто-генерим дуб, чтобы озвучку можно было сразу СЛУШАТЬ в
-  // редакторе (не дожидаясь экспорта). После рендера /dub отдаёт output.mp4 с Higgs-дорожкой.
-  useEffect(() => {
-    if (!justAnalyzed) return;
-    setJustAnalyzed(false);
-    (async () => {
-      setRendering(true); setRendered(false);
-      try {
-        const { job_id } = await api.render(pid);
-        await api.watchJob(job_id, () => {});
-        setProject(await api.getProject(pid));
-        setDubRev(Date.now()); setRendered(true);
-      } catch (e) { console.error("auto-dub after analyze failed", e); }
-      finally { setRendering(false); }
-    })();
-  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const [regenId, setRegenId] = useState<string | null>(null);        // segment whose TTS is being re-generated
   const [remixText, setRemixText] = useState("");                     // funny-remix theme/instruction for Gemma
   const [remixing, setRemixing] = useState(false);
@@ -709,9 +701,9 @@ function Editor() {
     if (burstRef.current !== `seg:${id}`) { pushHistory(p); burstRef.current = `seg:${id}`; }
     setProject({ ...p, segments: p.segments.map((x) => x.id === id ? { ...x, tgt_text: tgt, dirty: true } : x) });
   }
-  function titleText(i: number, text: string) {                      // instant local echo for a title's text
+  function titleText(i: number, text: string) {                      // instant local echo. РЕНДЕР берёт tgt (если непустой), поэтому правим И tgt И text — иначе правка текста не видна на кадре
     if (burstRef.current !== `title:${i}`) { pushHistory(p); burstRef.current = `title:${i}`; }
-    setProject({ ...p, captions: { ...p.captions, titles: p.captions.titles.map((x, j) => j === i ? { ...x, text } : x) } });
+    setProject({ ...p, captions: { ...p.captions, titles: p.captions.titles.map((x, j) => j === i ? { ...x, text, tgt: text } : x) } });
   }
   // a patch/PUT rejected (4xx/5xx/offline) -> surface it in the Files panel (like doExport) and re-sync from
   // the server so the optimistic local echo can't silently diverge from persisted truth
@@ -798,7 +790,7 @@ function Editor() {
       await api.patch(pid, { op: "gain", gain_db: gainDb });
       const { job_id } = await api.render(pid);
       await api.watchJob(job_id, () => {});
-      setProject(await api.getProject(pid)); setRendered(false); setDubRev(Date.now());
+      setProject(await api.getProject(pid)); setRendered(true); setDubRev(Date.now());   // готовое видео -> плавная прослушка
     } catch (e) { console.error("gain apply failed", e); }
     finally { setRegenId(null); }
   }
@@ -809,7 +801,7 @@ function Editor() {
       await api.patch(pid, { op: "regen_all" });                    // mark every segment dirty
       const { job_id } = await api.render(pid);                     // re-TTS all dirty segs + re-mux -> fresh dub
       await api.watchJob(job_id, () => {});
-      setProject(await api.getProject(pid)); setRendered(false); bump(); setDubRev(Date.now());
+      setProject(await api.getProject(pid)); setRendered(true); bump(); setDubRev(Date.now());   // готовое видео -> плавная прослушка
     } catch (e) { console.error("regen all TTS failed", e); }
     finally { setRegenId(null); }
   }
@@ -1048,8 +1040,8 @@ function Editor() {
                   <span className="tabnum">{fmtT(ti.start)} → {fmtT(ti.end)}</span>
                   <button onClick={() => branch("title_del", { idx: i })} className="ml-auto hover:text-[var(--color-warn)] transition-colors" title="delete"><Trash2 size={12} /></button>
                 </div>
-                <input value={ti.text} onChange={(e) => titleText(i, e.target.value)}
-                  onBlur={async (e) => { burstRef.current = null; setRendered(false); try { setProject(await api.patch(pid, { op: "title", idx: i, text: e.target.value })); bump(); } catch (err) { await surfaceErr(err); } }}
+                <input value={ti.tgt || ti.text} onChange={(e) => titleText(i, e.target.value)}
+                  onBlur={async (e) => { burstRef.current = null; setRendered(false); try { setProject(await api.patch(pid, { op: "title", idx: i, text: e.target.value, tgt: e.target.value })); bump(); } catch (err) { await surfaceErr(err); } }}
                   className="w-full bg-[var(--color-bg)]/60 border border-[var(--color-border)] rounded p-1.5 text-[13px] focus:border-[var(--color-accent)] focus:outline-none transition-colors" />
                 <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                   <button onClick={() => branch("title", { idx: i, bold: !ti.bold })}
