@@ -19,7 +19,11 @@
 //!     но статус показываем;
 //!   • драйвер NVIDIA — детект (nvcuda.dll), «скачивание» = открыть сайт (кнопка во фронте).
 
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -791,6 +795,206 @@ pub fn download_components(
     Ok(json!({ "components": results, "ready": overall.ready }))
 }
 
+// Параллелить файлы, где сервер поддерживает range: N соединений сатурируют канал HF CDN (одиночный поток —
+// нет). conns авто-масштабируется по размеру (1 для мелких).
+const PARALLEL_CONNS: u64 = 8;
+
+#[cfg(windows)]
+fn write_at(f: &File, buf: &[u8], off: u64) -> std::io::Result<usize> {
+    use std::os::windows::fs::FileExt;
+    f.seek_write(buf, off)
+}
+#[cfg(not(windows))]
+fn write_at(f: &File, buf: &[u8], off: u64) -> std::io::Result<usize> {
+    use std::os::unix::fs::FileExt;
+    f.write_at(buf, off)
+}
+
+/// Размер файла + поддержка byte-range: 1-байтовый ranged-пробник. HF CDN (в т.ч. Xet-CAS) отдаёт 206 +
+/// content-range на ureq-запрос (reqwest/curl-UA CAS душит 403). Порт Higgs probe_size.
+fn probe_size(url: &str) -> (u64, bool) {
+    match ureq::get(url).header("Range", "bytes=0-0").call() {
+        Ok(resp) => {
+            if resp.status().as_u16() == 206 {
+                let total = resp
+                    .headers()
+                    .get("content-range")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.rsplit('/').next())
+                    .and_then(|s| s.trim().parse::<u64>().ok())
+                    .unwrap_or(0);
+                (total, total > 0)
+            } else {
+                let total = resp
+                    .headers()
+                    .get("content-length")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0);
+                (total, false)
+            }
+        }
+        Err(_) => (0, false),
+    }
+}
+
+/// Скачать ОДИН диапазон [start,end] в общий файл по офсету (write_at, без seek-гонок). abort -> стоп всех.
+/// Порт Higgs download_range (ureq + Range). downloaded — общий счётчик для прогресса.
+fn download_range(
+    url: &str,
+    file: &Arc<File>,
+    start: u64,
+    end: u64,
+    downloaded: &Arc<AtomicU64>,
+    abort: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    let resp = ureq::get(url)
+        .header("Range", &format!("bytes={start}-{end}"))
+        .call()
+        .map_err(|e| format!("range {start}-{end}: {e}"))?;
+    let mut reader = resp.into_body().into_reader();
+    let mut buf = [0u8; 262_144];
+    let mut offset = start;
+    loop {
+        if abort.load(Ordering::Relaxed) {
+            return Err("отменено".into());
+        }
+        let n = reader.read(&mut buf).map_err(|e| format!("чтение range: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        let mut w = 0;
+        while w < n {
+            let k = write_at(file, &buf[w..n], offset + w as u64).map_err(|e| format!("запись: {e}"))?;
+            if k == 0 {
+                return Err("short write".into());
+            }
+            w += k;
+        }
+        offset += n as u64;
+        downloaded.fetch_add(n as u64, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+/// Параллельная (N потоков) byte-range загрузка в dest (aria2-style, порт Higgs download_parallel).
+/// Прогресс + отмена — с ГЛАВНОГО потока (emit/cancel не Send); воркеры трогают только Arc-атомики.
+fn download_parallel(
+    url: &str,
+    dest: &Path,
+    total: u64,
+    cancel: &dyn Fn() -> bool,
+    emit: &dyn Fn(u64, u64, f64),
+) -> Result<(), String> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(dest)
+        .map_err(|e| format!("создать {}: {e}", dest.display()))?;
+    file.set_len(total).map_err(|e| format!("set_len: {e}"))?;
+    let file = Arc::new(file);
+
+    let conns = PARALLEL_CONNS.min((total / (4 * 1024 * 1024)).max(1)).max(1);
+    let chunk = total / conns;
+    let downloaded = Arc::new(AtomicU64::new(0));
+    let finished = Arc::new(AtomicUsize::new(0));
+    let abort = Arc::new(AtomicBool::new(false));
+    let error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+    std::thread::scope(|sc| {
+        for i in 0..conns {
+            let start = i * chunk;
+            let end = if i == conns - 1 { total - 1 } else { start + chunk - 1 };
+            let url = url.to_string();
+            let (file, downloaded, finished, abort, error) =
+                (file.clone(), downloaded.clone(), finished.clone(), abort.clone(), error.clone());
+            sc.spawn(move || {
+                if let Err(e) = download_range(&url, &file, start, end, &downloaded, &abort) {
+                    if e != "отменено" {
+                        abort.store(true, Ordering::Relaxed); // стоп остальных
+                        let mut slot = error.lock().unwrap();
+                        if slot.is_none() {
+                            *slot = Some(e);
+                        }
+                    }
+                }
+                finished.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+        // Главный поток: прогресс + проверка отмены, пока воркеры не закончат.
+        let t0 = std::time::Instant::now();
+        loop {
+            if cancel() {
+                abort.store(true, Ordering::Relaxed);
+            }
+            let got = downloaded.load(Ordering::Relaxed);
+            let secs = t0.elapsed().as_secs_f64();
+            let mbps = if secs > 0.0 { (got as f64 / 1_000_000.0) / secs } else { 0.0 };
+            emit(got, total, mbps);
+            if finished.load(Ordering::SeqCst) >= conns as usize {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    });
+
+    if let Some(e) = error.lock().unwrap().take() {
+        let _ = std::fs::remove_file(dest);
+        return Err(e);
+    }
+    if cancel() {
+        let _ = std::fs::remove_file(dest);
+        return Err("отменено".into());
+    }
+    emit(total, total, 0.0);
+    Ok(())
+}
+
+/// Одиночный поток (fallback: сервер без range). Порт Higgs download_single.
+fn download_single(
+    url: &str,
+    dest: &Path,
+    cancel: &dyn Fn() -> bool,
+    emit: &dyn Fn(u64, u64, f64),
+) -> Result<(), String> {
+    use std::io::Write;
+    let resp = ureq::get(url).call().map_err(|e| format!("GET {url}: {e}"))?;
+    let total = resp
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+    let mut reader = resp.into_body().into_reader();
+    let mut file = File::create(dest).map_err(|e| format!("создать {}: {e}", dest.display()))?;
+    let mut buf = [0u8; 262_144];
+    let mut got = 0u64;
+    let t0 = std::time::Instant::now();
+    let mut last = std::time::Instant::now();
+    loop {
+        if cancel() {
+            let _ = std::fs::remove_file(dest);
+            return Err("отменено".into());
+        }
+        let n = reader.read(&mut buf).map_err(|e| format!("чтение: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        file.write_all(&buf[..n]).map_err(|e| format!("запись: {e}"))?;
+        got += n as u64;
+        if last.elapsed().as_millis() > 200 {
+            last = std::time::Instant::now();
+            let secs = t0.elapsed().as_secs_f64();
+            let mbps = if secs > 0.0 { (got as f64 / 1_000_000.0) / secs } else { 0.0 };
+            emit(got, total, mbps);
+        }
+    }
+    file.flush().map_err(|e| format!("flush: {e}"))?;
+    emit(got, got.max(total), 0.0);
+    Ok(())
+}
+
 /// Скачать одну FileSpec с докачкой-резюме и распаковкой по типу.
 #[allow(clippy::too_many_arguments)]
 fn download_file_spec(
@@ -889,79 +1093,29 @@ fn download_file_spec(
     Ok(())
 }
 
-// ── HTTP-загрузка (reqwest blocking; докачка через Range) ────────────────────
+// ── HTTP-загрузка: многопоточные byte-range'ы (ureq, метод Higgs-Ultimate) + fallback одиночным потоком ──
 
-/// Скачать URL в файл. Поддерживает резюме: если .part уже есть — просим Range с оффсета. Прогресс —
-/// через колбэк (downloaded, total, speed_mbps). Отмена — по cancel().
+/// Скачать URL в dest. Сначала многопоточная byte-range загрузка (ureq): HF Xet-CAS отдаёт 206 на ureq-Range
+/// (reqwest/curl-UA CAS душит 403; питон-hf_xet качает, значит и range-ureq качает). Нет range у сервера ->
+/// одиночный поток. Прогресс — колбэк (downloaded, total, speed_mbps); отмена — cancel().
 fn http_download(
     url: &str,
     dest: &Path,
     cancel: &dyn Fn() -> bool,
     emit: &dyn Fn(u64, u64, f64),
 ) -> Result<(), String> {
-    use std::io::{Read, Write};
-
-    let part = dest.with_extension(format!(
-        "{}part",
-        dest.extension().and_then(|e| e.to_str()).map(|e| format!("{e}.")).unwrap_or_default()
-    ));
-    let resume_from = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
-
-    let client = reqwest::blocking::Client::builder()
-        .timeout(None)
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .build()
-        .map_err(|e| format!("http client: {e}"))?;
-
-    let mut req = client.get(url);
-    if resume_from > 0 {
-        req = req.header("Range", format!("bytes={resume_from}-"));
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("создать {}: {e}", parent.display()))?;
     }
-    let mut resp = req.send().map_err(|e| format!("GET {url}: {e}"))?;
-    let status = resp.status();
-    if !(status.is_success() || status.as_u16() == 206) {
-        return Err(format!("HTTP {} для {url}", status.as_u16()));
-    }
-    // Полный размер: content-length + возможный оффсет резюма (206 отдаёт остаток).
-    let remaining = resp.content_length().unwrap_or(0);
-    let effective_resume = if status.as_u16() == 206 { resume_from } else { 0 };
-    let total = remaining + effective_resume;
-
-    // Если сервер проигнорировал Range (200 вместо 206) — начинаем part заново.
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .append(effective_resume > 0)
-        .truncate(effective_resume == 0)
-        .open(&part)
-        .map_err(|e| format!("открыть {}: {e}", part.display()))?;
-
-    let mut downloaded = effective_resume;
-    let mut buf = [0u8; 262_144];
-    let start = std::time::Instant::now();
-    let mut last_emit = std::time::Instant::now();
-    loop {
-        if cancel() {
-            return Err("отменено".to_string());
-        }
-        let n = resp.read(&mut buf).map_err(|e| format!("чтение тела: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        file.write_all(&buf[..n]).map_err(|e| format!("запись: {e}"))?;
-        downloaded += n as u64;
-        if last_emit.elapsed().as_millis() > 250 {
-            last_emit = std::time::Instant::now();
-            let secs = start.elapsed().as_secs_f64().max(0.001);
-            let speed = ((downloaded - effective_resume) as f64 / 1_000_000.0) / secs;
-            emit(downloaded, total, speed);
+    let (total, ranges_ok) = probe_size(url);
+    if ranges_ok && total > 0 {
+        match download_parallel(url, dest, total, cancel, emit) {
+            Ok(()) => return Ok(()),
+            Err(e) if e == "отменено" => return Err(e),
+            Err(_) => {} // деградация -> одиночный поток
         }
     }
-    file.flush().map_err(|e| format!("flush: {e}"))?;
-    drop(file);
-    std::fs::rename(&part, dest).map_err(|e| format!("финализация {}: {e}", dest.display()))?;
-    emit(downloaded, total, 0.0);
-    Ok(())
+    download_single(url, dest, cancel, emit)
 }
 
 // ── Распаковка архивов ───────────────────────────────────────────────────────
