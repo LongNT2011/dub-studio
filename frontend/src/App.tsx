@@ -8,6 +8,7 @@ import { api, type Project, type Capabilities, type SetupStatus, type SetupCompo
 import { LANGS, setLang, type Lang } from "./lib/i18n";
 import { useStore } from "./store";
 import PreviewCanvas from "./components/PreviewCanvas";
+import { playSfx, sfxEnabled, setSfxEnabled } from "./lib/sfx";
 import ResourceMonitor from "./components/ResourceMonitor";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -169,6 +170,7 @@ function ModelsSection() {
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const [cap, setCap] = useState<Capabilities | null>(null);
+  const [sfx, setSfx] = useState(sfxEnabled());
   useEffect(() => { api.capabilities().then(setCap).catch(() => {}); }, []);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center glass-scrim anim-fade" onClick={onClose}>
@@ -178,6 +180,13 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
           <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={16} /></button>
         </div>
         <div className="mono text-[11px] text-[var(--color-muted)] mb-3">{cap ? `${cap.device} · ${cap.tts_quant}` : "…"}</div>
+        <label className="flex items-center justify-between gap-3 mb-3 pb-3 border-b border-[var(--color-border)]">
+          <span className="text-[13px] text-[var(--color-text)] inline-flex items-center gap-2"><Music size={14} className="text-[var(--color-muted)]" />{t("settings.sounds")}</span>
+          <button onClick={() => { const v = !sfx; setSfx(v); setSfxEnabled(v); if (v) playSfx("notify"); }} title={t("settings.sounds")}
+            className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${sfx ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface-2)] border border-[var(--color-border)]"}`}>
+            <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${sfx ? "left-[18px]" : "left-0.5"}`} />
+          </button>
+        </label>
         <div className="overflow-y-auto flex-1 -mr-2 pr-2"><ModelsSection /></div>
       </div>
     </div>
@@ -423,10 +432,10 @@ function DropZone() {
           // (output.mp4) -> плей играет озвучку и двигает скраб -> кадры следуют (1:1 оригинал).
         } catch { /* рендер не удался -> редактор откроется на покадровом превью */ }
       }
-      s.setStage("editor");
+      s.setStage("editor"); playSfx("success");
     } catch (err) {
       s.setProgress("error", String(err), null);  // surface backend failure instead of hanging on "analyzing"
-      s.setStage("empty");
+      s.setStage("empty"); playSfx("error");
     }
   }
 
@@ -774,7 +783,7 @@ function Editor() {
   // a patch/PUT rejected (4xx/5xx/offline) -> surface it in the Files panel (like doExport) and re-sync from
   // the server so the optimistic local echo can't silently diverge from persisted truth
   async function surfaceErr(err: unknown) {
-    pushActivity(String(err), "error");
+    pushActivity(String(err), "error"); playSfx("error");
     addExport({ id: `err-${Date.now()}`, name: t("common.error"), status: "error", msg: String(err) });
     try { setProject(await api.getProject(pid)); } catch { /* offline -> keep optimistic state */ }
   }
@@ -796,7 +805,7 @@ function Editor() {
       await api.patch(pid, { op: "regen", id: segId });
       const { job_id } = await api.render(pid);                       // re-TTS only the dirty seg + re-mux -> fresh dub
       await api.watchJob(job_id, () => {});
-      setProject(await api.getProject(pid)); setRendered(false); bump(); setDubRev(Date.now());   // refresh preview + reload the re-rendered dub audio
+      setProject(await api.getProject(pid)); setRendered(false); bump(); setDubRev(Date.now()); playSfx("notify");   // refresh preview + reload the re-rendered dub audio
     } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
@@ -871,7 +880,7 @@ function Editor() {
       await api.patch(pid, { op: "regen_all" });                    // mark every segment dirty
       const { job_id } = await api.render(pid);                     // re-TTS all dirty segs + re-mux -> fresh dub
       await api.watchJob(job_id, () => {});
-      setProject(await api.getProject(pid)); setRendered(false); bump(); setDubRev(Date.now());   // покадровое превью; /dub обновлён -> плей играет новый дуб
+      setProject(await api.getProject(pid)); setRendered(false); bump(); setDubRev(Date.now()); playSfx("notify");   // покадровое превью; /dub обновлён -> плей играет новый дуб
     } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
@@ -912,23 +921,24 @@ function Editor() {
       const { job_id } = await api.render(pid);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") { updateExport(exId, { msg: e.msg || "" }); pushActivity(e.msg || "", "work"); } });
       updateExport(exId, { status: "done", msg: "", url: `${api.outputUrl(pid)}?rev=${Date.now()}` });   // bust cache on re-export
-      pushActivity(`${t("compare.result")}: ${name}`, "done");
+      pushActivity(`${t("compare.result")}: ${name}`, "done"); playSfx("success");
       setRendered(true); setDubRev(Date.now());   // /dub now serves the freshly rendered output.mp4 -> reload <audio>
     } catch (err) {
-      updateExport(exId, { status: "error", msg: String(err) }); pushActivity(String(err), "error");
+      updateExport(exId, { status: "error", msg: String(err) }); pushActivity(String(err), "error"); playSfx("error");
     } finally { setRendering(false); }
   }
   async function doRemix() {                                            // Gemma rewrites the WHOLE script on a theme
     if (!remixText.trim() || remixing) return;
-    setRemixing(true);
+    setRemixing(true); pushActivity(t("remix.apply"));
     try {
       pushHistory(p);
       const { job_id } = await api.remix(pid, remixText.trim());
-      await api.watchJob(job_id, () => {});
+      await api.watchJob(job_id, (e) => { if (e.type === "progress") useStore.getState().setProgress(e.stage || "remix", e.msg || t("remix.apply"), e.pct ?? null); });
       setRendered(false);
       setProject(await api.getProject(pid));                            // rewritten transcript -> shows in the lane
-      bump();
-    } catch (err) { console.error("remix failed", err); }
+      bump(); setLane("subs");                                          // показать переписанный текст сразу
+      useStore.getState().setProgress("done", t("remix.apply"), null); // done-строка в журнале
+    } catch (err) { await surfaceErr(err); }                           // было: тихий console.error -> провал не был виден
     finally { setRemixing(false); }
   }
 
@@ -1673,7 +1683,7 @@ function FirstRun() {
         }
       });
       const s = await refresh();
-      if (s.ready) { setStage("empty"); }   // всё скачано -> сразу на стартовый экран, без ручного «Продолжить»
+      if (s.ready) { setStage("empty"); playSfx("success"); }   // всё скачано -> сразу на стартовый экран, без ручного «Продолжить»
     } catch (e) {
       setErr(String(e)); useStore.getState().pushActivity(String(e), "error");
     } finally {

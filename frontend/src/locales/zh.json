@@ -176,6 +176,7 @@
     "refreshHint": "强制刷新预览/字幕（如卡顿或卡住）"
   },
   "settings": {
+    "sounds": "通知音效",
     "title": "模型",
     "asr": "语音识别",
     "llm": "翻译",

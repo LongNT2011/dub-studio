@@ -176,6 +176,7 @@
     "refreshHint": "Forçar a atualização da prévia / legendas"
   },
   "settings": {
+    "sounds": "Sons de notificação",
     "title": "Modelos",
     "asr": "Reconhecimento de fala",
     "llm": "Tradução",

@@ -209,6 +209,7 @@
     "refreshHint": "Force-refresh the preview / subtitles (if it lags or hangs)"
   },
   "settings": {
+    "sounds": "Notification sounds",
     "title": "Models",
     "asr": "Speech recognition",
     "llm": "Translation",

@@ -176,6 +176,7 @@
     "refreshHint": "Forzar el refresco de la vista previa / subtítulos"
   },
   "settings": {
+    "sounds": "Sonidos de notificación",
     "title": "Modelos",
     "asr": "Reconocimiento de voz",
     "llm": "Traducción",

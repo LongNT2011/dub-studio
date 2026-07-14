@@ -176,6 +176,7 @@
     "refreshHint": "Forcer le rafraîchissement de l'aperçu / sous-titres"
   },
   "settings": {
+    "sounds": "Sons de notification",
     "title": "Modèles",
     "asr": "Reconnaissance vocale",
     "llm": "Traduction",
