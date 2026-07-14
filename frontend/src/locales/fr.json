@@ -249,7 +249,9 @@
     "theme": "Thème",
     "rendering": "Rendu",
     "done": "Terminé",
-    "error": "Erreur"
+    "error": "Erreur",
+    "play": "Lecture",
+    "pause": "Pause"
   },
   "setup": {
     "title": "First run",

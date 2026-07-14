@@ -282,7 +282,9 @@
     "theme": "Theme",
     "rendering": "Rendering",
     "done": "Done",
-    "error": "Error"
+    "error": "Error",
+    "play": "Play",
+    "pause": "Pause"
   },
   "setup": {
     "title": "First run",

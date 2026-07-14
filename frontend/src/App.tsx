@@ -1999,6 +1999,21 @@ function TranscriptView() {
   const [busy, setBusy] = useState<string | null>(null);            // спикер в работе, либо "__all__"
   const [made, setMade] = useState<Record<string, string>>({});     // спикер -> имя созданного голоса
   const [scrub, setScrub] = useState(0);
+  const [play, setPlay] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  // Плей: <video> тянет /dub — для транскрипта (nodub) это ОРИГИНАЛ (видео+аудио). Скраб следует за
+  // currentTime -> активная строка + караоке-подсветка слова. Один элемент = и картинка, и звук.
+  useEffect(() => {
+    const v = videoRef.current; if (!v) return;
+    if (!play) { v.pause(); return; }
+    v.play().catch(() => setPlay(false));
+    const id = window.setInterval(() => setScrub(v.currentTime), 80);
+    return () => window.clearInterval(id);
+  }, [play]);
+  const seek = (tt: number) => { setScrub(tt); if (videoRef.current) videoRef.current.currentTime = tt; };
+  // пословные тайминги ASR (лежат в extra.words) — для караоке внутри активной фразы
+  const wordsOf = (s: Project["segments"][number]) =>
+    (((s as unknown as { extra?: { words?: Array<{ word: string; start: number; end: number }> } }).extra?.words) || []);
 
   const rows = p.segments.filter((s) => (s.src_text || "").trim());
   const speakers = [...new Set(p.segments.map((s) => s.speaker ?? "0"))].sort();
@@ -2040,19 +2055,35 @@ function TranscriptView() {
           <span className="text-[13px] font-medium flex items-center gap-2 min-w-0"><FileText size={15} className="text-[var(--color-accent)] shrink-0" /><span className="truncate">{p.meta.video?.split(/[\\/]/).pop() || t("transcribe.title")}</span></span>
           <span className="text-[11px] text-[var(--color-muted)] shrink-0">{speakers.length} {t("transcribe.speakersN")}</span>
         </div>
-        <div className="px-3 pt-2">
-          <WaveformTimeline pid={pid} duration={p.meta.duration || 0} scrub={scrub} segments={p.segments} onSeek={setScrub} />
+        <div className="px-3 pt-2 space-y-2">
+          <div className="relative rounded-lg overflow-hidden bg-black/50 border border-[var(--color-border)] grid place-items-center max-h-[34vh]">
+            <video ref={videoRef} src={api.dubUrl(pid)} playsInline preload="auto"
+              onEnded={() => setPlay(false)} onClick={() => setPlay((x) => !x)}
+              className="max-h-[34vh] max-w-full cursor-pointer" />
+            <button onClick={() => setPlay((x) => !x)} title={play ? t("common.pause") : t("common.play")}
+              className="absolute bottom-2 left-2 grid place-items-center w-10 h-10 rounded-full bg-[var(--color-accent)] text-[var(--color-on-accent)] shadow-lg hover:brightness-110 transition">
+              {play ? <Pause size={18} /> : <Play size={18} className="ml-0.5" />}
+            </button>
+          </div>
+          <WaveformTimeline pid={pid} duration={p.meta.duration || 0} scrub={scrub} segments={p.segments} onSeek={seek} />
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1.5">
           {rows.map((s) => {
             const spk = s.speaker ?? "0";
             const active = s.id === activeId;
+            const words = active ? wordsOf(s) : [];
             return (
-              <div key={s.id} ref={active ? activeRef : undefined} onClick={() => setScrub(s.start)}
+              <div key={s.id} ref={active ? activeRef : undefined} onClick={() => seek(s.start)}
                 className={`flex gap-2 items-start cursor-pointer rounded px-1.5 -mx-1.5 py-0.5 transition-colors ${active ? "bg-[color-mix(in_oklab,var(--color-accent)_16%,transparent)]" : "hover:bg-[var(--color-surface-2)]"}`}>
                 <span className="mono text-[9px] px-1.5 py-px rounded shrink-0" style={{ background: colorOf(spk), color: "#0b0c0e" }}>SPK {spk}</span>
                 <span className="mono text-[9px] text-[var(--color-muted)] pt-0.5 shrink-0 w-8">{fmt(s.start)}</span>
-                <span className="text-[13px] leading-snug">{(s.src_text || "").trim()}</span>
+                <span className="text-[13px] leading-snug">
+                  {active && words.length > 0
+                    ? words.map((w, i) => (
+                        <span key={i} className={`transition-colors ${scrub >= w.start && scrub < w.end ? "bg-[var(--color-accent)] text-[var(--color-on-accent)] rounded px-0.5" : ""}`}>{w.word}{" "}</span>
+                      ))
+                    : (s.src_text || "").trim()}
+                </span>
               </div>
             );
           })}

@@ -249,7 +249,9 @@
     "theme": "主题",
     "rendering": "渲染中",
     "done": "完成",
-    "error": "错误"
+    "error": "错误",
+    "play": "播放",
+    "pause": "暂停"
   },
   "setup": {
     "title": "First run",

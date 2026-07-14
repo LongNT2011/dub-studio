@@ -311,13 +311,13 @@ pub fn manifest() -> Vec<Component> {
             size: 2_560_000_000,
             files: &[
                 FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx", dest_rel: "models/tdt-fp32/encoder-model.onnx", size: 41_770_866, extract: Extract::None },
-                FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx_data", dest_rel: "models/tdt-fp32/encoder-model.onnx_data", size: 0, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/encoder-model.onnx.data", dest_rel: "models/tdt-fp32/encoder-model.onnx.data", size: 2_435_420_160, extract: Extract::None },
                 FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/decoder_joint-model.onnx", dest_rel: "models/tdt-fp32/decoder_joint-model.onnx", size: 72_520_893, extract: Extract::None },
                 FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/nemo128.onnx", dest_rel: "models/tdt-fp32/nemo128.onnx", size: 139_764, extract: Extract::None },
                 FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/vocab.txt", dest_rel: "models/tdt-fp32/vocab.txt", size: 93_939, extract: Extract::None },
                 FileSpec { url: "https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/main/config.json", dest_rel: "models/tdt-fp32/config.json", size: 0, extract: Extract::None },
             ],
-            markers: &[Marker { rel: "models/tdt-fp32/encoder-model.onnx", expect: 41_770_866 }, Marker { rel: "models/tdt-fp32/vocab.txt", expect: 93_939 }],
+            markers: &[Marker { rel: "models/tdt-fp32/encoder-model.onnx", expect: 41_770_866 }, Marker { rel: "models/tdt-fp32/encoder-model.onnx.data", expect: 2_435_420_160 }, Marker { rel: "models/tdt-fp32/vocab.txt", expect: 93_939 }],
             external_url: None,
         },
         Component {
@@ -834,19 +834,32 @@ pub fn download_components(
     let mut comp_total = vec![0u64; ncomp];
     let mut tasks: Vec<Task> = Vec::new();
     let mut open_files: Vec<Arc<File>> = Vec::new(); // держим хендлы живыми до конца пула
+    // Прямые файлы (Extract::None) качаем во ВРЕМЕННЫЙ <target>.part и переименовываем в финал ТОЛЬКО после
+    // валидации (размер + GGUF-магия). Иначе set_len создаёт файл полного размера сразу -> маркер по размеру
+    // считает его «установленным» ещё до докачки / при обрыве -> llama-server грузит нули ('????'). (part, финал, total).
+    let mut parts: Vec<(PathBuf, PathBuf, u64)> = Vec::new();
     for p in &planned {
         if cancel() {
             return Err("отменено".to_string());
         }
         let (total, ranges_ok) = probe_size(p.url);
         comp_total[p.ci] += total;
+        let dl_target: PathBuf = if p.extract == Extract::None {
+            let mut s = p.target.clone().into_os_string();
+            s.push(".part");
+            let part = PathBuf::from(s);
+            parts.push((part.clone(), p.target.clone(), total));
+            part
+        } else {
+            p.target.clone() // архивы качаем в tmp напрямую — extract их сам валидирует
+        };
         if ranges_ok && total > 0 {
             let file = std::fs::OpenOptions::new()
                 .create(true)
                 .write(true)
                 .truncate(true)
-                .open(&p.target)
-                .map_err(|e| format!("создать {}: {e}", p.target.display()))?;
+                .open(&dl_target)
+                .map_err(|e| format!("создать {}: {e}", dl_target.display()))?;
             file.set_len(total).map_err(|e| format!("set_len: {e}"))?;
             let file = Arc::new(file);
             open_files.push(file.clone());
@@ -857,7 +870,7 @@ pub fn download_components(
                 start += CHUNK;
             }
         } else {
-            tasks.push(Task::Whole { url: p.url, dest: p.target.clone(), ci: p.ci });
+            tasks.push(Task::Whole { url: p.url, dest: dl_target, ci: p.ci });
         }
     }
     let grand_total: u64 = comp_total.iter().sum();
@@ -947,17 +960,48 @@ pub fn download_components(
 
     drop(open_files); // закрыть хендлы до распаковки (иначе zip не откроет файл на чтение)
 
-    if let Some(e) = error.lock().unwrap().take() {
-        for p in &planned {
-            let _ = std::fs::remove_file(&p.target);
+    // Сбой/отмена: удаляем только НЕДОкачанные .part и tmp-архивы (готовые финальные файлы не трогаем).
+    let cleanup = || {
+        for (part, _, _) in &parts {
+            let _ = std::fs::remove_file(part);
         }
+        for p in &planned {
+            if p.extract != Extract::None {
+                let _ = std::fs::remove_file(&p.target);
+            }
+        }
+    };
+    if let Some(e) = error.lock().unwrap().take() {
+        cleanup();
         return Err(e);
     }
     if cancel() {
-        for p in &planned {
-            let _ = std::fs::remove_file(&p.target);
-        }
+        cleanup();
         return Err("отменено".to_string());
+    }
+
+    // Успех: валидируем каждый .part (размер == probed total; .gguf -> магия GGUF) и АТОМАРНО переименовываем
+    // в финал. Битый/неполный .part -> удаляем + ошибка; финальный файл не появляется -> маркер честно «не
+    // установлен» (не даём llama-server грузить файл с дырами). Ловит и Xet-обрыв, и прерванную докачку.
+    for (part, target, total) in &parts {
+        let sz = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
+        if *total > 0 && sz != *total {
+            let _ = std::fs::remove_file(part);
+            return Err(format!("докачка {}: неполный размер {sz}/{total}", target.display()));
+        }
+        if target.extension().and_then(|s| s.to_str()) == Some("gguf") {
+            use std::io::Read;
+            let mut magic = [0u8; 4];
+            let ok = std::fs::File::open(part)
+                .and_then(|mut f| f.read_exact(&mut magic))
+                .is_ok();
+            if !ok || &magic != b"GGUF" {
+                let _ = std::fs::remove_file(part);
+                return Err(format!("докачка {}: не GGUF (magic={magic:02x?}) — файл битый", target.display()));
+            }
+        }
+        std::fs::rename(part, target)
+            .map_err(|e| format!("переименовать {}: {e}", target.display()))?;
     }
 
     // Распаковка/финализация архивов — последовательно, вне сети.
@@ -995,7 +1039,10 @@ pub fn download_components(
 
 // Общий пул соединений на ВСЁ задание: чанки всех файлов в одной очереди, POOL_SLOTS воркеров разбирают её.
 // Разные модели качаются одновременно, но суммарно не больше POOL_SLOTS коннектов (не 8×N -> без бана HF CDN).
-const POOL_SLOTS: usize = 16;
+// 4, не 16: HF Xet-CAS (cas-bridge.xethub.hf.co — туда уехали все альт-кванты) роняет соединения при
+// высокой параллели, файл собирается с дырами и молча бьётся. 4 коннекта Xet держит; обычный CDN и на
+// 4 сатурирует канал. Плюс ретраи диапазонов (RANGE_RETRIES) добивают транзиентные дропы.
+const POOL_SLOTS: usize = 4;
 const CHUNK: u64 = 16 * 1024 * 1024; // 16МБ на задачу — балансирует очередь между большими и мелкими файлами
 
 #[cfg(windows)]
@@ -1037,8 +1084,14 @@ fn probe_size(url: &str) -> (u64, bool) {
     }
 }
 
+/// Сколько раз повторяем ОДИН диапазон при сбое. HF Xet-CAS (cas-bridge.xethub.hf.co) роняет соединения
+/// под параллелью (Peer disconnected) ИЛИ отдаёт неполный range — это ТРАНЗИЕНТНО, ретрай спасает.
+const RANGE_RETRIES: u32 = 6;
+
 /// Скачать ОДИН диапазон [start,end] в общий файл по офсету (write_at, без seek-гонок). abort -> стоп всех.
-/// Порт Higgs download_range (ureq + Range). downloaded — общий счётчик для прогресса.
+/// Порт Higgs download_range (ureq + Range) + РЕТРАИ (Xet-CAS дропает под параллелью). downloaded — общий
+/// счётчик прогресса; на неудачной попытке откатываем её вклад, чтобы ретрай не задвоил прогресс.
+/// Обязательна проверка полноты диапазона: 206 + РОВНО (end-start+1) байт, иначе дыра в файле = битый GGUF.
 fn download_range(
     url: &str,
     file: &Arc<File>,
@@ -1047,10 +1100,44 @@ fn download_range(
     downloaded: &Arc<AtomicU64>,
     abort: &Arc<AtomicBool>,
 ) -> Result<(), String> {
+    let want = end - start + 1;
+    let mut last = String::new();
+    for attempt in 0..RANGE_RETRIES {
+        if abort.load(Ordering::Relaxed) {
+            return Err("отменено".into());
+        }
+        let mut got = 0u64;
+        let res = download_range_once(url, file, start, end, downloaded, abort, &mut got);
+        match res {
+            Ok(()) if got == want => return Ok(()),
+            Ok(()) => last = format!("неполный range: {got}/{want} байт"),
+            Err(e) if e == "отменено" => return Err(e),
+            Err(e) => last = e,
+        }
+        // откат прогресса этой попытки + бэкофф перед повтором (следующая попытка перезапишет диапазон)
+        downloaded.fetch_sub(got.min(downloaded.load(Ordering::Relaxed)), Ordering::Relaxed);
+        std::thread::sleep(std::time::Duration::from_millis(400 * (attempt as u64 + 1)));
+    }
+    Err(format!("range {start}-{end} после {RANGE_RETRIES} попыток: {last}"))
+}
+
+/// Одна попытка скачать диапазон. Пишет got = сколько байт реально записано (для отката прогресса).
+fn download_range_once(
+    url: &str,
+    file: &Arc<File>,
+    start: u64,
+    end: u64,
+    downloaded: &Arc<AtomicU64>,
+    abort: &Arc<AtomicBool>,
+    got: &mut u64,
+) -> Result<(), String> {
     let resp = ureq::get(url)
         .header("Range", &format!("bytes={start}-{end}"))
         .call()
         .map_err(|e| format!("range {start}-{end}: {e}"))?;
+    if resp.status().as_u16() != 206 {
+        return Err(format!("range {start}-{end}: статус {} (ждали 206)", resp.status()));
+    }
     let mut reader = resp.into_body().into_reader();
     let mut buf = [0u8; 262_144];
     let mut offset = start;
@@ -1071,6 +1158,7 @@ fn download_range(
             w += k;
         }
         offset += n as u64;
+        *got += n as u64;
         downloaded.fetch_add(n as u64, Ordering::Relaxed);
     }
     Ok(())
