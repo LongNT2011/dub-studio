@@ -15,7 +15,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyNDVBRkZGRTY2MzQxOUEKUldTYVFXUG0vNjlGSXF1ejBheStLbTJqeGYzdEdCTm1JTlNNTUFzNVVNbVpjZmNRcXo3aTFQVUoK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMyMjhFMkZEQjJERkE0MjUKUldRbHBOK3kvZUlvTXVoblJyWitkNDNpN3h0bFNGdXJyQUE5MWlsYlE4NHB5d0M0RzRIa054QzkK",
       "endpoints": [
         "https://github.com/timoncool/dub-studio/releases/latest/download/latest.json"
       ],
