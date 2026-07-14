@@ -151,6 +151,8 @@
   "edit": {
     "setStart": "起点设为播放头",
     "setEnd": "终点设为播放头",
+    "startVideo": "起点设为视频开头",
+    "endVideo": "终点设为视频结尾",
     "alignLeft": "左对齐",
     "alignCenter": "居中",
     "alignRight": "右对齐"

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
-import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast } from "lucide-react";
+import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useFloatable, dockSlot } from "./lib/useFloatable";
 import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent } from "./lib/api";
@@ -1038,10 +1038,12 @@ function Editor() {
                       <button onClick={(e) => { e.stopPropagation(); branch("blur", { idx: i, fill: b.fill ? null : "#000000" }); }}
                         title={b.fill ? t("blur.modeFill") : t("blur.modeBlur")}
                         className="shrink-0 hover:text-[var(--color-accent)] transition-colors">{b.fill ? <Square size={12} /> : <Droplet size={12} />}</button>
-                      <button onClick={(e) => { e.stopPropagation(); branch("blur", { idx: i, t0: Math.max(scrub, 0) }); }} title={t("edit.setStart")}
-                        className="shrink-0 hover:text-[var(--color-accent)] transition-colors"><ChevronFirst size={12} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); branch("blur", { idx: i, t1: scrub }); }} title={t("edit.setEnd")}
-                        className="shrink-0 hover:text-[var(--color-accent)] transition-colors"><ChevronLast size={12} /></button>
+                      <span className="inline-flex rounded border border-[var(--color-border)] overflow-hidden shrink-0">
+                        <button onClick={(e) => { e.stopPropagation(); branch("blur", { idx: i, t0: Math.max(scrub, 0) }); }} title={t("edit.setStart")} className="px-1.5 py-1 text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"><ChevronFirst size={13} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); branch("blur", { idx: i, t1: scrub }); }} title={t("edit.setEnd")} className="px-1.5 py-1 text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"><ChevronLast size={13} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); branch("blur", { idx: i, t0: 0 }); }} title={t("edit.startVideo")} className="px-1.5 py-1 text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"><ArrowLeftToLine size={13} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); branch("blur", { idx: i, t1: p.meta.duration || 0 }); }} title={t("edit.endVideo")} className="px-1.5 py-1 text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"><ArrowRightToLine size={13} /></button>
+                      </span>
                       <button onClick={(e) => { e.stopPropagation(); branch("blur_del", { idx: i }); setSelBlur(null); }} className="shrink-0 hover:text-[var(--color-warn)] transition-colors"><Trash2 size={12} /></button>
                     </div>
                   ))}
@@ -1114,10 +1116,12 @@ function Editor() {
                         className={`px-1.5 py-1 transition-colors ${(ti.align || "center") === a ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}><Ic size={12} /></button>
                     ))}
                   </span>
-                  <button onClick={(e) => { e.stopPropagation(); branch("title", { idx: i, start: scrub }); }} title={t("edit.setStart")}
-                    className="px-1.5 py-1 rounded border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition-colors"><ChevronFirst size={13} /></button>
-                  <button onClick={(e) => { e.stopPropagation(); branch("title", { idx: i, end: scrub }); }} title={t("edit.setEnd")}
-                    className="px-1.5 py-1 rounded border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition-colors"><ChevronLast size={13} /></button>
+                  <span className="inline-flex rounded border border-[var(--color-border)] overflow-hidden shrink-0">
+                    <button onClick={(e) => { e.stopPropagation(); branch("title", { idx: i, start: scrub }); }} title={t("edit.setStart")} className="px-1.5 py-1 text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"><ChevronFirst size={13} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); branch("title", { idx: i, end: scrub }); }} title={t("edit.setEnd")} className="px-1.5 py-1 text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"><ChevronLast size={13} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); branch("title", { idx: i, start: 0 }); }} title={t("edit.startVideo")} className="px-1.5 py-1 text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"><ArrowLeftToLine size={13} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); branch("title", { idx: i, end: p.meta.duration || 0 }); }} title={t("edit.endVideo")} className="px-1.5 py-1 text-[var(--color-muted)] hover:text-[var(--color-accent)] transition-colors"><ArrowRightToLine size={13} /></button>
+                  </span>
                 </div>
               </div>
             ))}

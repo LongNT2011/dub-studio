@@ -151,6 +151,8 @@
   "edit": {
     "setStart": "Início no cursor",
     "setEnd": "Fim no cursor",
+    "startVideo": "Início no começo do vídeo",
+    "endVideo": "Fim no fim do vídeo",
     "alignLeft": "Alinhar à esquerda",
     "alignCenter": "Centralizar",
     "alignRight": "Alinhar à direita"

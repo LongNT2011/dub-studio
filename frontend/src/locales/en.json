@@ -184,6 +184,8 @@
   "edit": {
     "setStart": "Start at playhead",
     "setEnd": "End at playhead",
+    "startVideo": "Start at video start",
+    "endVideo": "End at video end",
     "alignLeft": "Align left",
     "alignCenter": "Align center",
     "alignRight": "Align right"
