@@ -1615,7 +1615,7 @@ function FirstRun() {
         if (e.type === "progress") setProg({ id: e.component || "", pct: e.pct ?? 0, msg: e.msg || "" });
       });
       const s = await refresh();
-      if (s.ready) { /* stay — user clicks Continue */ }
+      if (s.ready) { setStage("empty"); }   // всё скачано -> сразу на стартовый экран, без ручного «Продолжить»
     } catch (e) {
       setErr(String(e));
     } finally {

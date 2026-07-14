@@ -769,35 +769,222 @@ pub fn download_components(
         return Err("нет скачиваемых компонентов среди выбранных id".to_string());
     }
 
-    // Общий вес для сквозного процента.
-    let grand_total: u64 = selected.iter().map(|c| c.size).sum();
-    let mut done_bytes: u64 = 0;
-    let mut results = Vec::new();
-
     let tmp_dir = std::env::temp_dir().join("dub-studio-setup");
     let _ = std::fs::create_dir_all(&tmp_dir);
 
-    for c in selected {
-        progress(json!({ "msg": format!("Скачиваю: {}", c.name), "stage": "download", "component": c.id }));
+    // Файлы к загрузке (пропускаем уже целые прямые файлы — идемпотентность). Архив/wheel качаем во
+    // временный файл рядом; запоминаем метаданные для распаковки после пула.
+    struct Planned {
+        dest: PathBuf,
+        target: PathBuf,
+        extract: Extract,
+        url: &'static str,
+    }
+    let mut planned: Vec<Planned> = Vec::new();
+    for c in &selected {
         for f in c.files {
-            if cancel() {
-                return Err("отменено".to_string());
+            let dest = repo_root.join(f.dest_rel);
+            if let Some(parent) = dest.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| format!("создать {}: {e}", parent.display()))?;
             }
-            download_file_spec(repo_root, &tmp_dir, c, f, grand_total, &mut done_bytes, cancel, progress)?;
+            if f.extract == Extract::None && f.size != 0 {
+                if let Ok(meta) = std::fs::metadata(&dest) {
+                    if meta.len() == f.size {
+                        continue; // уже на месте
+                    }
+                }
+            }
+            let target = if f.extract != Extract::None {
+                tmp_dir.join(
+                    Path::new(f.dest_rel)
+                        .file_name()
+                        .map(|s| s.to_os_string())
+                        .unwrap_or_else(|| "archive.tmp".into()),
+                )
+            } else {
+                dest.clone()
+            };
+            planned.push(Planned { dest, target, extract: f.extract, url: f.url });
         }
-        // Проверка после закачки.
-        let st = component_status(repo_root, c);
-        results.push(json!({ "id": c.id, "installed": st.installed, "missing": st.missing }));
-        progress(json!({ "msg": format!("Готово: {}", c.name), "stage": "download", "component": c.id, "installed": st.installed }));
     }
 
+    // Уже всё на месте — ничего не качаем.
+    if planned.is_empty() {
+        let results: Vec<Value> = selected
+            .iter()
+            .map(|c| {
+                let st = component_status(repo_root, c);
+                json!({ "id": c.id, "installed": st.installed, "missing": st.missing })
+            })
+            .collect();
+        let overall = setup_status(repo_root);
+        return Ok(json!({ "components": results, "ready": overall.ready }));
+    }
+
+    progress(json!({ "msg": "Скачиваю модели…", "stage": "download" }));
+
+    // Пробинг + нарезка на чанки + открытие файлов. Чанки ВСЕХ файлов кладём в ОДНУ очередь.
+    enum Task {
+        Range { file: Arc<File>, url: &'static str, start: u64, end: u64 },
+        Whole { url: &'static str, dest: PathBuf },
+    }
+    let mut tasks: Vec<Task> = Vec::new();
+    let mut open_files: Vec<Arc<File>> = Vec::new(); // держим хендлы живыми до конца пула
+    let mut grand_total: u64 = 0;
+    for p in &planned {
+        if cancel() {
+            return Err("отменено".to_string());
+        }
+        let (total, ranges_ok) = probe_size(p.url);
+        if ranges_ok && total > 0 {
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&p.target)
+                .map_err(|e| format!("создать {}: {e}", p.target.display()))?;
+            file.set_len(total).map_err(|e| format!("set_len: {e}"))?;
+            let file = Arc::new(file);
+            open_files.push(file.clone());
+            let mut start = 0u64;
+            while start < total {
+                let end = (start + CHUNK - 1).min(total - 1);
+                tasks.push(Task::Range { file: file.clone(), url: p.url, start, end });
+                start += CHUNK;
+            }
+            grand_total += total;
+        } else {
+            // сервер без range -> файл целиком в один слот
+            tasks.push(Task::Whole { url: p.url, dest: p.target.clone() });
+            grand_total += total; // 0, если размер неизвестен
+        }
+    }
+
+    // ── Общий пул: POOL_SLOTS воркеров разбирают ОДНУ очередь чанков всех файлов. Разные модели качаются
+    //    одновременно, но суммарно не больше POOL_SLOTS соединений (не 8×N -> без бана HF CDN). ──
+    let n = POOL_SLOTS.min(tasks.len()).max(1);
+    let queue = Arc::new(Mutex::new(std::collections::VecDeque::from(tasks)));
+    let downloaded = Arc::new(AtomicU64::new(0));
+    let finished = Arc::new(AtomicUsize::new(0));
+    let abort = Arc::new(AtomicBool::new(false));
+    let error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+    std::thread::scope(|sc| {
+        for _ in 0..n {
+            let (queue, downloaded, finished, abort, error) = (
+                queue.clone(),
+                downloaded.clone(),
+                finished.clone(),
+                abort.clone(),
+                error.clone(),
+            );
+            sc.spawn(move || {
+                loop {
+                    if abort.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let task = { queue.lock().unwrap().pop_front() };
+                    let task = match task {
+                        Some(t) => t,
+                        None => break, // очередь пуста
+                    };
+                    let res = match &task {
+                        Task::Range { file, url, start, end } => {
+                            download_range(url, file, *start, *end, &downloaded, &abort)
+                        }
+                        Task::Whole { url, dest } => download_whole(url, dest, &downloaded, &abort),
+                    };
+                    if let Err(e) = res {
+                        if e != "отменено" {
+                            abort.store(true, Ordering::Relaxed);
+                            let mut slot = error.lock().unwrap();
+                            if slot.is_none() {
+                                *slot = Some(e);
+                            }
+                        }
+                        break;
+                    }
+                }
+                finished.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+        // Главный поток: агрегатный прогресс по всем файлам + проверка отмены.
+        let t0 = std::time::Instant::now();
+        loop {
+            if cancel() {
+                abort.store(true, Ordering::Relaxed);
+            }
+            let got = downloaded.load(Ordering::Relaxed);
+            let secs = t0.elapsed().as_secs_f64();
+            let mbps = if secs > 0.0 { (got as f64 / 1_000_000.0) / secs } else { 0.0 };
+            let pct = if grand_total > 0 { (got as f64 / grand_total as f64) * 100.0 } else { 0.0 };
+            progress(json!({
+                "stage": "download",
+                "msg": "Скачиваю модели…",
+                "downloaded": got,
+                "total": grand_total,
+                "speed_mbps": mbps,
+                "pct": pct.min(100.0),
+            }));
+            if finished.load(Ordering::SeqCst) >= n {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    });
+
+    drop(open_files); // закрыть хендлы до распаковки (иначе zip не откроет файл на чтение)
+
+    if let Some(e) = error.lock().unwrap().take() {
+        for p in &planned {
+            let _ = std::fs::remove_file(&p.target);
+        }
+        return Err(e);
+    }
+    if cancel() {
+        for p in &planned {
+            let _ = std::fs::remove_file(&p.target);
+        }
+        return Err("отменено".to_string());
+    }
+
+    // Распаковка/финализация архивов — последовательно, вне сети.
+    for p in &planned {
+        let dir = p.dest.parent().unwrap_or(repo_root);
+        match p.extract {
+            Extract::None => {}
+            Extract::ZipFlat => {
+                extract_zip_flat(&p.target, dir)?;
+                let _ = std::fs::remove_file(&p.target);
+            }
+            Extract::ZipPick => {
+                extract_zip_pick(&p.target, dir)?;
+                let _ = std::fs::remove_file(&p.target);
+            }
+            Extract::ZipTree => {
+                extract_zip_tree(&p.target, dir)?;
+                let _ = std::fs::remove_file(&p.target);
+            }
+            Extract::WheelDlls => {
+                extract_wheel_dlls(&p.target, dir)?;
+                let _ = std::fs::remove_file(&p.target);
+            }
+        }
+    }
+
+    let mut results = Vec::new();
+    for c in &selected {
+        let st = component_status(repo_root, c);
+        results.push(json!({ "id": c.id, "installed": st.installed, "missing": st.missing }));
+    }
     let overall = setup_status(repo_root);
     Ok(json!({ "components": results, "ready": overall.ready }))
 }
 
-// Параллелить файлы, где сервер поддерживает range: N соединений сатурируют канал HF CDN (одиночный поток —
-// нет). conns авто-масштабируется по размеру (1 для мелких).
-const PARALLEL_CONNS: u64 = 8;
+// Общий пул соединений на ВСЁ задание: чанки всех файлов в одной очереди, POOL_SLOTS воркеров разбирают её.
+// Разные модели качаются одновременно, но суммарно не больше POOL_SLOTS коннектов (не 8×N -> без бана HF CDN).
+const POOL_SLOTS: usize = 16;
+const CHUNK: u64 = 16 * 1024 * 1024; // 16МБ на задачу — балансирует очередь между большими и мелкими файлами
 
 #[cfg(windows)]
 fn write_at(f: &File, buf: &[u8], off: u64) -> std::io::Result<usize> {
@@ -877,104 +1064,20 @@ fn download_range(
     Ok(())
 }
 
-/// Параллельная (N потоков) byte-range загрузка в dest (aria2-style, порт Higgs download_parallel).
-/// Прогресс + отмена — с ГЛАВНОГО потока (emit/cancel не Send); воркеры трогают только Arc-атомики.
-fn download_parallel(
+/// Скачать файл ЦЕЛИКОМ в один поток (fallback: сервер без range), обновляя ОБЩИЙ счётчик пула. abort -> стоп.
+fn download_whole(
     url: &str,
     dest: &Path,
-    total: u64,
-    cancel: &dyn Fn() -> bool,
-    emit: &dyn Fn(u64, u64, f64),
-) -> Result<(), String> {
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(dest)
-        .map_err(|e| format!("создать {}: {e}", dest.display()))?;
-    file.set_len(total).map_err(|e| format!("set_len: {e}"))?;
-    let file = Arc::new(file);
-
-    let conns = PARALLEL_CONNS.min((total / (4 * 1024 * 1024)).max(1)).max(1);
-    let chunk = total / conns;
-    let downloaded = Arc::new(AtomicU64::new(0));
-    let finished = Arc::new(AtomicUsize::new(0));
-    let abort = Arc::new(AtomicBool::new(false));
-    let error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-
-    std::thread::scope(|sc| {
-        for i in 0..conns {
-            let start = i * chunk;
-            let end = if i == conns - 1 { total - 1 } else { start + chunk - 1 };
-            let url = url.to_string();
-            let (file, downloaded, finished, abort, error) =
-                (file.clone(), downloaded.clone(), finished.clone(), abort.clone(), error.clone());
-            sc.spawn(move || {
-                if let Err(e) = download_range(&url, &file, start, end, &downloaded, &abort) {
-                    if e != "отменено" {
-                        abort.store(true, Ordering::Relaxed); // стоп остальных
-                        let mut slot = error.lock().unwrap();
-                        if slot.is_none() {
-                            *slot = Some(e);
-                        }
-                    }
-                }
-                finished.fetch_add(1, Ordering::SeqCst);
-            });
-        }
-        // Главный поток: прогресс + проверка отмены, пока воркеры не закончат.
-        let t0 = std::time::Instant::now();
-        loop {
-            if cancel() {
-                abort.store(true, Ordering::Relaxed);
-            }
-            let got = downloaded.load(Ordering::Relaxed);
-            let secs = t0.elapsed().as_secs_f64();
-            let mbps = if secs > 0.0 { (got as f64 / 1_000_000.0) / secs } else { 0.0 };
-            emit(got, total, mbps);
-            if finished.load(Ordering::SeqCst) >= conns as usize {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-    });
-
-    if let Some(e) = error.lock().unwrap().take() {
-        let _ = std::fs::remove_file(dest);
-        return Err(e);
-    }
-    if cancel() {
-        let _ = std::fs::remove_file(dest);
-        return Err("отменено".into());
-    }
-    emit(total, total, 0.0);
-    Ok(())
-}
-
-/// Одиночный поток (fallback: сервер без range). Порт Higgs download_single.
-fn download_single(
-    url: &str,
-    dest: &Path,
-    cancel: &dyn Fn() -> bool,
-    emit: &dyn Fn(u64, u64, f64),
+    downloaded: &Arc<AtomicU64>,
+    abort: &Arc<AtomicBool>,
 ) -> Result<(), String> {
     use std::io::Write;
     let resp = ureq::get(url).call().map_err(|e| format!("GET {url}: {e}"))?;
-    let total = resp
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(0);
     let mut reader = resp.into_body().into_reader();
     let mut file = File::create(dest).map_err(|e| format!("создать {}: {e}", dest.display()))?;
     let mut buf = [0u8; 262_144];
-    let mut got = 0u64;
-    let t0 = std::time::Instant::now();
-    let mut last = std::time::Instant::now();
     loop {
-        if cancel() {
-            let _ = std::fs::remove_file(dest);
+        if abort.load(Ordering::Relaxed) {
             return Err("отменено".into());
         }
         let n = reader.read(&mut buf).map_err(|e| format!("чтение: {e}"))?;
@@ -982,140 +1085,10 @@ fn download_single(
             break;
         }
         file.write_all(&buf[..n]).map_err(|e| format!("запись: {e}"))?;
-        got += n as u64;
-        if last.elapsed().as_millis() > 200 {
-            last = std::time::Instant::now();
-            let secs = t0.elapsed().as_secs_f64();
-            let mbps = if secs > 0.0 { (got as f64 / 1_000_000.0) / secs } else { 0.0 };
-            emit(got, total, mbps);
-        }
+        downloaded.fetch_add(n as u64, Ordering::Relaxed);
     }
     file.flush().map_err(|e| format!("flush: {e}"))?;
-    emit(got, got.max(total), 0.0);
     Ok(())
-}
-
-/// Скачать одну FileSpec с докачкой-резюме и распаковкой по типу.
-#[allow(clippy::too_many_arguments)]
-fn download_file_spec(
-    repo_root: &Path,
-    tmp_dir: &Path,
-    comp: &Component,
-    f: &FileSpec,
-    grand_total: u64,
-    done_bytes: &mut u64,
-    cancel: &dyn Fn() -> bool,
-    progress: &ProgressCb,
-) -> Result<(), String> {
-    let dest = repo_root.join(f.dest_rel);
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("создать {}: {e}", parent.display()))?;
-    }
-
-    // Прямой файл уже целый? Пропускаем (идемпотентность).
-    if f.extract == Extract::None && f.size != 0 {
-        if let Ok(meta) = std::fs::metadata(&dest) {
-            if meta.len() == f.size {
-                *done_bytes += f.size;
-                return Ok(());
-            }
-        }
-    }
-
-    // Куда качать: прямой файл — в dest; архив/wheel — во временный файл рядом.
-    let is_archive = f.extract != Extract::None;
-    let download_target = if is_archive {
-        tmp_dir.join(
-            Path::new(f.dest_rel)
-                .file_name()
-                .map(|s| s.to_os_string())
-                .unwrap_or_else(|| "archive.tmp".into()),
-        )
-    } else {
-        dest.clone()
-    };
-
-    let base = *done_bytes;
-    let comp_id = comp.id.to_string();
-    let name = comp.name.to_string();
-    let emit = |downloaded: u64, total: u64, speed: f64| {
-        let pct = if grand_total > 0 {
-            ((base + downloaded) as f64 / grand_total as f64) * 100.0
-        } else {
-            0.0
-        };
-        progress(json!({
-            "stage": "download",
-            "component": comp_id,
-            "msg": name,
-            "downloaded": base + downloaded,
-            "total": grand_total,
-            "file_total": total,
-            "speed_mbps": speed,
-            "pct": pct.min(100.0),
-        }));
-    };
-
-    http_download(f.url, &download_target, cancel, &emit)?;
-
-    // Распаковка/финализация.
-    match f.extract {
-        Extract::None => {}
-        Extract::ZipFlat => {
-            let dir = dest.parent().unwrap_or(repo_root);
-            extract_zip_flat(&download_target, dir)?;
-            let _ = std::fs::remove_file(&download_target);
-        }
-        Extract::ZipPick => {
-            let dir = dest.parent().unwrap_or(repo_root);
-            extract_zip_pick(&download_target, dir)?;
-            let _ = std::fs::remove_file(&download_target);
-        }
-        Extract::ZipTree => {
-            let dir = dest.parent().unwrap_or(repo_root);
-            extract_zip_tree(&download_target, dir)?;
-            let _ = std::fs::remove_file(&download_target);
-        }
-        Extract::WheelDlls => {
-            let dir = dest.parent().unwrap_or(repo_root);
-            extract_wheel_dlls(&download_target, dir)?;
-            let _ = std::fs::remove_file(&download_target);
-        }
-    }
-
-    // Учёт: для файла с известным размером прибавляем size, иначе — фактический размер закачанного.
-    let added = if f.size != 0 {
-        f.size
-    } else {
-        std::fs::metadata(&download_target).map(|m| m.len()).unwrap_or(0)
-    };
-    *done_bytes = base + added;
-    Ok(())
-}
-
-// ── HTTP-загрузка: многопоточные byte-range'ы (ureq, метод Higgs-Ultimate) + fallback одиночным потоком ──
-
-/// Скачать URL в dest. Сначала многопоточная byte-range загрузка (ureq): HF Xet-CAS отдаёт 206 на ureq-Range
-/// (reqwest/curl-UA CAS душит 403; питон-hf_xet качает, значит и range-ureq качает). Нет range у сервера ->
-/// одиночный поток. Прогресс — колбэк (downloaded, total, speed_mbps); отмена — cancel().
-fn http_download(
-    url: &str,
-    dest: &Path,
-    cancel: &dyn Fn() -> bool,
-    emit: &dyn Fn(u64, u64, f64),
-) -> Result<(), String> {
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("создать {}: {e}", parent.display()))?;
-    }
-    let (total, ranges_ok) = probe_size(url);
-    if ranges_ok && total > 0 {
-        match download_parallel(url, dest, total, cancel, emit) {
-            Ok(()) => return Ok(()),
-            Err(e) if e == "отменено" => return Err(e),
-            Err(_) => {} // деградация -> одиночный поток
-        }
-    }
-    download_single(url, dest, cancel, emit)
 }
 
 // ── Распаковка архивов ───────────────────────────────────────────────────────

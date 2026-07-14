@@ -82,6 +82,79 @@ fn setup_server_env(repo_root: &PathBuf) {
     }
 }
 
+/// Портативная раскладка (ресурсы рядом с exe)? Тот же маркер, что в resolve_repo_root.
+fn is_portable() -> bool {
+    let d = app_root_dir();
+    d.join("frontend").is_dir() && d.join("models").is_dir()
+}
+
+/// Проверка обновления на GitHub-релизе и (по согласию юзера) установка. Драйвится из Rust: фронт
+/// грузится с внешнего http-URL встроенного сервера, где Tauri JS-IPC ненадёжен, а Rust-апдейтер
+/// работает независимо от webview. Тихо выходит при отсутствии апдейта/сети. Портатив НЕ ставит на
+/// лету (нельзя перезаписать запущенный ~489-МБ каталог) — предлагает открыть страницу релиза.
+const RELEASES_URL: &str = "https://github.com/timoncool/dub-studio/releases/latest";
+fn spawn_update_check(app: tauri::AppHandle, portable: bool) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    use tauri_plugin_updater::UpdaterExt;
+    tauri::async_runtime::spawn(async move {
+        let updater = match app.updater() {
+            Ok(u) => u,
+            Err(_) => return,
+        };
+        let update = match updater.check().await {
+            Ok(Some(u)) => u,
+            _ => return, // нет апдейта или ошибка сети -> тихо
+        };
+        let ver = update.version.clone();
+        if portable {
+            let open = app
+                .dialog()
+                .message(format!(
+                    "Доступна новая версия {ver}. Открыть страницу загрузки?"
+                ))
+                .title("Обновление Dub Studio")
+                .kind(MessageDialogKind::Info)
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    "Открыть".into(),
+                    "Позже".into(),
+                ))
+                .blocking_show();
+            if open {
+                use tauri_plugin_opener::OpenerExt;
+                let _ = app.opener().open_url(RELEASES_URL, None::<&str>);
+            }
+            return;
+        }
+        let yes = app
+            .dialog()
+            .message(format!(
+                "Доступна новая версия {ver}. Обновить сейчас? Приложение перезапустится."
+            ))
+            .title("Обновление Dub Studio")
+            .kind(MessageDialogKind::Info)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Обновить".into(),
+                "Позже".into(),
+            ))
+            .blocking_show();
+        if !yes {
+            return;
+        }
+        match update.download_and_install(|_, _| {}, || {}).await {
+            Ok(_) => {
+                app.restart(); // Windows: инсталлятор сам закроет приложение; на прочих ОС перезапустим
+            }
+            Err(e) => {
+                app.dialog()
+                    .message(format!("Не удалось обновить: {e}"))
+                    .title("Обновление Dub Studio")
+                    .kind(MessageDialogKind::Error)
+                    .blocking_show();
+            }
+        }
+    });
+}
+
 pub fn run() {
     // Портатив: состояние WebView2 (localStorage) держим рядом с exe, а не в профиле пользователя.
     if std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").is_none() {
@@ -113,6 +186,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             let win = WebviewWindowBuilder::new(
                 app,
@@ -125,6 +201,8 @@ pub fn run() {
             .resizable(true)
             .build()?;
             let _ = win;
+            // авто-обновление: проверка на GitHub-релизе в фоне, установка по согласию (см. spawn_update_check)
+            spawn_update_check(app.handle().clone(), is_portable());
             Ok(())
         })
         .run(tauri::generate_context!())
