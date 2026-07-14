@@ -299,7 +299,7 @@ function StatusBar() {
   const [open, setOpen] = useState(false);
   const last = activities[activities.length - 1];
   const busy = rendering || progress.pct != null || (!!progress.stage && !["", "done", "error"].includes(progress.stage));
-  const text = busy ? (progress.msg || last?.text || t("status.working")) : (last?.text || t("status.idle"));
+  const text = busy ? (stageLabel(progress.stage, t) || progress.msg || last?.text || t("status.working")) : (last?.text || t("status.idle"));
   const errored = !busy && last?.kind === "error";
   const fmt = (ms: number) => new Date(ms).toLocaleTimeString();
   return (
@@ -567,6 +567,16 @@ const ANALYZE_STEPS: { key: string; stages: string[] }[] = [
   { key: "voicing",     stages: ["tts", "mix"] },        // TTS synthesis + mix — runs BETWEEN translate and OCR; without this the stepper blanks (cur=-1) during voice gen
   { key: "locating",    stages: ["ocr_detect", "translate_titles", "translate_tagline", "build", "burn", "mux"] },
 ];
+// стадия -> переведённая метка шага (бэкенд шлёт детальный msg по-русски; в UI показываем локализованный
+// ярлык стадии вместо сырого текста, чтобы статус был на языке интерфейса). Неизвестная стадия -> null.
+const STAGE_TO_STEPKEY: Record<string, string> = Object.fromEntries(
+  ANALYZE_STEPS.flatMap((s) => s.stages.map((st) => [st, s.key])),
+);
+function stageLabel(stage: string | undefined, t: (k: string) => string): string | null {
+  if (!stage) return null;
+  const k = STAGE_TO_STEPKEY[stage];
+  return k ? t(`analyze.${k}`) : null;
+}
 
 function AnalyzeProgress() {
   const { t } = useTranslation();
@@ -603,7 +613,7 @@ function AnalyzeProgress() {
             ? <div className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-300" style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} />
             : <div className="h-full w-1/3 rounded-full bg-[var(--color-accent)] animate-pulse" />}
         </div>
-        <div className="mt-2 min-h-4 text-center mono text-[12px] text-[var(--color-muted)] break-words">{progress.msg}</div>
+        <div className="mt-2 min-h-4 text-center mono text-[12px] text-[var(--color-muted)] break-words">{stageLabel(progress.stage, t) || progress.msg}</div>
       </div>
     </div>
   );
