@@ -202,8 +202,10 @@
   <h2 data-i18n="gal_h2">Every mode, in your language</h2>
   <p class="lead" data-i18n="gal_lead">The full editor — dub, voice-over, subtitles, funny remix and transcript — localized into 6 languages.</p>
   <div class="gallery">
-    <figure><img src="shots/mode-dub-ru.png" alt="Full dub mode, Russian interface" loading="lazy"/><figcaption data-i18n="g1"><b>Full dub</b> · Russian UI · voice cloned + localized title</figcaption></figure>
+    <figure><img src="shots/mode-dub-en.png" alt="Full dub mode, English interface" loading="lazy"/><figcaption data-i18n="g6"><b>Full dub</b> · English UI · voice cloned + localized title</figcaption></figure>
+    <figure><img src="shots/mode-dub-ru.png" alt="Full dub mode, Russian interface" loading="lazy"/><figcaption data-i18n="g1"><b>Full dub</b> · Russian UI · translated captions</figcaption></figure>
     <figure><img src="shots/mode-voiceover-es.png" alt="Voice-over mode, Spanish interface" loading="lazy"/><figcaption data-i18n="g2"><b>Voice-over</b> · Spanish UI · original-volume balance slider</figcaption></figure>
+    <figure><img src="shots/mode-voiceover-pt.png" alt="Voice-over mode, Portuguese interface" loading="lazy"/><figcaption data-i18n="g7"><b>Voice-over</b> · Portuguese UI · 2 speakers</figcaption></figure>
     <figure><img src="shots/mode-subtitles-zh.png" alt="Subtitles mode, Chinese interface" loading="lazy"/><figcaption data-i18n="g3"><b>Subtitles</b> · Chinese UI · styled burned-in captions</figcaption></figure>
     <figure><img src="shots/mode-funny-ru.png" alt="Funny remix mode, Russian interface" loading="lazy"/><figcaption data-i18n="g4"><b>Funny remix</b> · Russian UI · rewrite-the-script panel</figcaption></figure>
     <figure><img src="shots/mode-transcribe-fr.png" alt="Transcript and diarization mode, French interface" loading="lazy"/><figcaption data-i18n="g5"><b>Transcript + diarization</b> · French UI · karaoke play-along</figcaption></figure>
@@ -280,7 +282,7 @@ const T={
    g3:"<b>Субтитры</b> · интерфейс ZH · стилизованные вшитые сабы",
    g4:"<b>Шуточный ремикс</b> · интерфейс RU · панель переписывания сценария",
    g5:"<b>Транскрипт + диаризация</b> · интерфейс FR · караоке-подсветка",
-   how_h2:"Как это работает",how_lead:"Умный авто-проход делает первый черновик; дальше ты донастраиваешь всё с живым превью.",
+   g6:"<b>Полный дубляж</b> · интерфейс EN · клон голоса + локализованный титр",g7:"<b>Закадровый</b> · интерфейс PT · 2 спикера",how_h2:"Как это работает",how_lead:"Умный авто-проход делает первый черновик; дальше ты донастраиваешь всё с живым превью.",
    s1:"Кинь видео и выбери целевой язык — разделение, ASR, диаризация, перевод и OCR за один проход.",
    s2:"Выбери режим: дубляж, закадровый, субтитры, шуточный ремикс или транскрипт.",
    s3:"Правь что угодно — транскрипт, голоса, стиль субтитров, блюр-боксы, титры — с мгновенным превью.",
@@ -322,7 +324,7 @@ const T={
    g3:"<b>字幕</b> · 中文界面 · 风格化烧录字幕",
    g4:"<b>恶搞混剪</b> · 俄语界面 · 脚本改写面板",
    g5:"<b>转录 + 说话人分离</b> · 法语界面 · 卡拉OK跟读",
-   how_h2:"工作原理",how_lead:"智能自动流程生成初稿；随后你用实时预览微调一切。",
+   g6:"<b>完整配音</b> · 英语界面 · 声音克隆 + 本地化标题",g7:"<b>旁白配音</b> · 葡语界面 · 两位说话人",how_h2:"工作原理",how_lead:"智能自动流程生成初稿；随后你用实时预览微调一切。",
    s1:"拖入视频并选择目标语言 —— 人声分离、识别、分离说话人、翻译与 OCR 一次完成。",
    s2:"选择模式：配音、旁白、字幕、恶搞混剪或转录。",
    s3:"随意编辑 —— 转录、声音、字幕样式、模糊框、标题 —— 即时预览。",
@@ -364,7 +366,7 @@ const T={
    g3:"<b>Subtítulos</b> · interfaz ZH · subtítulos incrustados con estilo",
    g4:"<b>Remix divertido</b> · interfaz RU · panel de reescritura del guion",
    g5:"<b>Transcripción + diarización</b> · interfaz FR · karaoke",
-   how_h2:"Cómo funciona",how_lead:"Un paso automático inteligente crea el primer borrador; luego ajustas todo con vista previa en vivo.",
+   g6:"<b>Doblaje completo</b> · interfaz EN · voz clonada + título localizado",g7:"<b>Voz superpuesta</b> · interfaz PT · 2 hablantes",how_h2:"Cómo funciona",how_lead:"Un paso automático inteligente crea el primer borrador; luego ajustas todo con vista previa en vivo.",
    s1:"Suelta un vídeo y elige un idioma destino — separación, ASR, diarización, traducción y OCR en una pasada.",
    s2:"Elige un modo: doblaje, voz superpuesta, subtítulos, remix divertido o transcripción.",
    s3:"Edita lo que sea — transcripción, voces, estilo de subtítulos, difuminados, títulos — con vista previa instantánea.",
@@ -406,7 +408,7 @@ const T={
    g3:"<b>Legendas</b> · interface ZH · legendas incrustadas estilizadas",
    g4:"<b>Remix divertido</b> · interface RU · painel de reescrita do roteiro",
    g5:"<b>Transcrição + diarização</b> · interface FR · karaokê",
-   how_h2:"Como funciona",how_lead:"Uma passagem automática inteligente cria o primeiro rascunho; depois você ajusta tudo com prévia ao vivo.",
+   g6:"<b>Dublagem completa</b> · interface EN · voz clonada + título localizado",g7:"<b>Locução</b> · interface PT · 2 locutores",how_h2:"Como funciona",how_lead:"Uma passagem automática inteligente cria o primeiro rascunho; depois você ajusta tudo com prévia ao vivo.",
    s1:"Solte um vídeo e escolha um idioma-alvo — separação, ASR, diarização, tradução e OCR numa passada.",
    s2:"Escolha um modo: dublagem, locução, legendas, remix divertido ou transcrição.",
    s3:"Edite qualquer coisa — transcrição, vozes, estilo de legenda, caixas de desfoque, títulos — com prévia instantânea.",
@@ -448,7 +450,7 @@ const T={
    g3:"<b>Sous-titres</b> · interface ZH · sous-titres incrustés stylés",
    g4:"<b>Remix drôle</b> · interface RU · panneau de réécriture du script",
    g5:"<b>Transcription + diarisation</b> · interface FR · karaoké",
-   how_h2:"Comment ça marche",how_lead:"Une passe automatique intelligente crée le premier brouillon ; ensuite vous peaufinez tout avec un aperçu en direct.",
+   g6:"<b>Doublage complet</b> · interface EN · voix clonée + titre localisé",g7:"<b>Voix off</b> · interface PT · 2 locuteurs",how_h2:"Comment ça marche",how_lead:"Une passe automatique intelligente crée le premier brouillon ; ensuite vous peaufinez tout avec un aperçu en direct.",
    s1:"Déposez une vidéo et choisissez une langue cible — séparation, ASR, diarisation, traduction et OCR en une passe.",
    s2:"Choisissez un mode : doublage, voix off, sous-titres, remix drôle ou transcription.",
    s3:"Modifiez tout — transcription, voix, style des sous-titres, zones de flou, titres — avec aperçu instantané.",
