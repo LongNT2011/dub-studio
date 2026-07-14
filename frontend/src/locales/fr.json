@@ -19,7 +19,8 @@
     "f1": "Texte à l'écran, localisé sur place",
     "f2": "Clonez, distribuez ou pack de voix",
     "f3": "Réécrivez le script puis redoublez",
-    "formats": "MP4 · MOV · jusqu'à 4K · rien ne quitte votre machine"
+    "formats": "MP4 · MOV · jusqu'à 4K · rien ne quitte votre machine",
+    "f4": "Diarisation + transcription propre, voix des locuteurs"
   },
   "analyze": {
     "title": "Analyse de votre vidéo",
@@ -50,13 +51,15 @@
     "dub_desc": "Redoublé dans la langue cible",
     "funny_desc": "Gemma réécrit le script puis redouble",
     "voiceover_desc": "Voix traduite par-dessus l'original atténué",
-    "transcribe_desc": "Transcription + diarisation, sans doublage"
+    "transcribe_desc": "Transcription + diarisation, sans doublage",
+    "transcribe": "Transcription"
   },
   "actions": {
     "translate": "Traduire",
     "dub": "Doublage complet",
     "funny": "Remix amusant",
-    "dubFile": "Doubler un fichier"
+    "dubFile": "Doubler un fichier",
+    "transcribe": "Transcription et voix"
   },
   "style": {
     "font": "Police",
@@ -143,7 +146,8 @@
   "files": {
     "title": "Fichiers",
     "download": "Télécharger",
-    "open": "Ouvrir"
+    "open": "Ouvrir",
+    "downloaded": "Enregistré"
   },
   "nav": {
     "new": "Nouveau",
@@ -273,6 +277,45 @@
     "totalToDownload": "To download",
     "reinstallHint": "Ships with the app — reinstall if missing",
     "done": "Done",
-    "error": "Error"
+    "error": "Error",
+    "pickNoteTitle": "Un quant par modèle.",
+    "pickNote": "Le nécessaire est déjà coché. Les quants sont des variantes du même modèle (OU) : quant plus élevé = meilleure qualité et plus lourd, plus bas = plus léger. Pas besoin de tout télécharger.",
+    "grpHiggs": "Voix · Higgs Audio v3",
+    "grpGemma": "Traduction + texte à l'écran · Gemma-4 12B",
+    "grpParakeet": "Reconnaissance vocale · Parakeet-TDT",
+    "grpRoformer": "Séparation vocale · Mel-Band Roformer",
+    "pickOneQuant": "choisissez-en un",
+    "default": "par défaut",
+    "alt": "ou",
+    "quantHint": "Une variante par modèle. Quant plus élevé = meilleure qualité, plus de VRAM et disque ; plus bas = plus léger."
+  },
+  "batch": {
+    "open": "Lot de fichiers",
+    "title": "Traitement par lot",
+    "queue": "File",
+    "start": "Démarrer",
+    "files": "fichiers",
+    "queued": "en file",
+    "analyzing": "analyse",
+    "rendering": "rendu",
+    "done": "terminé",
+    "error": "erreur",
+    "open_out": "Ouvrir",
+    "back": "Retour",
+    "add": "Ajouter des fichiers"
+  },
+  "transcribe": {
+    "title": "Transcription et diarisation",
+    "speakers": "Locuteurs · créer des voix",
+    "speaker": "Locuteur",
+    "makeVoice": "Voix",
+    "makeAll": "Créer toutes les voix",
+    "made": "Terminé",
+    "refHint": "le texte de référence est transcrit automatiquement (comme Higgs)",
+    "sec": "s réf",
+    "exportSrt": "Exporter .srt",
+    "exportTxt": "Exporter .txt",
+    "empty": "Aucune ligne dans la transcription",
+    "speakersN": "locuteurs"
   }
 }

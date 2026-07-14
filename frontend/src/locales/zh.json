@@ -19,7 +19,8 @@
     "f1": "屏幕文字，就地本地化",
     "f2": "克隆、自动分配或音色包",
     "f3": "改写脚本，再重新配音",
-    "formats": "MP4 · MOV · 最高 4K · 数据不离开你的电脑"
+    "formats": "MP4 · MOV · 最高 4K · 数据不离开你的电脑",
+    "f4": "说话人分离 + 干净转录，从说话人生成声音"
   },
   "analyze": {
     "title": "正在分析视频",
@@ -50,13 +51,15 @@
     "dub_desc": "用目标语言重新配音",
     "funny_desc": "Gemma 改写脚本后重新配音",
     "voiceover_desc": "翻译人声叠加在减弱的原声之上",
-    "transcribe_desc": "转录 + 说话人分离，无配音"
+    "transcribe_desc": "转录 + 说话人分离，无配音",
+    "transcribe": "转录"
   },
   "actions": {
     "translate": "翻译",
     "dub": "完整配音",
     "funny": "搞笑改编",
-    "dubFile": "为文件配音"
+    "dubFile": "为文件配音",
+    "transcribe": "转录与声音"
   },
   "style": {
     "font": "字体",
@@ -143,7 +146,8 @@
   "files": {
     "title": "文件",
     "download": "下载",
-    "open": "打开"
+    "open": "打开",
+    "downloaded": "已保存"
   },
   "nav": {
     "new": "新建",
@@ -273,6 +277,45 @@
     "totalToDownload": "To download",
     "reinstallHint": "Ships with the app — reinstall if missing",
     "done": "Done",
-    "error": "Error"
+    "error": "Error",
+    "pickNoteTitle": "每个模型选一个量化。",
+    "pickNote": "需要的已勾选。量化是同一模型的变体（可选其一）：量化越高质量越好也越重，越低越轻。无需全部下载。",
+    "grpHiggs": "语音 · Higgs Audio v3",
+    "grpGemma": "翻译 + 画面文字 · Gemma-4 12B",
+    "grpParakeet": "语音识别 · Parakeet-TDT",
+    "grpRoformer": "人声分离 · Mel-Band Roformer",
+    "pickOneQuant": "选一个",
+    "default": "默认",
+    "alt": "或",
+    "quantHint": "每个模型一个变体。量化越高质量越好、占用显存和磁盘越多；越低越轻。"
+  },
+  "batch": {
+    "open": "批量文件",
+    "title": "批量处理",
+    "queue": "队列",
+    "start": "开始",
+    "files": "个文件",
+    "queued": "排队中",
+    "analyzing": "分析中",
+    "rendering": "渲染中",
+    "done": "完成",
+    "error": "错误",
+    "open_out": "打开",
+    "back": "返回",
+    "add": "添加文件"
+  },
+  "transcribe": {
+    "title": "转录与说话人分离",
+    "speakers": "说话人 · 生成声音",
+    "speaker": "说话人",
+    "makeVoice": "声音",
+    "makeAll": "生成所有声音",
+    "made": "完成",
+    "refHint": "参考文本自动转录（如 Higgs）",
+    "sec": "秒 参考",
+    "exportSrt": "导出 .srt",
+    "exportTxt": "导出 .txt",
+    "empty": "转录中没有内容",
+    "speakersN": "位说话人"
   }
 }
