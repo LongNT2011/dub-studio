@@ -68,7 +68,7 @@ pub fn source_frame(input: &Path, work_dir: &Path, t: f64) -> Result<Vec<u8>, St
     #[cfg(not(windows))]
     const FFMPEG: &str = "ffmpeg";
     let png = work_dir.join("_original.png");
-    let out = std::process::Command::new(FFMPEG)
+    let out = crate::cmd_no_window(FFMPEG)
         .arg("-y")
         .arg("-ss")
         .arg(format!("{:.2}", t.max(0.0)))

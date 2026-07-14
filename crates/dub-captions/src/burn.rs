@@ -7,6 +7,19 @@ use crate::types::BlurBox;
 use std::path::Path;
 use std::process::Command;
 
+/// Windows: спавн без чёрного консольного окна (CREATE_NO_WINDOW) — иначе встроенный в GUI-оболочку
+/// сервер открывает окно на каждый вызов ffmpeg. На не-Windows — обычный Command.
+fn cmd_no_window(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut c = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000);
+    }
+    c
+}
+
 #[cfg(windows)]
 const FFMPEG: &str = "ffmpeg.exe";
 #[cfg(not(windows))]
@@ -200,7 +213,7 @@ fn run_ffmpeg(
     out: &Path,
     gpu_decode: bool,
 ) -> Result<(), String> {
-    let mut cmd = Command::new(FFMPEG);
+    let mut cmd = cmd_no_window(FFMPEG);
     cmd.arg("-y");
     if gpu_decode {
         cmd.args(["-hwaccel", "cuda"]);
@@ -249,7 +262,7 @@ pub fn burn_frame(
         vec!["-vf".into(), format!("{sel},{ass_f}")]
     };
 
-    let mut cmd = Command::new(FFMPEG);
+    let mut cmd = cmd_no_window(FFMPEG);
     cmd.arg("-y")
         .arg("-ss")
         .arg(format!("{:.3}", (t - 1.0).max(0.0)))

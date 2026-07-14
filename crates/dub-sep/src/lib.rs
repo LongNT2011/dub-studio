@@ -15,6 +15,19 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// Windows: спавн без чёрного консольного окна (CREATE_NO_WINDOW) — иначе встроенный в GUI-оболочку
+/// сервер открывает окно на каждый запуск CLI сепарации. На не-Windows — обычный Command.
+fn cmd_no_window(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut c = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000);
+    }
+    c
+}
+
 mod wav;
 
 #[derive(Debug, thiserror::Error)]
@@ -128,7 +141,7 @@ fn run_cli(cli: &Path, model: &Path, input: &Path, output: &Path) -> Result<(), 
                 .unwrap_or_else(|_| p.to_path_buf())
         }
     };
-    let mut cmd = Command::new(abs(cli));
+    let mut cmd = cmd_no_window(abs(cli));
     cmd.arg(abs(model)).arg(abs(input)).arg(abs(output));
     if let Some(dir) = cli.parent() {
         cmd.current_dir(abs(dir));

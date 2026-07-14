@@ -5,6 +5,19 @@
 use std::path::Path;
 use std::process::Command;
 
+/// Windows: спавн без чёрного консольного окна (CREATE_NO_WINDOW) — иначе встроенный в GUI-оболочку
+/// сервер открывает окно на каждый вызов ffmpeg. На не-Windows — обычный Command.
+fn cmd_no_window(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    #[allow(unused_mut)]
+    let mut c = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        c.creation_flags(0x0800_0000);
+    }
+    c
+}
+
 use base64::Engine;
 use regex::Regex;
 use serde_json::{Map, Value};
@@ -52,7 +65,7 @@ fn vis_json(s: &str) -> Value {
 /// _frame_b64 — square-pad кадр (SigLIP резайзит всё в 896x896; квадрат сохраняет геометрию букв) и base64.
 fn frame_b64(video: &Path, t: f64, tmp: &Path) -> Result<String, TranslateError> {
     let _ = std::fs::remove_file(tmp); // сбросить прошлый кадр, чтобы не прочитать несвежий при сбое
-    let out = Command::new(FFMPEG)
+    let out = cmd_no_window(FFMPEG)
         .args(["-y", "-ss"])
         .arg(format!("{t:.1}"))
         .arg("-i")
