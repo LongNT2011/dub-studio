@@ -3,6 +3,7 @@
 
 use serde_json::Value;
 use std::path::Path;
+use std::process::Command;
 
 #[cfg(windows)]
 const FFMPEG: &str = "ffmpeg.exe";
@@ -42,7 +43,7 @@ fn parse_fps(r: &str) -> f64 {
 
 /// ffprobe -show_format -show_streams (json) -> MediaMeta. Ошибка если нет видеопотока/длительности.
 pub fn probe(input: &Path) -> Result<MediaMeta, String> {
-    let out = crate::cmd_no_window(FFPROBE)
+    let out = Command::new(FFPROBE)
         .args([
             "-v",
             "quiet",
@@ -102,7 +103,7 @@ pub fn probe(input: &Path) -> Result<MediaMeta, String> {
 /// (объединённо: сразу 16k/mono, т.к. дальше в порту нет separation-стадии). Если у видео нет аудио —
 /// ffmpeg вернёт ошибку, которую пробрасываем.
 pub fn extract_wav_16k_mono(input: &Path, out_wav: &Path) -> Result<(), String> {
-    let status = crate::cmd_no_window(FFMPEG)
+    let status = Command::new(FFMPEG)
         .arg("-y")
         .arg("-i")
         .arg(input)
@@ -128,7 +129,7 @@ pub fn extract_wav_16k_mono(input: &Path, out_wav: &Path) -> Result<(), String> 
 // ─── Рендер-хелперы (порт media.py: extract_audio/duration/time_stretch/mix/mux/trim) ─────────
 
 fn run_ff(args: &[&std::ffi::OsStr]) -> Result<(), String> {
-    let out = crate::cmd_no_window(FFMPEG)
+    let out = Command::new(FFMPEG)
         .args(args)
         .output()
         .map_err(|e| format!("ffmpeg запуск: {e}"))?;
@@ -164,7 +165,7 @@ pub fn to_16k_mono(src: &Path, dst: &Path) -> Result<(), String> {
 
 /// Длительность файла в секундах (ffprobe format.duration). Порт media.duration.
 pub fn duration(path: &Path) -> Result<f64, String> {
-    let out = crate::cmd_no_window(FFPROBE)
+    let out = Command::new(FFPROBE)
         .args(["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"])
         .arg(path)
         .output()

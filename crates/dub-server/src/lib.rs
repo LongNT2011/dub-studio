@@ -144,20 +144,6 @@ fn models_root(repo_root: &Path) -> PathBuf {
 /// Прописать в PATH процесса каталоги скачанных бинарей (ffmpeg, llama, движок Higgs с CUDA/VC-DLL),
 /// чтобы `Command::new("ffmpeg")` и подобные находили их без перезапуска после автозакачки. Вызывается
 /// один раз при старте сервера (main.rs / Tauri-shell). Идемпотентно: не дублирует уже присутствующие.
-/// Спавн дочернего процесса БЕЗ чёрного консольного окна на Windows (CREATE_NO_WINDOW). Нужно, т.к.
-/// dub-server теперь встроен в GUI-оболочку (один exe, windows_subsystem) — без флага каждый ffmpeg/llama
-/// открывает своё окно. На не-Windows — обычный Command.
-pub(crate) fn cmd_no_window(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
-    #[allow(unused_mut)]
-    let mut c = std::process::Command::new(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        c.creation_flags(0x0800_0000);
-    }
-    c
-}
-
 pub fn augment_path_for_tools(repo_root: &Path) {
     let dirs = [
         repo_root.join("tools").join("ffmpeg"),
@@ -947,11 +933,11 @@ async fn open_output(State(st): State<AppState>, AxPath(pid): AxPath<String>) ->
     let _ = tokio::task::spawn_blocking(move || {
         #[cfg(windows)]
         {
-            let _ = cmd_no_window("cmd").args(["/C", "start", "", &path]).spawn();
+            let _ = std::process::Command::new("cmd").args(["/C", "start", "", &path]).spawn();
         }
         #[cfg(not(windows))]
         {
-            let _ = cmd_no_window("xdg-open").arg(&path).spawn();
+            let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
         }
     })
     .await;

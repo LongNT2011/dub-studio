@@ -521,7 +521,7 @@ fn box_bg_colour(
     t: f64,
 ) -> Option<(String, f64)> {
     let ffmpeg = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
-    let out = crate::cmd_no_window(ffmpeg)
+    let out = std::process::Command::new(ffmpeg)
         .args(["-v", "error", "-ss", &format!("{t:.3}")])
         .arg("-i")
         .arg(video)

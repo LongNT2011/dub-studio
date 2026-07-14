@@ -10,19 +10,6 @@ use std::io::{BufRead, BufReader};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-
-/// Windows: спавн без чёрного консольного окна (CREATE_NO_WINDOW) — иначе встроенный в GUI-оболочку
-/// сервер открывает окно на каждый запуск llama-server/CLI. На не-Windows — обычный Command.
-fn cmd_no_window(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    #[allow(unused_mut)]
-    let mut c = Command::new(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        c.creation_flags(0x0800_0000);
-    }
-    c
-}
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -124,7 +111,7 @@ impl LlamaServer {
             )));
         }
         let port = free_port()?;
-        let mut cmd = cmd_no_window(&opts.bin);
+        let mut cmd = Command::new(&opts.bin);
         cmd.arg("-m")
             .arg(&opts.model)
             .arg("--host")

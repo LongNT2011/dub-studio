@@ -42,7 +42,7 @@ pub fn waveform_peaks(video: &Path, n: usize) -> Vec<f64> {
     const FFMPEG: &str = "ffmpeg.exe";
     #[cfg(not(windows))]
     const FFMPEG: &str = "ffmpeg";
-    let out = crate::cmd_no_window(FFMPEG)
+    let out = std::process::Command::new(FFMPEG)
         .args(["-v", "quiet", "-i"])
         .arg(video)
         .args(["-ac", "1", "-ar", "8000", "-f", "s16le", "-"])

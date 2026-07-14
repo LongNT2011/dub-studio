@@ -29,19 +29,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Windows: спавн без чёрного консольного окна (CREATE_NO_WINDOW) — иначе встроенный в GUI-оболочку
-/// сервер открывает окно на каждый вызов ffmpeg. На не-Windows — обычный Command.
-fn cmd_no_window(program: impl AsRef<std::ffi::OsStr>) -> Command {
-    #[allow(unused_mut)]
-    let mut c = Command::new(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        c.creation_flags(0x0800_0000);
-    }
-    c
-}
-
 /// Одна per-frame детекция строки: (text, x, y, w, h, t) — сырой поток для frame-accurate блюра.
 #[derive(Clone, Debug)]
 pub struct RawDet {
@@ -105,7 +92,7 @@ fn extract_frames(video: &Path, out_dir: &Path, fps: i32) -> Result<Vec<PathBuf>
     std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
     let vf = format!("fps={fps}");
     let pat = out_dir.join("f_%05d.png");
-    let out = cmd_no_window(FFMPEG)
+    let out = Command::new(FFMPEG)
         .arg("-y")
         .arg("-i")
         .arg(video)
