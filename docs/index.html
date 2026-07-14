@@ -91,22 +91,24 @@
   .langs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:22px}
   .langs a{border:1px solid var(--border);border-radius:8px;padding:7px 14px;font-size:14px;color:var(--muted)}
   .langs a:hover{border-color:var(--accent);color:var(--text)}
-  .showcase{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:26px;margin-top:44px}
+  .showcase{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:26px;margin-top:44px}
   .pair{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px}
   .pair figcaption{font-size:14px;color:var(--muted);margin-top:14px;text-align:center}
   .pair .tag{display:inline-block;font:600 11px/1 ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 9px;margin-bottom:10px}
   .ba{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .v{position:relative}
   .v span{position:absolute;top:8px;left:8px;z-index:2;font:600 10px/1 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;background:rgba(11,12,14,.82);color:var(--muted);padding:5px 8px;border-radius:6px}
-  .v video{display:block;width:100%;border-radius:10px;background:#000;max-height:520px}
+  .v video{display:block;width:100%;border-radius:10px;background:#000;max-height:560px;cursor:pointer}
+  .v .snd{position:absolute;top:auto;left:auto;bottom:10px;right:10px;z-index:3;font:600 11px/1 -apple-system,"Segoe UI",sans-serif;background:var(--accent);color:var(--on-accent);padding:6px 9px;border-radius:8px;cursor:pointer;user-select:none;box-shadow:0 3px 10px rgba(0,0,0,.4)}
+  .v.on .snd{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
   .gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:44px}
   .gallery figure{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
   .gallery img{display:block;width:100%}
   .gallery figcaption{padding:12px 14px;font-size:13px;color:var(--muted)}
   .gallery figcaption b{color:var(--text)}
   .gallery img{cursor:zoom-in}
-  .featgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:44px}
-  .feat{background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:20px 22px;display:flex;gap:15px;align-items:flex-start;transition:border-color .15s,transform .15s}
+  .featgrid{display:flex;flex-wrap:wrap;justify-content:center;gap:16px;margin-top:44px}
+  .feat{flex:1 1 300px;max-width:335px;background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:18px 20px;display:flex;gap:14px;align-items:flex-start;transition:border-color .15s,transform .15s}
   .feat:hover{border-color:var(--accent);transform:translateY(-2px)}
   .feat .fic{font-size:22px;line-height:1;flex-shrink:0;width:40px;height:40px;display:grid;place-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:10px}
   .feat p{color:var(--muted);font-size:14.5px;margin:0}
@@ -524,6 +526,21 @@ function apply(l){
   });
   lb.addEventListener("click",()=>lb.style.display="none");
   document.addEventListener("keydown",e=>{if(e.key==="Escape")lb.style.display="none";});
+  // sound — videos autoplay muted (browser policy); a badge unmutes one at a time
+  const allVids=[...document.querySelectorAll("#showcase video")];
+  document.querySelectorAll("#showcase .v").forEach(v=>{
+    const vid=v.querySelector("video"); if(!vid)return;
+    const badge=document.createElement("span"); badge.className="snd"; badge.textContent="🔊 "+(navigator.language.slice(0,2)==="ru"?"звук":"sound");
+    v.appendChild(badge);
+    const toggle=(e)=>{ e.preventDefault(); e.stopPropagation();
+      const turnOn=vid.muted;
+      allVids.forEach(o=>{o.muted=true; o.parentElement.classList.remove("on");});
+      document.querySelectorAll("#showcase .snd").forEach(b=>{b.textContent="🔊 "+(navigator.language.slice(0,2)==="ru"?"звук":"sound");});
+      if(turnOn){ vid.muted=false; v.classList.add("on"); badge.textContent="🔇 "+(navigator.language.slice(0,2)==="ru"?"выкл":"mute"); const p=vid.play(); if(p&&p.catch)p.catch(()=>{}); }
+    };
+    badge.addEventListener("click",toggle);
+    vid.addEventListener("click",toggle);
+  });
 })();
 </script>
 </body>
