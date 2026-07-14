@@ -127,7 +127,11 @@ impl LlamaServer {
             .arg("on")
             // один запрос за раз (пайплайн последовательный) — не раздуваем KV-кэш параллельными слотами.
             .arg("--parallel")
-            .arg("1");
+            .arg("1")
+            // ОБЯЗАТЕЛЬНО: Jinja-движок шаблонов. Без него llama-server игнорирует chat_template_kwargs
+            // (enable_thinking:false из client.rs) -> Gemma-4 «думает», сжигает max_tokens на reasoning_content,
+            // а content приходит ПУСТЫМ -> перевод/rewrite молча откатываются на оригинал (сломан весь MT).
+            .arg("--jinja");
         if let Some(mmproj) = &opts.mmproj {
             if mmproj.is_file() {
                 // --mmproj + дефолтный offload на GPU (быстрее); проектор Gemma лёгкий (~175МБ).
