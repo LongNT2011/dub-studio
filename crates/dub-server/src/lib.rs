@@ -167,6 +167,23 @@ pub fn augment_path_for_tools(repo_root: &Path) {
     }
 }
 
+/// Поднять axum-сервер БЛОКИРУЮЩЕ на собственном tokio-рантайме. Для встраивания в десктоп-оболочку ОДНИМ
+/// процессом (вместо запуска dub-server.exe отдельным subprocess) — вызывать из фонового std::thread.
+/// Слушает 127.0.0.1:port; augment PATH под инструменты делается здесь же.
+pub fn serve_blocking(repo_root: impl AsRef<Path>, port: u16) -> anyhow::Result<()> {
+    let root = repo_root.as_ref().to_path_buf();
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async move {
+        augment_path_for_tools(&root);
+        let state = AppState::new(&root);
+        let app = build_router(state);
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        axum::serve(listener, app).await?;
+        Ok::<(), anyhow::Error>(())
+    })
+}
+
 impl AppState {
     pub fn new(repo_root: impl AsRef<Path>) -> Self {
         let repo_root = repo_root.as_ref().to_path_buf();
@@ -283,6 +300,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/record/stop", post(record_stop))
         .route("/voices/download-pack", post(voices_download_pack))
         .route("/voices/catalog", get(voices_catalog))
+        .route("/voices/sample", get(voice_sample))
         .route("/voices/get", post(voices_get))
         .route("/voices/rename", post(voices_rename))
         .route("/voices/delete", post(voices_delete))
@@ -430,6 +448,26 @@ fn list_voice_names(dir: &Path) -> Vec<String> {
 /// GET /voices — список голосов из каталога (пак + записи с микрофона).
 async fn voices_list(State(st): State<AppState>) -> Json<Value> {
     Json(json!({ "voices": list_voice_names(&st.voices_dir) }))
+}
+
+/// GET /voices/sample?name=<name> — отдать аудио-сэмпл голоса (voices/<name>.wav|.mp3) с Range для <audio>
+/// (прослушка выбранного голоса в UI). sanitize защищает от path-traversal.
+async fn voice_sample(
+    State(st): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Response {
+    let name = sanitize_voice_name(q.get("name").map(|s| s.as_str()).unwrap_or(""));
+    if name.is_empty() {
+        return (StatusCode::BAD_REQUEST, "no name").into_response();
+    }
+    for ext in ["wav", "mp3"] {
+        let p = st.voices_dir.join(format!("{name}.{ext}"));
+        if p.is_file() {
+            return serve_file_range(&p, req, None).await;
+        }
+    }
+    (StatusCode::NOT_FOUND, "voice not found").into_response()
 }
 
 /// GET /record/devices — список микрофонов.

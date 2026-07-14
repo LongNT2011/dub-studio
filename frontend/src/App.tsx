@@ -650,6 +650,19 @@ function Editor() {
   const [fonts, setFonts] = useState<Record<string, string>>({});
   const [voiceList, setVoiceList] = useState<string[]>([]);
   const [spkVoiceBusy, setSpkVoiceBusy] = useState<string | null>(null);
+  const [voicePreview, setVoicePreview] = useState<string | null>(null);   // имя проигрываемого сэмпла голоса
+  const voicePreviewAudio = useRef<HTMLAudioElement | null>(null);
+  // Прослушать/остановить сэмпл выбранного голоса (плей-пауза у дропдауна).
+  const toggleVoicePreview = (name: string) => {
+    if (!name) return;
+    const cur = voicePreviewAudio.current;
+    if (voicePreview === name) { cur?.pause(); setVoicePreview(null); return; }   // повторный клик = пауза
+    cur?.pause();
+    const a = new Audio(api.voiceSampleUrl(name));
+    voicePreviewAudio.current = a;
+    a.onended = () => setVoicePreview(null);
+    a.play().then(() => setVoicePreview(name)).catch(() => setVoicePreview(null));
+  };
   const [gainDraft, setGainDraft] = useState<number | null>(null);
   const [presets, setPresets] = useState<Record<string, Record<string, unknown>>>({});
   useEffect(() => { api.fonts().then((r) => setFonts(r.fonts)).catch(() => {}); }, []);   // bundled caption fonts
@@ -1253,11 +1266,17 @@ function Editor() {
               const spks = [...new Set(p.segments.map((s) => s.speaker ?? "0"))].sort();   // lexical — matches engine sorted()
               const names = (p.audio.voice.name || "").split(",").map((s) => s.trim());
               const pick = (cur: string, on: (v: string) => void) => (
-                <select value={cur} onChange={(e) => on(e.target.value)}
-                  className="w-[200px] max-w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[13px] focus:border-[var(--color-accent)] focus:outline-none transition-colors">
-                  <option value="">{voiceList.length ? "—" : "(пак не найден)"}</option>
-                  {voiceList.map((v) => <option key={v} value={v}>{v}</option>)}
-                </select>
+                <div className="flex items-center gap-1.5">
+                  <select value={cur} onChange={(e) => on(e.target.value)}
+                    className="w-[200px] max-w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[13px] focus:border-[var(--color-accent)] focus:outline-none transition-colors">
+                    <option value="">{voiceList.length ? "—" : "(пак не найден)"}</option>
+                    {voiceList.map((v) => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                  <button type="button" disabled={!cur} onClick={() => toggleVoicePreview(cur)} title={t("voice.preview")}
+                    className="shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg border border-[var(--color-border)] hover:border-[var(--color-accent)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    {voicePreview === cur && cur ? <Pause size={14} className="text-[var(--color-accent)]" /> : <Play size={14} />}
+                  </button>
+                </div>
               );
               if (spks.length <= 1)
                 return <div className="mt-2 flex">{pick(names[0] || "", (v) => branch("recast", { voice_mode: "voice", voice_name: v }))}</div>;

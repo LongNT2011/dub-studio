@@ -8,8 +8,6 @@
 
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::{Child, Command};
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::{WebviewUrl, WebviewWindowBuilder};
@@ -23,15 +21,15 @@ fn app_root_dir() -> PathBuf {
 }
 
 /// Найти корень репо в dev (…/desktop/src-tauri/target/<profile>/exe -> вверх до dub-studio).
-/// В портативной сборке возвращаем каталог рядом с exe (там лежат dub-server.exe, models/, frontend/).
+/// В портативной сборке возвращаем каталог рядом с exe (там лежат frontend/, models/, fonts/).
 fn resolve_repo_root() -> PathBuf {
     // Явное переопределение (dev / тесты).
     if let Ok(r) = std::env::var("DUB_STUDIO_ROOT") {
         return PathBuf::from(r);
     }
     let exe_dir = app_root_dir();
-    // Портативная раскладка: dub-server.exe лежит рядом с оболочкой.
-    if exe_dir.join("dub-server.exe").is_file() || exe_dir.join("dub-server").is_file() {
+    // Портативная раскладка: ресурсы (frontend/models) лежат рядом с оболочкой (dub-server встроен в exe).
+    if exe_dir.join("frontend").is_dir() && exe_dir.join("models").is_dir() {
         return exe_dir;
     }
     // Dev: exe в …/desktop/src-tauri/target/<profile>/. Поднимаемся до каталога с crates/.
@@ -46,22 +44,6 @@ fn resolve_repo_root() -> PathBuf {
         }
     }
     exe_dir
-}
-
-/// Путь к бинарю dub-server: рядом с exe (портатив) или в target/<profile> репо (dev).
-fn resolve_server_bin(repo_root: &PathBuf) -> PathBuf {
-    let name = if cfg!(windows) { "dub-server.exe" } else { "dub-server" };
-    let near = app_root_dir().join(name);
-    if near.is_file() {
-        return near;
-    }
-    for profile in ["release", "debug"] {
-        let cand = repo_root.join("target").join(profile).join(name);
-        if cand.is_file() {
-            return cand;
-        }
-    }
-    near
 }
 
 /// Занять свободный TCP-порт на 127.0.0.1 (ядро выдаёт порт 0 -> читаем реальный, отпускаем).
@@ -83,30 +65,9 @@ fn wait_until_ready(port: u16, timeout: Duration) -> bool {
     false
 }
 
-/// Ручка дочернего сервера — убиваем его при выходе приложения.
-struct ServerProc(Mutex<Option<Child>>);
-
-impl Drop for ServerProc {
-    fn drop(&mut self) {
-        if let Ok(mut guard) = self.0.lock() {
-            if let Some(mut child) = guard.take() {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-        }
-    }
-}
-
-/// Поднять dub-server как дочерний процесс на выбранном порту. Прокидываем окружение: корень репо,
-/// порт (DUB_STUDIO_PORT), путь к onnxruntime 1.24 и CUDA-DLL движка (портативно рядом с exe).
-fn spawn_server(repo_root: &PathBuf, port: u16) -> std::io::Result<Child> {
-    let bin = resolve_server_bin(repo_root);
-    let mut cmd = Command::new(&bin);
-    cmd.env("DUB_STUDIO_ROOT", repo_root)
-        .env("DUB_STUDIO_PORT", port.to_string())
-        .env("DUB_STUDIO_HOST", "127.0.0.1");
-
-    // onnxruntime 1.24: рядом с exe (портатив) или в models/runtime (dev).
+/// Прописать ORT_DYLIB_PATH (onnxruntime 1.24) в окружение ПРОЦЕССА до старта сервера (dub-asr трогает ort
+/// лениво; PATH под движок/инструменты добавит augment_path_for_tools внутри serve_blocking).
+fn setup_server_env(repo_root: &PathBuf) {
     if std::env::var_os("ORT_DYLIB_PATH").is_none() {
         for cand in [
             app_root_dir().join("onnxruntime.dll"),
@@ -114,20 +75,11 @@ fn spawn_server(repo_root: &PathBuf, port: u16) -> std::io::Result<Child> {
             repo_root.join("models").join("runtime").join("onnxruntime.dll"),
         ] {
             if cand.is_file() {
-                cmd.env("ORT_DYLIB_PATH", cand);
+                std::env::set_var("ORT_DYLIB_PATH", cand);
                 break;
             }
         }
     }
-
-    // PATH += каталог движка Higgs (cuda/ggml/vcruntime DLL) — движок ищет зависимости в PATH.
-    let engine_dir = repo_root.join("models").join("higgs-engine");
-    if engine_dir.is_dir() {
-        let cur = std::env::var("PATH").unwrap_or_default();
-        cmd.env("PATH", format!("{};{}", engine_dir.display(), cur));
-    }
-
-    cmd.spawn()
 }
 
 pub fn run() {
@@ -141,26 +93,26 @@ pub fn run() {
 
     let repo_root = resolve_repo_root();
     let port = pick_free_port().unwrap_or(8765);
+    setup_server_env(&repo_root);
 
-    let child = match spawn_server(&repo_root, port) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("не удалось запустить dub-server: {e}");
-            std::process::exit(1);
+    // axum-бэкенд поднимается В ЭТОМ ЖЕ процессе на фоновом потоке — ОДИН exe, без dub-server.exe-сайдкара.
+    // Поток-демон: живёт до выхода процесса, отдельно убивать не нужно (нет дочернего процесса).
+    let root = repo_root.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = dub_server::serve_blocking(&root, port) {
+            eprintln!("встроенный dub-server упал: {e}");
         }
-    };
-    let server = ServerProc(Mutex::new(Some(child)));
+    });
 
     // Ждём готовности сервера, чтобы окно не открылось на пустоту.
     if !wait_until_ready(port, Duration::from_secs(30)) {
-        eprintln!("dub-server не поднялся на 127.0.0.1:{port} за 30с");
+        eprintln!("встроенный dub-server не поднялся на 127.0.0.1:{port} за 30с");
     }
 
     let url = format!("http://127.0.0.1:{port}/");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(server)
         .setup(move |app| {
             let win = WebviewWindowBuilder::new(
                 app,
@@ -177,5 +129,4 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("ошибка запуска Tauri");
-    // ServerProc живёт в состоянии Tauri (.manage) -> его Drop убивает dub-server при выходе.
 }
