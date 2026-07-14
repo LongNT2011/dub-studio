@@ -44,10 +44,12 @@
   "mode": {
     "subtitles": "字幕",
     "dub": "配音",
+    "voiceover": "旁白配音",
     "funny": "搞笑",
-    "subtitles_desc": "原声 + 翻译字幕",
+    "subtitles_desc": "原始音频 + 原语言字幕",
     "dub_desc": "用目标语言重新配音",
-    "funny_desc": "Gemma 改写脚本后重新配音"
+    "funny_desc": "Gemma 改写脚本后重新配音",
+    "voiceover_desc": "翻译人声叠加在减弱的原声之上"
   },
   "actions": {
     "translate": "翻译",
@@ -94,7 +96,9 @@
     "narrowSearch": "缩小搜索范围以查看更多",
     "fromSpeakers": "从说话人创建语音：",
     "gain": "轨道增益",
-    "gainHint": "增强整条音轨（重新生成/导出时应用）。"
+    "gainHint": "增强整条音轨（重新生成/导出时应用）。",
+    "origGain": "原声音量",
+    "origGainHint": "旁白：原声轨道在译文下方的音量。"
   },
   "remix": {
     "title": "改编",

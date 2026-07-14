@@ -45,11 +45,13 @@
   "mode": {
     "subtitles": "Subtitles",
     "dub": "Dub",
+    "voiceover": "Voiceover",
     "funny": "Funny",
     "transcribe": "Transcript",
-    "subtitles_desc": "Original audio + translated subtitles",
+    "subtitles_desc": "Original audio + original-language subtitles",
     "dub_desc": "Re-voiced into the target language",
-    "funny_desc": "Gemma rewrites the script, then re-dubs"
+    "funny_desc": "Gemma rewrites the script, then re-dubs",
+    "voiceover_desc": "Translated voice over the ducked original"
   },
   "batch": {
     "open": "Batch of files",
@@ -126,7 +128,9 @@
     "narrowSearch": "Narrow the search to see more",
     "fromSpeakers": "Voice from speaker:",
     "gain": "Track gain",
-    "gainHint": "Boost the whole track (applied on regen/export)."
+    "gainHint": "Boost the whole track (applied on regen/export).",
+    "origGain": "Original volume",
+    "origGainHint": "Voice-over: how loud the original track sits under the translation."
   },
   "remix": {
     "title": "Remix",

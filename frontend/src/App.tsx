@@ -404,7 +404,7 @@ function DropZone() {
   const [tgt, setTgt] = useState<string>((i18n.language as string) || "ru");   // translate TO (default = UI lang)
   const [src, setSrc] = useState("auto");                                       // translate FROM (auto-detect)
   const [file, setFile] = useState<File | null>(null);                          // staged video — analyzed on Start, not on drop
-  const [mode, setMode] = useState<"dub" | "subtitles" | "funny" | "transcribe">("dub");       // output mode chosen up front
+  const [mode, setMode] = useState<"dub" | "voiceover" | "subtitles" | "funny" | "transcribe">("dub");       // output mode chosen up front
   const [funny, setFunny] = useState("");                                       // Gemma rewrite instruction (funny mode)
 
   async function run() {
@@ -414,8 +414,10 @@ function DropZone() {
     try {
       const { project_id } = await api.createProject(file);
       s.setPid(project_id);
-      const eMode = mode === "subtitles" ? "nodub" : mode === "transcribe" ? "transcribe" : "dub"; // subtitles = keep original audio + translated subs; transcribe = только транскрипт+диаризация
-      const eSubs = mode === "subtitles" ? "translate" : mode === "transcribe" ? "transcribe" : "auto";
+      // subtitles = ОРИГИНАЛ: исходная дорожка + субтитры на языке оригинала (без дубляжа, без перевода);
+      // voiceover = закадровый (перевод+TTS, оригинал слышно приглушённым); transcribe = транскрипт+диаризация.
+      const eMode = mode === "subtitles" ? "nodub" : mode === "transcribe" ? "transcribe" : mode === "voiceover" ? "voiceover" : "dub";
+      const eSubs = mode === "subtitles" ? "transcribe" : mode === "transcribe" ? "transcribe" : "auto";
       const eRewrite = mode === "funny" ? funny.trim() : "";       // funny = rewrite the script + dub, in this pass
       const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
@@ -423,7 +425,7 @@ function DropZone() {
       // Озвучку готовим ЗДЕСЬ, на экране загрузки (не собирая видео — кадры даёт per-frame preview),
       // чтобы редактор открылся с готовым дубом (плей сразу играет). Иначе рендер блокировал бы превью
       // после открытия -> чёрный экран, и слушать дуб можно было бы только после экспорта.
-      if (mode === "dub" || mode === "funny") {
+      if (mode === "dub" || mode === "funny" || mode === "voiceover") {
         try {
           const r = await api.render(project_id);   // полный дубляж на экране ЗАГРУЗКИ (1:1 питон: analyze -> analyzed.mp4): TTS+микс+бёрн+mux -> output.mp4
           await api.watchJob(r.job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "voicing", e.msg || "", e.pct ?? null); });
@@ -512,9 +514,9 @@ function DropZone() {
             </select>
           </div>
           <div className="mt-3 grid grid-cols-2 gap-1.5">
-            {([["dub", AudioLines], ["subtitles", Captions], ["funny", Sparkles], ["transcribe", FileText]] as const).map(([m, Icon]) => (
+            {([["dub", AudioLines], ["voiceover", Mic2], ["subtitles", Captions], ["funny", Sparkles], ["transcribe", FileText]] as const).map(([m, Icon]) => (
               <button key={m} onClick={() => setMode(m)}
-                className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-[12px] font-medium transition-colors ${mode === m ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+                className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-[12px] font-medium transition-colors ${m === "transcribe" ? "col-span-2" : ""} ${mode === m ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
                 <Icon size={14} />{t(`mode.${m}`)}</button>
             ))}
           </div>
@@ -722,6 +724,7 @@ function Editor() {
     a.play().then(() => setVoicePreview(name)).catch(() => setVoicePreview(null));
   };
   const [gainDraft, setGainDraft] = useState<number | null>(null);
+  const [voGainDraft, setVoGainDraft] = useState<number | null>(null);   // черновик громкости оригинала (voiceover)
   const [presets, setPresets] = useState<Record<string, Record<string, unknown>>>({});
   useEffect(() => { api.fonts().then((r) => setFonts(r.fonts)).catch(() => {}); }, []);   // bundled caption fonts
   // голоса из каталога; если пусто и ещё не пробовали — тихо тянем дефолтный пак (VibeVoice, ~100МБ) в фоне
@@ -870,6 +873,17 @@ function Editor() {
       const { job_id } = await api.render(pid);
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); setRendered(false); setDubRev(Date.now());   // покадровое превью; /dub обновлён -> плей играет новый дуб
+    } catch (e) { await surfaceErr(e); }
+    finally { setRegenId(null); }
+  }
+  async function doVoiceoverGain(gainDb: number) {                   // громкость оригинала под переводом (voiceover): патч + пересведение (ре-TTS не нужен)
+    if (regenId) return;
+    setRegenId("__all__"); pushActivity(t("voice.origGain"));
+    try {
+      await api.patch(pid, { op: "voiceover_gain", gain_db: gainDb });
+      const { job_id } = await api.render(pid);
+      await api.watchJob(job_id, () => {});
+      setProject(await api.getProject(pid)); setRendered(false); setDubRev(Date.now());   // покадровое превью; /dub обновлён -> плей играет закадр с новым балансом
     } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
@@ -1402,6 +1416,19 @@ function Editor() {
                 className="w-full accent-[var(--color-accent)]" />
               <div className="text-[10px] text-[var(--color-muted)] leading-snug mt-0.5">{t("voice.gainHint")}</div>
             </div>
+            {p.mode === "voiceover" && (   // закадровый: громкость ОРИГИНАЛЬНОЙ дорожки под переводом (0 = в полную силу, ниже = тише)
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-[11px] mb-1">
+                  <span className="text-[var(--color-muted)]">{t("voice.origGain")}</span>
+                  <span className="mono text-[11px] text-[var(--color-text)]">{(voGainDraft ?? p.audio.voiceover_gain_db ?? -6).toFixed(1)} dB</span>
+                </div>
+                <input type="range" min={-24} max={0} step={0.5} value={voGainDraft ?? p.audio.voiceover_gain_db ?? -6}
+                  onChange={(e) => setVoGainDraft(parseFloat(e.target.value))}
+                  onPointerUp={async () => { if (voGainDraft != null) { await doVoiceoverGain(voGainDraft); setVoGainDraft(null); } }}
+                  className="w-full accent-[var(--color-accent)]" />
+                <div className="text-[10px] text-[var(--color-muted)] leading-snug mt-0.5">{t("voice.origGainHint")}</div>
+              </div>
+            )}
             <button onClick={doRegenAll} disabled={regenId !== null} title={t("voice.regenAll")}
               className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-50 hover:brightness-105 transition">
               {regenId === "__all__" ? <Loader2 size={15} className="animate-spin" /> : <RotateCw size={15} />}{t("voice.regenAll")}
@@ -1870,9 +1897,9 @@ function BatchView() {
   const [running, setRunning] = useState(false);
   const [doneN, setDoneN] = useState(0);
 
-  const eMode = mode === "subtitles" ? "nodub" : mode === "transcribe" ? "transcribe" : "dub";
-  const eSubs = mode === "subtitles" ? "translate" : mode === "transcribe" ? "transcribe" : "auto";
-  const doRender = mode === "dub" || mode === "funny";
+  const eMode = mode === "subtitles" ? "nodub" : mode === "transcribe" ? "transcribe" : mode === "voiceover" ? "voiceover" : "dub";
+  const eSubs = mode === "subtitles" ? "transcribe" : mode === "transcribe" ? "transcribe" : "auto";   // субтитры = оригинал (без перевода)
+  const doRender = mode === "dub" || mode === "funny" || mode === "voiceover";
 
   async function start() {
     setRunning(true);

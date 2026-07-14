@@ -963,6 +963,28 @@ async fn dub_video(
         f = dir.join("analyzed.mp4");
     }
     if !f.is_file() {
+        // nodub / субтитры / транскрипт: озвучки нет — играем ОРИГИНАЛЬНУЮ дорожку видео (source.*),
+        // чтобы плей в редакторе работал (переиспользуем аудиодорожку исходника, <audio> берёт её из mp4).
+        // Путь — из source.txt (как в analyze/render); fallback — source.* в каталоге.
+        if let Ok(p) = std::fs::read_to_string(dir.join("source.txt")) {
+            let sp = std::path::PathBuf::from(p.trim());
+            if sp.is_file() {
+                f = sp;
+            }
+        }
+        if !f.is_file() {
+            if let Ok(rd) = std::fs::read_dir(&dir) {
+                for e in rd.flatten() {
+                    let p = e.path();
+                    if p.file_stem().and_then(|s| s.to_str()) == Some("source") && p.is_file() {
+                        f = p;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if !f.is_file() {
         return (StatusCode::NOT_FOUND, "no dubbed audio yet").into_response();
     }
     serve_file_range(&f, req, None).await

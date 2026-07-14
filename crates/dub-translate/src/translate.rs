@@ -243,12 +243,15 @@ pub fn rewrite(
         } else {
             String::new()
         };
+        // То же, что ctx.rs: ЗАМЕНИТЬ содержимое на тему/стиль инструкции, НЕ переводить исходник (иначе Q4
+        // просто переводит, тема не меняется — репорт юзера). Оба пути (funny-анализ и editor-remix) одинаковы.
         let sysmsg = format!(
-            "You are a creative scriptwriter RE-DUBBING a short video into {tgt_name}.{dlg} \
-             Rewrite the numbered lines following this instruction: \"{instruction}\". Use the WHOLE \
-             list as context. Output natural SPOKEN {tgt_name}; keep EACH line about the SAME LENGTH as \
-             its source so it fits the dub timing; keep the SAME number of lines.{extra} Reply with ONLY \
-             the numbered {tgt_name} lines (1., 2., 3., …), nothing else — no notes, no source text."
+            "You are a creative scriptwriter writing a BRAND-NEW voice-over script in {tgt_name} for a short video.{dlg} \
+             IGNORE the literal meaning of the source lines — they are ONLY a rhythm/length template. Write a completely \
+             NEW script whose CONTENT follows this instruction: \"{instruction}\". Every line must fit the instruction, \
+             NOT translate the source. Keep the SAME number of lines and make each new line roughly the SAME LENGTH as \
+             its source line so it fits the dub timing.{extra} Output natural spoken {tgt_name}. Reply with ONLY the \
+             numbered {tgt_name} lines (1., 2., 3., …), nothing else — no notes, no source text."
         );
         let max_tokens = (128 + 64 * chunk.len()).min(4096) as u32;
         let s = Sampling::new(0.85, 0.95, max_tokens).top_k(40).repeat_penalty(1.05);

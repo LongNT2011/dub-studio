@@ -203,44 +203,44 @@ pub fn manifest() -> Vec<Component> {
         // Альтернативные кванты Gemma (выбор в настройках; тяжелее q4_0, чуть точнее). Свой mmproj на квант.
         Component {
             id: "gemma-q5_0",
-            name: "Gemma-4 12B QAT (q5_0) + vision",
-            purpose: "Перевод и vision — вариант точнее q4_0",
+            name: "Gemma-4 12B (Q5_K_M) + vision",
+            purpose: "Перевод и vision — точнее q4_0",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
-            size: 8_600_000_000,
+            size: 8_588_690_400,
             files: &[
-                FileSpec { url: "https://huggingface.co/google/gemma-4-12b-it-qat-q4_0-gguf/resolve/main/gemma-4-12b-it-qat-q5_0.gguf", dest_rel: "models/mt-q5_0/gemma-4-12b-it-qat-q5_0.gguf", size: 0, extract: Extract::None },
-                FileSpec { url: "https://huggingface.co/google/gemma-4-12b-it-qat-q4_0-gguf/resolve/main/mmproj-gemma-4-12b-it-qat-q5_0.gguf", dest_rel: "models/mt-q5_0/mmproj-gemma-4-12b-it-qat-q5_0.gguf", size: 0, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/gemma-4-12b-it-Q5_K_M.gguf", dest_rel: "models/mt-q5_0/gemma-4-12b-it-Q5_K_M.gguf", size: 8_413_574_560, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/mmproj-F16.gguf", dest_rel: "models/mt-q5_0/mmproj-F16.gguf", size: 175_115_840, extract: Extract::None },
             ],
-            markers: &[Marker { rel: "models/mt-q5_0/gemma-4-12b-it-qat-q5_0.gguf", expect: 0 }, Marker { rel: "models/mt-q5_0/mmproj-gemma-4-12b-it-qat-q5_0.gguf", expect: 0 }],
+            markers: &[Marker { rel: "models/mt-q5_0/gemma-4-12b-it-Q5_K_M.gguf", expect: 8_413_574_560 }, Marker { rel: "models/mt-q5_0/mmproj-F16.gguf", expect: 175_115_840 }],
             external_url: None,
         },
         Component {
             id: "gemma-q6_k",
-            name: "Gemma-4 12B QAT (q6_k) + vision",
+            name: "Gemma-4 12B (Q6_K) + vision",
             purpose: "Перевод и vision — ещё точнее",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
-            size: 9_900_000_000,
+            size: 9_961_137_120,
             files: &[
-                FileSpec { url: "https://huggingface.co/google/gemma-4-12b-it-qat-q4_0-gguf/resolve/main/gemma-4-12b-it-qat-q6_k.gguf", dest_rel: "models/mt-q6_k/gemma-4-12b-it-qat-q6_k.gguf", size: 0, extract: Extract::None },
-                FileSpec { url: "https://huggingface.co/google/gemma-4-12b-it-qat-q4_0-gguf/resolve/main/mmproj-gemma-4-12b-it-qat-q6_k.gguf", dest_rel: "models/mt-q6_k/mmproj-gemma-4-12b-it-qat-q6_k.gguf", size: 0, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/gemma-4-12b-it-Q6_K.gguf", dest_rel: "models/mt-q6_k/gemma-4-12b-it-Q6_K.gguf", size: 9_786_021_280, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/mmproj-F16.gguf", dest_rel: "models/mt-q6_k/mmproj-F16.gguf", size: 175_115_840, extract: Extract::None },
             ],
-            markers: &[Marker { rel: "models/mt-q6_k/gemma-4-12b-it-qat-q6_k.gguf", expect: 0 }, Marker { rel: "models/mt-q6_k/mmproj-gemma-4-12b-it-qat-q6_k.gguf", expect: 0 }],
+            markers: &[Marker { rel: "models/mt-q6_k/gemma-4-12b-it-Q6_K.gguf", expect: 9_786_021_280 }, Marker { rel: "models/mt-q6_k/mmproj-F16.gguf", expect: 175_115_840 }],
             external_url: None,
         },
         Component {
             id: "gemma-q8_0",
-            name: "Gemma-4 12B QAT (q8_0) + vision",
+            name: "Gemma-4 12B (Q8_0) + vision",
             purpose: "Перевод и vision — максимальная точность",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
-            size: 12_800_000_000,
+            size: 12_844_762_080,
             files: &[
-                FileSpec { url: "https://huggingface.co/google/gemma-4-12b-it-qat-q4_0-gguf/resolve/main/gemma-4-12b-it-qat-q8_0.gguf", dest_rel: "models/mt-q8_0/gemma-4-12b-it-qat-q8_0.gguf", size: 0, extract: Extract::None },
-                FileSpec { url: "https://huggingface.co/google/gemma-4-12b-it-qat-q4_0-gguf/resolve/main/mmproj-gemma-4-12b-it-qat-q8_0.gguf", dest_rel: "models/mt-q8_0/mmproj-gemma-4-12b-it-qat-q8_0.gguf", size: 0, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/gemma-4-12b-it-Q8_0.gguf", dest_rel: "models/mt-q8_0/gemma-4-12b-it-Q8_0.gguf", size: 12_669_646_240, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/mmproj-F16.gguf", dest_rel: "models/mt-q8_0/mmproj-F16.gguf", size: 175_115_840, extract: Extract::None },
             ],
-            markers: &[Marker { rel: "models/mt-q8_0/gemma-4-12b-it-qat-q8_0.gguf", expect: 0 }, Marker { rel: "models/mt-q8_0/mmproj-gemma-4-12b-it-qat-q8_0.gguf", expect: 0 }],
+            markers: &[Marker { rel: "models/mt-q8_0/gemma-4-12b-it-Q8_0.gguf", expect: 12_669_646_240 }, Marker { rel: "models/mt-q8_0/mmproj-F16.gguf", expect: 175_115_840 }],
             external_url: None,
         },
         Component {
@@ -1282,6 +1282,12 @@ mod tests {
         for c in &st.components {
             // Драйвер зависит от железа; на приёмочной машине RTX 4090 он есть, но в headless CI может не быть.
             if c.delivery == Delivery::External {
+                continue;
+            }
+            // Опциональные компоненты (альт-кванты Gemma q5/q6/q8, Higgs q6/q4 — по 5-12ГБ каждый) —
+            // это ВЗАИМОЗАМЕНЯЕМЫЕ альтернативы дефолту, их не качают все сразу. Проверяем лишь дефолтный
+            // (Required) стек. Что альт-кванты реально скачиваются — проверено byte-range probe URL'ов.
+            if c.requirement == Requirement::Optional {
                 continue;
             }
             if !c.installed {

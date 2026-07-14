@@ -44,10 +44,12 @@
   "mode": {
     "subtitles": "Sous-titres",
     "dub": "Doublage",
+    "voiceover": "Voix off",
     "funny": "Drôle",
-    "subtitles_desc": "Audio original + sous-titres traduits",
+    "subtitles_desc": "Audio original + sous-titres dans la langue d'origine",
     "dub_desc": "Redoublé dans la langue cible",
-    "funny_desc": "Gemma réécrit le script puis redouble"
+    "funny_desc": "Gemma réécrit le script puis redouble",
+    "voiceover_desc": "Voix traduite par-dessus l'original atténué"
   },
   "actions": {
     "translate": "Traduire",
@@ -94,7 +96,9 @@
     "narrowSearch": "Affinez la recherche",
     "fromSpeakers": "Voix du locuteur :",
     "gain": "Gain",
-    "gainHint": "Amplifier toute la piste (au rendu/export)."
+    "gainHint": "Amplifier toute la piste (au rendu/export).",
+    "origGain": "Volume d’origine",
+    "origGainHint": "Voix off : volume de la piste originale sous la traduction."
   },
   "remix": {
     "title": "Remix",

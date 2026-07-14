@@ -63,12 +63,21 @@ pub struct Audio {
     /// Дополнительное усиление всей дорожки на монтаже, dB (0 = без изменений). Применяется на рендере.
     #[serde(default)]
     pub gain_db: f64,
+    /// Громкость ОРИГИНАЛЬНОЙ дорожки под переводом в режиме voiceover (закадровый), dB.
+    /// 0 = оригинал в полную силу; отрицательное = тише перевода. Регулируется в редакторе.
+    /// Дефолт -6 dB: оригинал отчётливо слышно ПОД переводом (не заглушен, но перевод главный).
+    #[serde(default = "default_voiceover_gain")]
+    pub voiceover_gain_db: f64,
     #[serde(flatten)]
     pub extra: Extra,
 }
 
 fn default_true() -> bool {
     true
+}
+
+fn default_voiceover_gain() -> f64 {
+    -6.0
 }
 
 impl Default for Audio {
@@ -78,6 +87,7 @@ impl Default for Audio {
             voice: Voice::default(),
             rewrite: None,
             gain_db: 0.0,
+            voiceover_gain_db: -6.0,
             extra: Extra::new(),
         }
     }

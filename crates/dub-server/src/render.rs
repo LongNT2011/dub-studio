@@ -79,13 +79,15 @@ pub fn run(
     };
     emit(progress, "probe", &format!("вход {}x{} dur={:.1}s", vw, vh, total));
 
-    let is_dub = proj.mode == "dub";
+    // voiceover (закадровый) = как dub, но оригинал слышно приглушённым ПОД переведённым голосом.
+    let is_voiceover = proj.mode == "voiceover";
+    let is_dub = proj.mode == "dub" || is_voiceover;
     let keep_music = proj.audio.keep_music;
 
     // ── АУДИО ──────────────────────────────────────────────────────────────────
     // Готовим финальную аудио-дорожку new_audio: dub (клон) поверх инструментала, либо оригинал.
     let new_audio: PathBuf = if is_dub {
-        build_dub(proj, paths, total, keep_music, regen_dub, progress)?
+        build_dub(proj, paths, total, keep_music, is_voiceover, regen_dub, progress)?
     } else {
         // nodub/transcribe: оставляем оригинальную дорожку — mux возьмёт её из исходного видео.
         emit(progress, "mix", "nodub: оригинальная аудиодорожка");
@@ -142,8 +144,8 @@ pub fn dub_audio(
     std::fs::create_dir_all(wd).map_err(|e| e.to_string())?;
     let meta = media::probe(&paths.input)?;
     let total = if proj.meta.duration > 0.0 { proj.meta.duration } else { meta.duration };
-    let src: PathBuf = if proj.mode == "dub" {
-        build_dub(proj, paths, total, proj.audio.keep_music, regen_dub, progress)?
+    let src: PathBuf = if proj.mode == "dub" || proj.mode == "voiceover" {
+        build_dub(proj, paths, total, proj.audio.keep_music, proj.mode == "voiceover", regen_dub, progress)?
     } else {
         paths.input.clone() // nodub/transcribe -> оригинальная дорожка
     };
@@ -154,12 +156,17 @@ pub fn dub_audio(
     Ok(out)
 }
 
+/// Нижний предел приглушения оригинала в режиме voiceover (закадровый): -40 dB ≈ почти тихо.
+/// Само значение регулирует пользователь (proj.audio.voiceover_gain_db, дефолт -6 dB).
+const VOICEOVER_DUCK_MIN_DB: f64 = -40.0;
+
 /// Полный аудио-конвейер дубляжа -> путь к new_audio. Порт _build_dub/_regen_dub (TTS+fit+timeline+mix).
 fn build_dub(
     proj: &Project,
     paths: &RenderPaths,
     total: f64,
     keep_music: bool,
+    voiceover: bool,
     regen_dub: bool,
     progress: &Progress,
 ) -> Result<PathBuf, String> {
@@ -189,7 +196,8 @@ fn build_dub(
     media::extract_audio(&paths.input, &audio_hq, 44100, 2)?;
 
     // 2) сепарация (vocals/instrumental) через dub-sep, если keep_music.
-    let (vocals, instrumental): (PathBuf, Option<PathBuf>) = if keep_music {
+    //    voiceover не сепарирует: нужен ВЕСЬ оригинал (голос+музыка) приглушённым под переводом.
+    let (vocals, instrumental): (PathBuf, Option<PathBuf>) = if keep_music && !voiceover {
         emit(progress, "separate", "сепарация (Mel-Band Roformer voc_fv6-Q8_0)");
         if paths.bsroformer_cli.is_file() && paths.bsroformer_model.is_file() {
             let sep = dub_sep::separate(
@@ -374,8 +382,29 @@ fn build_dub(
         dub = fit;
     }
 
-    // 6) свести с инструменталом (если есть).
-    let mixed = if let Some(inst) = instrumental {
+    // 6) свести дорожку.
+    let mixed = if voiceover {
+        // Закадровый: весь оригинал приглушаем на voiceover_gain_db (регулируется в редакторе) и кладём
+        // ПОД переведённый голос. Слышно исходного спикера под дублем (эффект «voice-over»). loudnorm
+        // ниже приведёт программу к -14 LUFS — соотношение дубль/оригинал сохранится.
+        let duck_db = proj.audio.voiceover_gain_db.clamp(VOICEOVER_DUCK_MIN_DB, 0.0);
+        emit(progress, "mix", &format!("voiceover: оригинал {duck_db:+.1} dB под переводом"));
+        // .m4a: media::gain кодирует в AAC — расширение должно совпадать (AAC в .wav-контейнере
+        // читается как тишина). amix(normalize=0) суммирует дубль (полный) + оригинал (приглушённый).
+        // duck_db==0 -> gain не нужен, кладём оригинал как есть.
+        let bed = if duck_db.abs() < 0.05 {
+            audio_hq.clone()
+        } else {
+            let ducked = wd.join("orig_ducked.m4a");
+            match media::gain(&audio_hq, &ducked, duck_db) {
+                Ok(()) => ducked,
+                Err(_) => audio_hq.clone(),
+            }
+        };
+        let new_audio = wd.join("new_audio.m4a");
+        media::mix(&dub, &bed, &new_audio)?;
+        new_audio
+    } else if let Some(inst) = instrumental {
         emit(progress, "mix", "сведение: инструментал + дубль-вокал");
         let new_audio = wd.join("new_audio.m4a");
         media::mix(&dub, &inst, &new_audio)?;

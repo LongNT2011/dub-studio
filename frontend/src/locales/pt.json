@@ -44,10 +44,12 @@
   "mode": {
     "subtitles": "Legendas",
     "dub": "Dublagem",
+    "voiceover": "Narração",
     "funny": "Engraçado",
-    "subtitles_desc": "Áudio original + legendas traduzidas",
+    "subtitles_desc": "Áudio original + legendas no idioma original",
     "dub_desc": "Redublado no idioma de destino",
-    "funny_desc": "Gemma reescreve o roteiro e redubla"
+    "funny_desc": "Gemma reescreve o roteiro e redubla",
+    "voiceover_desc": "Voz traduzida sobre o original atenuado"
   },
   "actions": {
     "translate": "Traduzir",
@@ -94,7 +96,9 @@
     "narrowSearch": "Refine a busca",
     "fromSpeakers": "Voz do falante:",
     "gain": "Ganho",
-    "gainHint": "Amplificar toda a faixa (ao regenerar/exportar)."
+    "gainHint": "Amplificar toda a faixa (ao regenerar/exportar).",
+    "origGain": "Volume original",
+    "origGainHint": "Locução: volume da faixa original sob a tradução."
   },
   "remix": {
     "title": "Remix",

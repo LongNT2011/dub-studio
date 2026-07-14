@@ -74,6 +74,7 @@ fn resolve_modes(args: &AnalyzeArgs) -> (String, String) {
     let mode = match args.mode.as_str() {
         "nodub" => "nodub",
         "transcribe" => "transcribe",
+        "voiceover" => "voiceover", // закадровый: переводим+TTS, но оригинал слышно приглушённым
         _ => "dub", // dub | auto -> dub
     }
     .to_string();

@@ -9,18 +9,34 @@ export type Floatable = {
   onDragStart: (e: React.PointerEvent) => void;
 };
 
+// Держим панель в пределах видимого окна. Защита от x/y за экраном: битый сохранённый pos
+// (например x=innerWidth-360 при innerWidth=0 -> -360) или сжатие окна не должны прятать панель.
+function clampPos(p: { x: number; y: number }): { x: number; y: number } {
+  const vw = window.innerWidth || 1280;
+  const vh = window.innerHeight || 800;
+  const x = Math.round(Math.max(4, Math.min(vw - 60, Number.isFinite(p.x) ? p.x : vw - 360)));
+  const y = Math.round(Math.max(4, Math.min(vh - 40, Number.isFinite(p.y) ? p.y : 64)));
+  return { x, y };
+}
+
 // Докнут в шапке ↔ оторван во float и таскается по всему окну. Позиция и режим — в localStorage.
 export function useFloatable(key: string, initial: { x: number; y: number }): Floatable {
   const [floating, setFloating] = useState<boolean>(() => localStorage.getItem(`fl:${key}:on`) === "1");
   const [pos, setPos] = useState<{ x: number; y: number }>(() => {
-    try { const s = localStorage.getItem(`fl:${key}:pos`); if (s) return JSON.parse(s); } catch { /* ignore */ }
-    return initial;
+    try { const s = localStorage.getItem(`fl:${key}:pos`); if (s) return clampPos(JSON.parse(s)); } catch { /* ignore */ }
+    return clampPos(initial);
   });
   const [dragging, setDragging] = useState(false);
   const off = useRef({ x: 0, y: 0 });
 
   useEffect(() => { localStorage.setItem(`fl:${key}:on`, floating ? "1" : "0"); }, [key, floating]);
   useEffect(() => { localStorage.setItem(`fl:${key}:pos`, JSON.stringify(pos)); }, [key, pos]);
+  // окно уменьшилось/повернулось -> подтянуть панель обратно в видимую область (не оставить за краем).
+  useEffect(() => {
+    const onResize = () => setPos((p) => clampPos(p));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const onDragStart = useCallback((e: React.PointerEvent) => {
     if (e.button !== 0) return;
@@ -44,7 +60,8 @@ export function useFloatable(key: string, initial: { x: number; y: number }): Fl
 
   return {
     floating, pos, dragging,
-    pop: () => setFloating(true),
+    // при отрыве во float всегда подтягиваем в видимую область (страховка от битого сохранённого pos).
+    pop: () => { setPos((p) => clampPos(p)); setFloating(true); },
     dock: () => setFloating(false),
     onDragStart,
   };

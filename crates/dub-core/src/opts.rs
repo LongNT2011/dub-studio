@@ -13,6 +13,41 @@ fn models_root() -> PathBuf {
     PathBuf::from("models")
 }
 
+/// Найти в каталоге .gguf: mmproj (want_mmproj=true) или саму модель (false). Glob по расширению —
+/// имя файла не важно, поэтому подходит любой скачанный квант.
+fn find_gguf_in(dir: &std::path::Path, want_mmproj: bool) -> Option<PathBuf> {
+    let mut hit: Option<PathBuf> = None;
+    for e in std::fs::read_dir(dir).ok()?.flatten() {
+        let p = e.path();
+        if p.extension().and_then(|s| s.to_str()) != Some("gguf") {
+            continue;
+        }
+        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+        if name.contains("mmproj") == want_mmproj {
+            // детерминизм: при нескольких берём лексикографически первый
+            if hit.as_ref().map(|h| p < *h).unwrap_or(true) {
+                hit = Some(p);
+            }
+        }
+    }
+    hit
+}
+
+/// Выбрать установленный вариант MT-модели: самый качественный из скачанных (q8 > q6 > q5 > q4_0).
+/// Возвращает (модель, mmproj). Каталог годится, только если в нём есть И модель, И mmproj —
+/// полускачанный вариант игнорируется. Fallback — дефолтные имена q4_0 (могут ещё не существовать).
+fn resolve_mt(root: &std::path::Path) -> (PathBuf, PathBuf) {
+    for dir in ["mt-q8_0", "mt-q6_k", "mt-q5_0", "mt"] {
+        let d = root.join(dir);
+        if let (Some(model), Some(mmproj)) = (find_gguf_in(&d, false), find_gguf_in(&d, true)) {
+            return (model, mmproj);
+        }
+    }
+    let mt = root.join("mt").join("gemma-4-12b-it-qat-q4_0.gguf");
+    let mmproj = root.join("mt").join("mmproj-gemma-4-12b-it-qat-q4_0.gguf");
+    (mt, mmproj)
+}
+
 #[derive(Clone, Debug)]
 pub struct EngineOpts {
     pub device: String,   // torch / ASR device
@@ -48,11 +83,8 @@ pub struct EngineOpts {
 impl Default for EngineOpts {
     fn default() -> Self {
         let root = models_root();
-        let mt = root.join("mt").join("gemma-4-12b-it-qat-q4_0.gguf");
-        let mmproj = mt
-            .parent()
-            .map(|p| p.join("mmproj-gemma-4-12b-it-qat-q4_0.gguf"))
-            .unwrap_or_else(|| PathBuf::from("mmproj-gemma-4-12b-it-qat-q4_0.gguf"));
+        // Берём самый качественный установленный вариант Gemma (mt-q8_0/q6_k/q5_0), иначе дефолт q4_0.
+        let (mt, mmproj) = resolve_mt(&root);
 
         let voice_pack = std::env::var("SHORTS_DUB_VOICES")
             .map(PathBuf::from)

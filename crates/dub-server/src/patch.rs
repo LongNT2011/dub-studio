@@ -186,6 +186,15 @@ fn op_gain(p: &mut Project, edit: &Value) -> PatchResult {
     Ok(())
 }
 
+/// Громкость ОРИГИНАЛЬНОЙ дорожки в режиме voiceover (закадровый). 0 = в полную силу, отрицательное =
+/// тише перевода. Ре-TTS не нужен — только пересведение (лёгкий ре-рендер), сегменты из кэша.
+fn op_voiceover_gain(p: &mut Project, edit: &Value) -> PatchResult {
+    if let Some(g) = f(edit, "gain_db") {
+        p.audio.voiceover_gain_db = g.clamp(-40.0, 0.0);
+    }
+    Ok(())
+}
+
 /// Наложить caption-поля стиля на SubStyle (типизированные — в поля, прочие — в extra passthrough).
 /// Порт edit_caption._apply: неизвестных ключей нет (Pydantic валидирует), но extra="allow" сохраняет
 /// vision-поля (background/scene_*). Здесь принимаем любые ключи стиля; типизированные кладём в поля,
@@ -553,6 +562,7 @@ pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
         "regen" => op_regen(p, edit),
         "regen_all" => op_regen_all(p, edit),
         "gain" => op_gain(p, edit),
+        "voiceover_gain" => op_voiceover_gain(p, edit),
         other => Err((400, format!("unknown op {other:?}"))),
     }
 }

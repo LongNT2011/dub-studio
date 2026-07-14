@@ -16,9 +16,9 @@ fn emit(progress: &Progress, stage: &str, msg: &str) {
     progress(serde_json::json!({ "stage": stage, "msg": msg }));
 }
 
-/// Нужно ли переводить: dub-режим ИЛИ subs=translate (как do_translate в pipeline).
+/// Нужно ли переводить: dub/voiceover-режим ИЛИ subs=translate (как do_translate в pipeline).
 fn wants_translate(proj: &Project) -> bool {
-    proj.mode == "dub" || proj.subs.mode == "translate"
+    proj.mode == "dub" || proj.mode == "voiceover" || proj.subs.mode == "translate"
 }
 
 /// Прогнать стадию. proj уже собран транскрипт-стадией (segments + mode/tgt_lang). vh/total — из probe.

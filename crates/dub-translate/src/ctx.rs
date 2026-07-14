@@ -116,11 +116,15 @@ pub fn run(
 
     // TP — ДОСЛОВНО. rewrite -> творческий; иначе точный перевод.
     let tp = if let Some(instr) = rewrite {
+        // Творческий ре-дубляж: ЗАМЕНИТЬ содержимое на тему/стиль инструкции, НЕ переводить исходник.
+        // «rewrite each line» (как в питоне) наша Q4-QAT читала как «переведи» -> тема не менялась;
+        // явное «ignore the source meaning, it's only a rhythm template» заставляет реально переписать (проверено).
         format!(
-            "You are RE-DUBBING this short video into {tgt}. REWRITE each numbered line following this \
-instruction: \"{instr}\". Keep the order and the numbering, keep each line about the SAME \
-LENGTH (it will be dubbed to fit the timing), and use ALL the context below:\n\n\
-{ctx}=== LINES ===\n{numbered}\n\nOutput ONLY 'N. <line>' per line, nothing else."
+            "You are a creative scriptwriter writing a BRAND-NEW voice-over script in {tgt} for this short video. \
+IGNORE the literal meaning of the source lines — they are ONLY a rhythm/length template. Write a completely NEW \
+script whose CONTENT follows this instruction: \"{instr}\". Every line must fit the instruction, NOT translate the \
+source. Keep the SAME number of lines and each line about the SAME LENGTH (it will be dubbed to fit the timing). \
+Use the scene/audio context below for tone.\n\n{ctx}=== LINES (rhythm template) ===\n{numbered}\n\nOutput ONLY 'N. <line>' per line, nothing else."
         )
     } else {
         format!(
