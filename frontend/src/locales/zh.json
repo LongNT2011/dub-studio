@@ -49,7 +49,8 @@
     "subtitles_desc": "原始音频 + 原语言字幕",
     "dub_desc": "用目标语言重新配音",
     "funny_desc": "Gemma 改写脚本后重新配音",
-    "voiceover_desc": "翻译人声叠加在减弱的原声之上"
+    "voiceover_desc": "翻译人声叠加在减弱的原声之上",
+    "transcribe_desc": "转录 + 说话人分离，无配音"
   },
   "actions": {
     "translate": "翻译",

@@ -99,12 +99,24 @@ fn op_mode(p: &mut Project, edit: &Value) -> PatchResult {
     match value.as_str() {
         "subtitles" => {
             p.mode = "nodub".into();
-            p.subs.mode = "translate".into();
+            p.subs.mode = "transcribe".into(); // субтитры = язык оригинала, без перевода
             p.audio.rewrite = None;
         }
         "dub" => {
             p.mode = "dub".into();
             p.subs.mode = "translate".into();
+            p.audio.rewrite = None;
+        }
+        "voiceover" => {
+            // закадровый: перевод+TTS поверх приглушённого оригинала (громкость — audio.voiceover_gain_db)
+            p.mode = "voiceover".into();
+            p.subs.mode = "translate".into();
+            p.audio.rewrite = None;
+        }
+        "transcribe" => {
+            // транскрипт+диаризация: без дубляжа/перевода, субтитры на языке оригинала
+            p.mode = "transcribe".into();
+            p.subs.mode = "transcribe".into();
             p.audio.rewrite = None;
         }
         "funny" => {

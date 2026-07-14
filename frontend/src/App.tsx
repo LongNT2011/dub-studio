@@ -406,6 +406,13 @@ function DropZone() {
   const [file, setFile] = useState<File | null>(null);                          // staged video — analyzed on Start, not on drop
   const [mode, setMode] = useState<"dub" | "voiceover" | "subtitles" | "funny" | "transcribe">("dub");       // output mode chosen up front
   const [funny, setFunny] = useState("");                                       // Gemma rewrite instruction (funny mode)
+  const [preview, setPreview] = useState<string | null>(null);                  // objectURL превью выбранного видео (первый кадр)
+  useEffect(() => {                                                             // создаём/освобождаем objectURL под выбранный файл
+    if (!file) { setPreview(null); return; }
+    const url = URL.createObjectURL(file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   async function run() {
     if (!file) return;
@@ -459,10 +466,11 @@ function DropZone() {
             </div>
           )}
           <div className="mt-8 space-y-4">
-            <Feature icon={Languages} title={t("actions.translate")} desc={t("hero.f1")} delay={0.12} />
-            <Feature icon={AudioLines} title={t("actions.dub")} desc={t("hero.f2")} delay={0.18} />
-            <Feature icon={Sparkles} title={t("actions.funny")} desc={t("hero.f3")} delay={0.24} />
-            <Feature icon={FileText} title={t("actions.transcribe")} desc={t("hero.f4")} delay={0.3} />
+            <Feature icon={AudioLines} title={t("actions.dub")} desc={t("hero.f2")} delay={0.12} />
+            <Feature icon={Mic2} title={t("mode.voiceover")} desc={t("mode.voiceover_desc")} delay={0.18} />
+            <Feature icon={Captions} title={t("mode.subtitles")} desc={t("mode.subtitles_desc")} delay={0.24} />
+            <Feature icon={Sparkles} title={t("actions.funny")} desc={t("hero.f3")} delay={0.3} />
+            <Feature icon={FileText} title={t("actions.transcribe")} desc={t("hero.f4")} delay={0.36} />
           </div>
         </div>
 
@@ -476,19 +484,25 @@ function DropZone() {
               ${over ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_9%,var(--color-surface))] shadow-[0_0_0_4px_color-mix(in_oklab,var(--color-accent)_18%,transparent)]"
                      : "border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)] hover:border-[#3a414c]"}`}
           >
+            {file && preview && (   // превью выбранного видео (первый кадр) заполняет рамку; скрим — для читаемости текста
+              <>
+                <video src={preview} muted playsInline preload="metadata" className="absolute inset-0 w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-black/45" />
+              </>
+            )}
             <span className={`${corner} top-3 left-3 border-l border-t`} />
             <span className={`${corner} top-3 right-3 border-r border-t`} />
             <span className={`${corner} bottom-3 left-3 border-l border-b`} />
             <span className={`${corner} bottom-3 right-3 border-r border-b`} />
-            <div className="text-center px-6">
+            <div className="relative z-10 text-center px-6">
               <div className={`mx-auto grid place-items-center w-16 h-16 rounded-2xl border transition-all duration-200
-                ${over ? "bg-[var(--color-accent)] text-[var(--color-on-accent)] border-transparent" : "bg-[var(--color-surface-2)] text-[var(--color-accent)] border-[var(--color-border)] group-hover:scale-105"}`}>
+                ${over ? "bg-[var(--color-accent)] text-[var(--color-on-accent)] border-transparent" : file && preview ? "bg-[var(--color-accent)] text-[var(--color-on-accent)] border-transparent shadow-lg" : "bg-[var(--color-surface-2)] text-[var(--color-accent)] border-[var(--color-border)] group-hover:scale-105"}`}>
                 {file ? <Check size={26} strokeWidth={2.5} /> : <Upload size={26} strokeWidth={2} />}
               </div>
               {file ? (
                 <>
-                  <div className="mt-5 text-lg font-semibold break-all px-2">{file.name}</div>
-                  <div className="mt-1.5 text-sm text-[var(--color-muted)]">{(file.size / 1048576).toFixed(1)} MB · {t("drop.change")}</div>
+                  <div className={`mt-5 text-lg font-semibold break-all px-2 ${preview ? "text-white drop-shadow" : ""}`}>{file.name}</div>
+                  <div className={`mt-1.5 text-sm ${preview ? "text-white/80" : "text-[var(--color-muted)]"}`}>{(file.size / 1048576).toFixed(1)} MB · {t("drop.change")}</div>
                 </>
               ) : (
                 <>
@@ -958,12 +972,14 @@ function Editor() {
 
   const isActive = (seg: Project["segments"][number]) => scrub >= seg.start && scrub < seg.end;
   const activeId = p.segments.find(isActive)?.id;
-  const mode = p.audio.rewrite ? "funny" : (p.mode === "nodub" ? "subtitles" : "dub");   // derived output mode
-  const MODES = [["subtitles", Captions], ["dub", AudioLines], ["funny", Sparkles]] as const;
+  const mode = p.mode === "voiceover" ? "voiceover" : p.mode === "transcribe" ? "transcribe" : p.audio.rewrite ? "funny" : (p.mode === "nodub" ? "subtitles" : "dub");   // derived output mode
+  const MODES = [["subtitles", Captions], ["dub", AudioLines], ["voiceover", Mic2], ["funny", Sparkles], ["transcribe", FileText]] as const;
   const cmds = [
     { label: t("mode.subtitles"), run: () => branch("mode", { value: "subtitles" }) },
     { label: t("mode.dub"), run: () => branch("mode", { value: "dub" }) },
+    { label: t("mode.voiceover"), run: () => branch("mode", { value: "voiceover" }) },
     { label: t("mode.funny"), run: () => branch("mode", { value: "funny" }) },
+    { label: t("mode.transcribe"), run: () => branch("mode", { value: "transcribe" }) },
     { label: t("export.proceed"), run: () => doExport() },
     { label: t("common.undo"), run: () => doUndo() },
     { label: t("common.redo"), run: () => doRedo() },

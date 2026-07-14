@@ -51,7 +51,8 @@
     "subtitles_desc": "Original audio + original-language subtitles",
     "dub_desc": "Re-voiced into the target language",
     "funny_desc": "Gemma rewrites the script, then re-dubs",
-    "voiceover_desc": "Translated voice over the ducked original"
+    "voiceover_desc": "Translated voice over the ducked original",
+    "transcribe_desc": "Transcript + diarization, no dubbing"
   },
   "batch": {
     "open": "Batch of files",

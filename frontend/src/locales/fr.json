@@ -49,7 +49,8 @@
     "subtitles_desc": "Audio original + sous-titres dans la langue d'origine",
     "dub_desc": "Redoublé dans la langue cible",
     "funny_desc": "Gemma réécrit le script puis redouble",
-    "voiceover_desc": "Voix traduite par-dessus l'original atténué"
+    "voiceover_desc": "Voix traduite par-dessus l'original atténué",
+    "transcribe_desc": "Transcription + diarisation, sans doublage"
   },
   "actions": {
     "translate": "Traduire",

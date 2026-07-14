@@ -341,15 +341,12 @@ fn build_dub(
         }
         let tgt = s.tgt_text.trim();
         let ref_wav = ref_of(s);
-        // синтез: dirty ИЛИ нет кэша ИЛИ кэш старше рефа спикера (реф пересобран -> голос сменился).
-        let stale_ref = raw
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .zip(ref_wav.metadata().and_then(|m| m.modified()).ok())
-            .map(|(seg_t, ref_t)| seg_t < ref_t)
-            .unwrap_or(true);
-        let need_synth = (regen_dub && s.dirty) || !raw.is_file() || stale_ref;
+        // Синтез ТОЛЬКО если сегмент dirty (правился текст/спикер/голос) ИЛИ нет кэша. Реф-клипы
+        // пересобираются каждый рендер, поэтому mtime-сравнение с рефом («stale_ref») ошибочно
+        // помечало ВЕСЬ кэш устаревшим на каждом рендере → экспорт ре-роллил уже одобренную озвучку
+        // («скидывалось»). Смена голоса и так метит все сегменты dirty (op_recast/op_segment), так что
+        // dirty-флага достаточно: не-dirty сегменты переиспользуют свой seg_XXX.wav между рендерами.
+        let need_synth = (regen_dub && s.dirty) || !raw.is_file();
         if need_synth {
             let ref_text = reftext_of(s); // авто-расшифровка рефа -> качество клона (как Higgs)
             let (samples, sr) = engine
