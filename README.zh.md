@@ -13,9 +13,19 @@
 
 [English](README.md) · [Русский](README.ru.md) · **中文** · [Español](README.es.md) · [Português](README.pt.md) · [Français](README.fr.md)
 
-![Dub Studio —— Windows 上的 AI 视频配音](docs/screenshot.png)
+### [🌐 在线演示与前后对比展示 →](https://timoncool.github.io/dub-studio/)
+
+
 
 </div>
+
+## 实际效果
+
+**[▶ 在网站上观看前后对比视频展示 →](https://timoncool.github.io/dub-studio/#showcase)** — 真实片段，全部在本地 GPU 上端到端完成：不同的视频、模式和语言。
+
+| ![dub](docs/shots/mode-dub-ru.png) | ![voiceover](docs/shots/mode-voiceover-es.png) | ![transcript](docs/shots/mode-transcribe-fr.png) |
+|:--:|:--:|:--:|
+| 🎙️ **配音** · EN→RU | 🗣️ **旁白配音** · EN→ES | 🎬 **转录** · 说话人分离 |
 
 ## 这是什么
 

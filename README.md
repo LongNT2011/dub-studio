@@ -14,7 +14,9 @@
 
 **English** · [Русский](README.ru.md) · [中文](README.zh.md) · [Español](README.es.md) · [Português](README.pt.md) · [Français](README.fr.md)
 
-![Dub Studio — AI video dubbing on Windows](docs/screenshot.png)
+### 🌐 [Live demo & before/after video showcase →](https://timoncool.github.io/dub-studio/)
+
+![Dub Studio — AI video dubbing on Windows](docs/shots/mode-dub-ru.png)
 
 </div>
 
@@ -25,6 +27,16 @@
 Everything runs **100% on your machine** — no cloud, no upload, no subscription. Your footage and your voiceprint never leave your computer.
 
 This is **v2 — a fully native rewrite**. No embeddable Python, no torch, no CUDA wheels. The whole pipeline is **Rust + native C++/CUDA engines (GGUF/ONNX)**: one process, fast startup, low VRAM. Models, engines, CUDA/VC++ runtime and ffmpeg are **downloaded and installed by the app itself** on first run — the only manual step is the NVIDIA driver.
+
+## See it in action
+
+**[▶ Watch the before/after video showcase →](https://timoncool.github.io/dub-studio/#showcase)** — real clips dubbed end‑to‑end on a local GPU: different videos, different modes, different languages, nothing left the machine.
+
+| ![Full dub, Russian UI](docs/shots/mode-dub-ru.png) | ![Voice-over, Spanish UI](docs/shots/mode-voiceover-es.png) | ![Transcript, French UI](docs/shots/mode-transcribe-fr.png) |
+|:--:|:--:|:--:|
+| 🎙️ **Full dub** · EN→RU | 🗣️ **Voice-over** · EN→ES | 🎬 **Transcript** · diarized |
+| ![Subtitles, Chinese UI](docs/shots/mode-subtitles-zh.png) | ![Funny remix, Russian UI](docs/shots/mode-funny-ru.png) | ![Reverse dub RU to EN](docs/shots/mode-dubrev-en.png) |
+| 📝 **Subtitles** · original-lang | ✨ **Funny remix** · rewritten | 🎙️ **Reverse dub** · RU→EN |
 
 ## Five modes, switchable on the fly
 

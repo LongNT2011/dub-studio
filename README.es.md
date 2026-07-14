@@ -13,9 +13,19 @@
 
 [English](README.md) · [Русский](README.ru.md) · [中文](README.zh.md) · **Español** · [Português](README.pt.md) · [Français](README.fr.md)
 
-![Dub Studio —— doblaje de vídeo con IA en Windows](docs/screenshot.png)
+### [🌐 Demo en vivo y showcase antes/después →](https://timoncool.github.io/dub-studio/)
+
+
 
 </div>
+
+## Míralo en acción
+
+**[▶ Ver el showcase antes/después en el sitio →](https://timoncool.github.io/dub-studio/#showcase)** — clips reales doblados de principio a fin en una GPU local: distintos vídeos, modos e idiomas.
+
+| ![dub](docs/shots/mode-dub-ru.png) | ![voiceover](docs/shots/mode-voiceover-es.png) | ![transcript](docs/shots/mode-transcribe-fr.png) |
+|:--:|:--:|:--:|
+| 🎙️ **Doblaje** · EN→RU | 🗣️ **Voz superpuesta** · EN→ES | 🎬 **Transcripción** · diarización |
 
 ## Qué es
 
