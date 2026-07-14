@@ -475,9 +475,11 @@ fn op_title(p: &mut Project, edit: &Value) -> PatchResult {
     if let Some(a) = edit.get("align").and_then(|v| v.as_str()) { t.align = a.to_string(); }
     if let Some(st) = f(edit, "start") { t.start = st; }
     if let Some(en) = f(edit, "end") { t.end = en; }
-    if let Some(lh) = i(edit, "lh") { t.lh = Some(lh); }
-    if let Some(sp) = i(edit, "size_px") { t.size_px = Some(sp); }
-    if let Some(ow) = i(edit, "outline_w") { t.outline_w = Some(ow); }
+    // nullable как shadow_dir: явный null снимает значение (возврат к авто-межстрочному/авто-фиту/авто-контуру),
+    // число выставляет, отсутствие ключа не трогает. i()/as_i64() на null давал None -> сброс молча игнорировался.
+    if edit.get("lh").is_some() { t.lh = edit.get("lh").and_then(|v| v.as_i64()); }
+    if edit.get("size_px").is_some() { t.size_px = edit.get("size_px").and_then(|v| v.as_i64()); }
+    if edit.get("outline_w").is_some() { t.outline_w = edit.get("outline_w").and_then(|v| v.as_i64()); }
     if let Some(bbox) = edit.get("bbox").and_then(|v| v.as_array()) {
         t.bbox = Some(bbox.iter().filter_map(|x| x.as_i64()).collect());
     }
@@ -707,6 +709,25 @@ mod tests {
         assert!(p.captions.titles.is_empty());
         let e = apply(&mut p, &json!({"op":"title_del","idx":0})).unwrap_err();
         assert_eq!(e.0, 404);
+    }
+
+    #[test]
+    fn title_size_px_null_resets_to_auto() {
+        // регресс: очистка поля px/контура/межстрочья у титра (явный JSON null) должна вернуть авто-подбор,
+        // а не молча игнорироваться (i()/as_i64() на null давал None -> сброс не применялся).
+        let mut p = Project::default();
+        apply(&mut p, &json!({"op":"title_add","text":"T","x":0,"y":0,"w":100,"h":40})).unwrap();
+        apply(&mut p, &json!({"op":"title","idx":0,"size_px":80,"outline_w":6,"lh":50})).unwrap();
+        assert_eq!(p.captions.titles[0].size_px, Some(80));
+        assert_eq!(p.captions.titles[0].outline_w, Some(6));
+        assert_eq!(p.captions.titles[0].lh, Some(50));
+        apply(&mut p, &json!({"op":"title","idx":0,"size_px":null,"outline_w":null,"lh":null})).unwrap();
+        assert_eq!(p.captions.titles[0].size_px, None);   // null -> авто-фит
+        assert_eq!(p.captions.titles[0].outline_w, None);
+        assert_eq!(p.captions.titles[0].lh, None);
+        apply(&mut p, &json!({"op":"title","idx":0,"size_px":42})).unwrap();
+        apply(&mut p, &json!({"op":"title","idx":0,"color":"#fff"})).unwrap();   // отсутствие ключа не трогает size_px
+        assert_eq!(p.captions.titles[0].size_px, Some(42));
     }
 
     #[test]

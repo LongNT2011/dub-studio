@@ -1,22 +1,28 @@
 // PreviewCanvas — the editing heart. Shows the engine's REAL rendered frame (WYSIWYG) with a react-konva
-// overlay: drag/resize the blur boxes and drag the subtitle band directly on the frame -> PATCH the Project ->
-// re-render the frame. (A 60fps JASSUB live layer over HTML5 <video> is the M2 fast-preview upgrade.)
+// overlay: drag/resize the blur boxes, drag/resize the titles, and drag the subtitle band directly on the
+// frame -> PATCH the Project -> re-render the frame. Which objects are interactive follows the LEFT lane
+// (subs | blur | titles): on the titles tab you edit titles, on the mask tab you edit blur zones — они не
+// перехватывают клики друг друга. (A 60fps JASSUB live layer over HTML5 <video> is the M2 upgrade.)
 import { useEffect, useRef, useState } from "react";
 import { Stage, Layer, Rect, Line, Transformer } from "react-konva";
 import type Konva from "konva";
 import { api, type Project } from "../lib/api";
 import { useStore } from "../store";
 
-type Props = { pid: string; project: Project; scrub: number; rendered: boolean; onChanged: (fresh: Project) => void };
+type Lane = "subs" | "blur" | "titles";
+type Props = { pid: string; project: Project; scrub: number; rendered: boolean; lane: Lane; onChanged: (fresh: Project) => void };
 
-export default function PreviewCanvas({ pid, project, scrub, rendered, onChanged }: Props) {
+export default function PreviewCanvas({ pid, project, scrub, rendered, lane, onChanged }: Props) {
   const rev = useStore((s) => s.rev);
   const bump = useStore((s) => s.bump);
   const sel = useStore((s) => s.selBlur);        // SHARED with the left blur list (click list <-> click canvas)
   const setSel = useStore((s) => s.setSelBlur);
+  const selT = useStore((s) => s.selTitle);      // SHARED with the left titles list
+  const setSelT = useStore((s) => s.setSelTitle);
   const wrap = useRef<HTMLDivElement>(null);
   const trRef = useRef<Konva.Transformer>(null);
   const boxRefs = useRef<Record<number, Konva.Rect>>({});
+  const titleRefs = useRef<Record<number, Konva.Rect>>({});
   const [disp, setDisp] = useState({ w: 0, h: 0 });
   const [guide, setGuide] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -39,13 +45,22 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, onChanged
     return () => ro.disconnect();
   }, [vw, vh]);
 
+  // attach the resize transformer to the selected object of the ACTIVE lane (blur box or title)
   useEffect(() => {
-    const node = sel != null ? boxRefs.current[sel] : null;
-    const hidden = sel != null && (project.captions.blur_boxes || [])[sel]?.hidden;   // no resize handles on a disabled zone
-    if (node && !hidden && trRef.current) {
+    let node: Konva.Rect | null = null;
+    if (lane === "blur" && sel != null) {
+      const hidden = (project.captions.blur_boxes || [])[sel]?.hidden;   // no resize handles on a disabled zone
+      if (!hidden) node = boxRefs.current[sel] ?? null;
+    } else if (lane === "titles" && selT != null) {
+      node = titleRefs.current[selT] ?? null;
+    }
+    if (node && node.getLayer() && trRef.current) {   // getLayer() != null -> узел ещё смонтирован (не устаревший реф)
       trRef.current.nodes([node]); trRef.current.getLayer()?.batchDraw();
     } else trRef.current?.nodes([]);
-  }, [sel, disp, project]);
+  }, [sel, selT, lane, disp, project]);
+
+  // гасим зависшую центральную направляющую при перемотке/смене вкладки (onDragEnd мог не прийти, если Rect размонтировался в процессе drag)
+  useEffect(() => { setGuide(null); }, [scrub, lane]);
 
   async function patch(edit: Record<string, unknown>) {
     setBusy(true);
@@ -55,6 +70,7 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, onChanged
   }
 
   const blurs = project.captions.blur_boxes || [];
+  const titles = project.captions.titles || [];
   const subY = project.captions.sub_y ?? Math.round(vh * 0.82);
 
   return (
@@ -65,21 +81,23 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, onChanged
           : <img src={previewSrc} alt="frame" className="absolute inset-0 w-full h-full rounded-lg" />}
         {!rendered && disp.w > 0 && (
           <Stage width={disp.w} height={disp.h} className="absolute inset-0"
-                 onMouseDown={(e) => { if (e.target === e.target.getStage()) setSel(null); }}>
+                 onMouseDown={(e) => { if (e.target === e.target.getStage()) { setSel(null); setSelT(null); } }}>
             <Layer>
-              {/* subtitle band — draggable vertically; drop -> PATCH sub_y */}
-              <Rect x={0} y={subY * sy - 14} width={disp.w} height={28} fill="rgba(198,242,78,0.05)"
-                    stroke="rgba(198,242,78,0.32)" dash={[6, 4]} draggable
-                    dragBoundFunc={(p) => ({ x: 0, y: p.y })}
-                    onDragEnd={(e) => { if (!sy) return; patch({ op: "subpos", sub_y: Math.round((e.target.y() + 14) / sy) }); }} />
-              {/* cover zones — ONLY the selected zone is outlined (cyan); the rest stay invisible but clickable
+              {/* subtitle band — draggable vertically; drop -> PATCH sub_y. Only on the subtitles lane. */}
+              {lane === "subs" && (
+                <Rect x={0} y={subY * sy - 14} width={disp.w} height={28} fill="rgba(198,242,78,0.05)"
+                      stroke="rgba(198,242,78,0.32)" dash={[6, 4]} draggable
+                      dragBoundFunc={(p) => ({ x: 0, y: p.y })}
+                      onDragEnd={(e) => { if (!sy) return; patch({ op: "subpos", sub_y: Math.round((e.target.y() + 14) / sy) }); }} />
+              )}
+              {/* cover zones — ONLY on the mask lane. Selected zone outlined (cyan); rest invisible but clickable
                   (select via canvas-click or the left list). Active on THIS frame; draggable unless hidden. */}
-              {blurs.map((b, i) => ({ b, i }))
+              {lane === "blur" && blurs.map((b, i) => ({ b, i }))
                 .filter(({ b }) => scrub >= b.t0 - 0.6 && scrub <= b.t1 + 0.4)
                 .map(({ b, i }) => {
                   const on = sel === i, hid = !!b.hidden;
                   return (
-                    <Rect key={i} ref={(n) => { if (n) boxRefs.current[i] = n; }}
+                    <Rect key={`b${i}`} ref={(n) => { if (n) boxRefs.current[i] = n; else delete boxRefs.current[i]; }}
                           x={b.x * sx} y={b.y * sy} width={b.w * sx} height={b.h * sy}
                           fill={on ? (hid ? "rgba(255,255,255,0.06)" : "rgba(91,224,200,0.18)") : "rgba(255,255,255,0.001)"}
                           stroke={on ? "#5be0c8" : undefined} strokeWidth={on ? 2.5 : 0}
@@ -94,6 +112,33 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, onChanged
                             const h = Math.round((n.height() * n.scaleY()) / sy);
                             n.scaleX(1); n.scaleY(1);
                             patch({ op: "blur", idx: i, x: Math.round(n.x() / sx), y: Math.round(n.y() / sy), w, h });
+                          }} />
+                  );
+                })}
+              {/* titles — ONLY on the titles lane. bbox=[x,y,w,h] в видео-пикселях (совпадает с ass::emit_title).
+                  Все титры на этом кадре обведены пунктиром (видно, что кликабельны); выбранный — сплошной.
+                  Drag/resize -> PATCH op:"title" bbox. */}
+              {lane === "titles" && titles.map((ti, i) => ({ ti, i }))
+                .filter(({ ti }) => (ti.bbox?.length ?? 0) >= 4 && scrub >= ti.start - 0.1 && scrub <= ti.end + 0.1)
+                .map(({ ti, i }) => {
+                  const [bx, by, bw, bh] = ti.bbox as number[];
+                  const on = selT === i;
+                  return (
+                    <Rect key={`t${i}`} ref={(n) => { if (n) titleRefs.current[i] = n; else delete titleRefs.current[i]; }}
+                          x={bx * sx} y={by * sy} width={bw * sx} height={bh * sy}
+                          fill={on ? "rgba(198,242,78,0.16)" : "rgba(198,242,78,0.001)"}
+                          stroke={on ? "#c6f24e" : "rgba(198,242,78,0.55)"} strokeWidth={on ? 2.5 : 1}
+                          dash={on ? undefined : [5, 4]} draggable
+                          onClick={() => setSelT(i)} onTap={() => setSelT(i)}
+                          onDragMove={(e) => setGuide(Math.abs(e.target.x() + (bw * sx) / 2 - disp.w / 2) < 8 ? disp.w / 2 : null)}
+                          onDragEnd={(e) => { setGuide(null); if (!sx || !sy) return; patch({ op: "title", idx: i, bbox: [Math.round(e.target.x() / sx), Math.round(e.target.y() / sy), bw, bh] }); }}
+                          onTransformEnd={(e) => {
+                            const n = e.target;
+                            if (!sx || !sy) { n.scaleX(1); n.scaleY(1); return; }
+                            const w = Math.round((n.width() * n.scaleX()) / sx);
+                            const h = Math.round((n.height() * n.scaleY()) / sy);
+                            n.scaleX(1); n.scaleY(1);
+                            patch({ op: "title", idx: i, bbox: [Math.round(n.x() / sx), Math.round(n.y() / sy), w, h] });
                           }} />
                   );
                 })}

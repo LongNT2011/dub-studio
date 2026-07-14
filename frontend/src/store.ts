@@ -16,6 +16,7 @@ type State = {
   future: Project[];
   rev: number;                       // preview cache-buster: bumped on every backend-confirmed frame change
   selBlur: number | null;            // selected blur-box index — SHARED between the left list and the canvas overlay
+  selTitle: number | null;           // selected title index — SHARED between the left titles list and the canvas overlay
   justAnalyzed: boolean;             // только что прошёл analyze -> редактор один раз авто-генерит дуб (чтобы сразу слушать)
   setJustAnalyzed: (b: boolean) => void;
   setStage: (s: Stage) => void;
@@ -31,6 +32,7 @@ type State = {
   redo: () => Project | null;
   bump: () => void;                  // invalidate the rendered preview frame -> <img> refetches
   setSelBlur: (i: number | null) => void;
+  setSelTitle: (i: number | null) => void;
 };
 
 export const useStore = create<State>((set, get) => ({
@@ -45,6 +47,7 @@ export const useStore = create<State>((set, get) => ({
   future: [],
   rev: 0,
   selBlur: null,
+  selTitle: null,
   justAnalyzed: false,
   setJustAnalyzed: (justAnalyzed) => set({ justAnalyzed }),
   setStage: (stage) => set({ stage }),
@@ -79,4 +82,5 @@ export const useStore = create<State>((set, get) => ({
   },
   bump: () => set((s) => ({ rev: s.rev + 1 })),
   setSelBlur: (selBlur) => set({ selBlur }),
+  setSelTitle: (selTitle) => set({ selTitle }),
 }));

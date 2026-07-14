@@ -634,6 +634,8 @@ function Editor() {
   const bump = useStore((s) => s.bump);
   const selBlur = useStore((s) => s.selBlur);             // selected blur zone (shared with the canvas overlay)
   const setSelBlur = useStore((s) => s.setSelBlur);
+  const selTitle = useStore((s) => s.selTitle);           // selected title (shared with the canvas overlay)
+  const setSelTitle = useStore((s) => s.setSelTitle);
   const rendering = useStore((s) => s.rendering);
   const setRendering = useStore((s) => s.setRendering);
   const addExport = useStore((s) => s.addExport);
@@ -733,8 +735,8 @@ function Editor() {
   async function branch(op: string, extra: Record<string, unknown> = {}) {
     pushHistory(p);                                                  // snapshot for undo BEFORE the mutation
     setRendered(false);
-    try { setProject(await api.patch(pid, { op, ...extra })); bump(); }   // style/voice/text change -> re-fetch the frame
-    catch (err) { await surfaceErr(err); }
+    try { const fresh = await api.patch(pid, { op, ...extra }); setProject(fresh); bump(); return fresh; }   // style/voice/text change -> re-fetch the frame
+    catch (err) { await surfaceErr(err); return null; }
   }
   async function doRegen(segId: string) {                            // re-synthesize the TTS for ONE phrase (mark dirty -> /render)
     if (regenId) return;
@@ -744,7 +746,7 @@ function Editor() {
       const { job_id } = await api.render(pid);                       // re-TTS only the dirty seg + re-mux -> fresh dub
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); setRendered(false); bump(); setDubRev(Date.now());   // refresh preview + reload the re-rendered dub audio
-    } catch (e) { console.error("regen TTS failed", e); }
+    } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
   async function doHideSeg(segId: string) {                          // toggle a line off/on — drops its subtitle AND its dub audio
@@ -755,7 +757,7 @@ function Editor() {
       const { job_id } = await api.render(pid);
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); bump(); setDubRev(Date.now());
-    } catch (e) { console.error("hide segment failed", e); }
+    } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
   async function doDelSeg(segId: string) {                           // delete a line entirely — subtitle + dub audio gone (undoable)
@@ -766,7 +768,7 @@ function Editor() {
       const { job_id } = await api.render(pid);
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); bump(); setDubRev(Date.now());
-    } catch (e) { console.error("delete segment failed", e); }
+    } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
   async function doKeepSeg(segId: string) {                          // toggle 'keep original audio' — source plays, no dub, no sub
@@ -777,14 +779,17 @@ function Editor() {
       const { job_id } = await api.render(pid);
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); bump(); setDubRev(Date.now());
-    } catch (e) { console.error("keep-original toggle failed", e); }
+    } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
   async function bulkDelIdx(op: "del_titles" | "del_blurs", idxs: Set<number>, clear: () => void) {
     if (!idxs.size) return;                                           // bulk-delete several titles / mask boxes by index
     pushHistory(p); setRendered(false);
-    try { setProject(await api.patch(pid, { op, idxs: [...idxs] })); bump(); clear(); }
-    catch (e) { console.error("bulk delete failed", e); }
+    try {
+      setProject(await api.patch(pid, { op, idxs: [...idxs] })); bump(); clear();
+      if (op === "del_blurs") setSelBlur(null); else setSelTitle(null);   // индексы съехали -> сбросить одиночный выбор
+    }
+    catch (e) { await surfaceErr(e); }
   }
   async function bulkSeg(op: "del_segments" | "hide_segments" | "keep_segments", extra: Record<string, unknown> = {}) {
     if (!selSegs.size || regenId) return;                            // bulk hide/delete the selected lines, ONE re-render
@@ -794,7 +799,7 @@ function Editor() {
       const { job_id } = await api.render(pid);
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); bump(); setDubRev(Date.now()); setSelSegs(new Set());
-    } catch (e) { console.error("bulk segment op failed", e); }
+    } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
   async function doGain(gainDb: number) {                            // монтажный гейн всей дорожки: патч + лёгкий ре-рендер (ре-TTS не нужен, сегменты из кэша)
@@ -805,7 +810,7 @@ function Editor() {
       const { job_id } = await api.render(pid);
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); setRendered(false); setDubRev(Date.now());   // покадровое превью; /dub обновлён -> плей играет новый дуб
-    } catch (e) { console.error("gain apply failed", e); }
+    } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
   async function doRegenAll() {                                      // re-synthesize the WHOLE dub (after switching the pack voice/speaker, or to re-roll)
@@ -816,7 +821,7 @@ function Editor() {
       const { job_id } = await api.render(pid);                     // re-TTS all dirty segs + re-mux -> fresh dub
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); setRendered(false); bump(); setDubRev(Date.now());   // покадровое превью; /dub обновлён -> плей играет новый дуб
-    } catch (e) { console.error("regen all TTS failed", e); }
+    } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
   async function forceSeg(seg: Project["segments"][number]) {        // force-refresh ONE phrase: re-seek + re-fetch + re-render (if stuck)
@@ -833,8 +838,8 @@ function Editor() {
     playEndRef.current = seg.end; a.currentTime = seg.start; setScrub(seg.start); setRendered(false);
     if (play) a.play().catch(() => {}); else setPlay(true);
   }
-  async function doUndo() { const prev = undo(); if (prev) { setRendered(false); await api.putProject(pid, prev); bump(); } }
-  async function doRedo() { const next = redo(); if (next) { setRendered(false); await api.putProject(pid, next); bump(); } }
+  async function doUndo() { const prev = undo(); if (prev) { setSelBlur(null); setSelTitle(null); setRendered(false); await api.putProject(pid, prev); bump(); } }
+  async function doRedo() { const next = redo(); if (next) { setSelBlur(null); setSelTitle(null); setRendered(false); await api.putProject(pid, next); bump(); } }
   useEffect(() => {                                                  // Cmd/Ctrl+Z / Shift+Z / Y (not while typing in a field)
     const h = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -1003,7 +1008,7 @@ function Editor() {
                 {(p.captions.blur_boxes || []).map((b, i) => ({ b, i }))
                   .filter(({ b }) => blurAll || (scrub >= b.t0 - 0.6 && scrub <= b.t1 + 0.4))
                   .map(({ b, i }) => (
-                    <div key={i} onClick={() => setSelBlur(i)}
+                    <div key={i} onClick={() => { setSelBlur(i); setRendered(false); setScrub(Math.max(b.t0, 0)); }}
                       className={`flex items-center gap-2 mono text-[10px] rounded px-2 py-1 cursor-pointer transition-colors ${selBlur === i ? "bg-[color-mix(in_oklab,var(--color-accent)_18%,transparent)] text-[var(--color-text)] ring-1 ring-[var(--color-accent)]" : "text-[var(--color-muted)] bg-[var(--color-surface-2)]/40 hover:text-[var(--color-text)]"} ${b.hidden ? "opacity-50" : ""} ${selBlurs.has(i) ? "ring-1 ring-[var(--color-accent)]" : ""}`}>
                       <button onClick={(e) => { e.stopPropagation(); setSelBlurs((prev) => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; }); }}
                         className={`grid place-items-center w-3.5 h-3.5 rounded-sm shrink-0 border transition-colors ${selBlurs.has(i) ? "bg-[var(--color-accent)] border-[var(--color-accent)] text-[var(--color-on-accent)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}>{selBlurs.has(i) && <Check size={9} />}</button>
@@ -1019,13 +1024,13 @@ function Editor() {
                       <button onClick={(e) => { e.stopPropagation(); branch("blur", { idx: i, fill: b.fill ? null : "#000000" }); }}
                         title={b.fill ? t("blur.modeFill") : t("blur.modeBlur")}
                         className="shrink-0 hover:text-[var(--color-accent)] transition-colors">{b.fill ? <Square size={12} /> : <Droplet size={12} />}</button>
-                      <button onClick={(e) => { e.stopPropagation(); branch("blur_del", { idx: i }); }} className="shrink-0 hover:text-[var(--color-warn)] transition-colors"><Trash2 size={12} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); branch("blur_del", { idx: i }); setSelBlur(null); }} className="shrink-0 hover:text-[var(--color-warn)] transition-colors"><Trash2 size={12} /></button>
                     </div>
                   ))}
                 {!(p.captions.blur_boxes || []).some((b) => blurAll || (scrub >= b.t0 - 0.6 && scrub <= b.t1 + 0.4)) &&
                   <div className="text-[11px] text-[var(--color-muted)]/50 py-3 text-center">—</div>}
               </div>
-              <button onClick={() => branch("blur_add", { x: Math.round((p.meta.width || 0) * 0.25), y: Math.round((p.meta.height || 0) * 0.45), w: Math.round((p.meta.width || 0) * 0.5), h: Math.round((p.meta.height || 0) * 0.08), t0: Math.max(0, scrub - 1), t1: scrub + 2 })}
+              <button onClick={async () => { const fresh = await branch("blur_add", { x: Math.round((p.meta.width || 0) * 0.25), y: Math.round((p.meta.height || 0) * 0.45), w: Math.round((p.meta.width || 0) * 0.5), h: Math.round((p.meta.height || 0) * 0.08), t0: Math.max(0, scrub - 1), t1: scrub + 2 }); if (fresh) setSelBlur((fresh.captions.blur_boxes || []).length - 1); }}
                 className="w-full mt-1.5 inline-flex items-center justify-center gap-1.5 text-[12px] py-1.5 rounded-lg border border-dashed border-[var(--color-border)] text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] transition-colors">
                 <Plus size={13} /> {t("blur.add")}
               </button>
@@ -1047,14 +1052,15 @@ function Editor() {
               </div>
             )}
             {(p.captions.titles || []).map((ti, i) => (
-              <div key={`${ti.start}_${ti.end}_${i}`} className="rounded-xl p-2.5 bg-[var(--color-surface-2)]/50">
+              <div key={`${ti.start}_${ti.end}_${i}`} onClick={() => { setSelTitle(i); setRendered(false); setScrub(Math.max(ti.start, 0)); }}
+                className={`rounded-xl p-2.5 bg-[var(--color-surface-2)]/50 cursor-pointer transition-shadow ${selTitle === i ? "ring-1 ring-[var(--color-accent)]" : ""}`}>
                 <div className="flex items-center gap-2 mono text-[10px] text-[var(--color-muted)] mb-1.5">
                   <button onClick={() => setSelTitles((prev) => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n; })}
                     className={`grid place-items-center w-3.5 h-3.5 rounded-sm shrink-0 border transition-colors ${selTitles.has(i) ? "bg-[var(--color-accent)] border-[var(--color-accent)] text-[var(--color-on-accent)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}>{selTitles.has(i) && <Check size={9} />}</button>
                   <span className="tabnum">{fmtT(ti.start)} → {fmtT(ti.end)}</span>
-                  <button onClick={() => branch("title_del", { idx: i })} className="ml-auto hover:text-[var(--color-warn)] transition-colors" title="delete"><Trash2 size={12} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); branch("title_del", { idx: i }); setSelTitle(null); }} className="ml-auto hover:text-[var(--color-warn)] transition-colors" title="delete"><Trash2 size={12} /></button>
                 </div>
-                <input value={ti.tgt || ti.text} onChange={(e) => titleText(i, e.target.value)}
+                <input value={ti.tgt || ti.text} onChange={(e) => titleText(i, e.target.value)} onClick={(e) => e.stopPropagation()}
                   onBlur={async (e) => { burstRef.current = null; setRendered(false); try { setProject(await api.patch(pid, { op: "title", idx: i, text: e.target.value, tgt: e.target.value })); bump(); } catch (err) { await surfaceErr(err); } }}
                   className="w-full bg-[var(--color-bg)]/60 border border-[var(--color-border)] rounded p-1.5 text-[13px] focus:border-[var(--color-accent)] focus:outline-none transition-colors" />
                 <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
@@ -1087,7 +1093,7 @@ function Editor() {
                 </div>
               </div>
             ))}
-            <button onClick={() => branch("title_add", { text: "Title", x: Math.round((p.meta.width || 0) * 0.15), y: Math.round((p.meta.height || 0) * 0.4), w: Math.round((p.meta.width || 0) * 0.7), h: Math.round((p.meta.height || 0) * 0.1), t0: Math.max(0, scrub - 0.5), t1: scrub + 3 })}
+            <button onClick={async () => { const fresh = await branch("title_add", { text: "Title", x: Math.round((p.meta.width || 0) * 0.15), y: Math.round((p.meta.height || 0) * 0.4), w: Math.round((p.meta.width || 0) * 0.7), h: Math.round((p.meta.height || 0) * 0.1), t0: Math.max(0, scrub - 0.5), t1: scrub + 3 }); if (fresh) setSelTitle((fresh.captions.titles || []).length - 1); }}
               className="w-full inline-flex items-center justify-center gap-1.5 text-[12px] py-1.5 rounded-lg border border-dashed border-[var(--color-border)] text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] transition-colors">
               <Plus size={13} /> {t("titles.add")}
             </button>
@@ -1123,7 +1129,7 @@ function Editor() {
               <ComparePane label={t("compare.result")} src={api.previewUrl(pid, scrub, rev)} />
             </div>
           ) : (
-            <PreviewCanvas pid={pid} project={p} scrub={scrub} rendered={rendered}
+            <PreviewCanvas pid={pid} project={p} scrub={scrub} rendered={rendered} lane={lane}
               onChanged={(fresh) => setProject(fresh)} />
           )}
         </div>
