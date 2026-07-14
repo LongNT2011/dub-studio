@@ -1594,7 +1594,7 @@ function FirstRun() {
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [prog, setProg] = useState<{ id: string; pct: number; msg: string } | null>(null);
+  const [prog, setProg] = useState<{ pct: Record<string, number>; overall: number; msg: string } | null>(null); // pct[componentId] -> % (параллельные бары)
   const [err, setErr] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -1608,11 +1608,15 @@ function FirstRun() {
 
   async function download(ids: string[]) {
     if (ids.length === 0 || busy) return;
-    setBusy(true); setErr(null); setProg({ id: ids[0], pct: 0, msg: "" });
+    setBusy(true); setErr(null); setProg({ pct: {}, overall: 0, msg: "" });
     try {
       const { job_id } = await api.setupDownload(ids);
       await api.watchJob(job_id, (e) => {
-        if (e.type === "progress") setProg({ id: e.component || "", pct: e.pct ?? 0, msg: e.msg || "" });
+        if (e.type === "progress") {
+          const m: Record<string, number> = {};
+          (e.parts || []).forEach((p) => { m[p.component] = p.pct; });   // бар на каждый компонент
+          setProg({ pct: m, overall: e.pct ?? 0, msg: e.msg || "" });
+        }
       });
       const s = await refresh();
       if (s.ready) { setStage("empty"); }   // всё скачано -> сразу на стартовый экран, без ручного «Продолжить»
@@ -1681,7 +1685,7 @@ function FirstRun() {
                     {members.map((c) => {
                       const isDefault = c.requirement !== "optional";
                       const checked = sel.has(c.id);
-                      const active = prog && prog.id === c.id;
+                      const active = !!prog && prog.pct[c.id] != null;
                       return (
                         <label key={c.id} className={`flex items-center gap-2.5 rounded-lg px-2 py-1.5 ${c.installed ? "" : "cursor-pointer hover:bg-[var(--color-surface-2)]"} ${checked && !c.installed ? "bg-[color-mix(in_oklab,var(--color-accent)_8%,transparent)]" : ""}`}>
                           {c.installed
@@ -1695,7 +1699,7 @@ function FirstRun() {
                                 : <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-surface-2)] text-[var(--color-muted)] uppercase tracking-wide shrink-0">{t("setup.alt")}</span>}
                               {c.installed && <span className="text-[10px] text-[var(--color-accent)] shrink-0">{t("setup.installed")}</span>}
                             </div>
-                            {active && <div className="mt-1 h-1 rounded-full bg-[var(--color-surface-2)] overflow-hidden"><div className="h-full bg-[var(--color-accent)]" style={{ width: `${prog!.pct}%` }} /></div>}
+                            {active && <div className="mt-1 h-1 rounded-full bg-[var(--color-surface-2)] overflow-hidden"><div className="h-full bg-[var(--color-accent)]" style={{ width: `${prog!.pct[c.id] ?? 0}%` }} /></div>}
                           </div>
                           <span className="mono text-[11px] text-[var(--color-muted)] shrink-0">{fmtBytes(c.size)}{c.vram ? ` · ${fmtBytes(c.vram)} VRAM` : ""}</span>
                         </label>
@@ -1707,7 +1711,7 @@ function FirstRun() {
               );
             }
             const c = row.c;
-            const active = prog && prog.id === c.id;
+            const active = !!prog && prog.pct[c.id] != null;
             const canPick = c.delivery === "download" && !c.installed;
             return (
               <div key={c.id} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3">
@@ -1728,7 +1732,7 @@ function FirstRun() {
                     <div className="text-[12px] text-[var(--color-muted)] truncate">{c.purpose}</div>
                     {active && (
                       <div className="mt-1.5 h-1.5 rounded-full bg-[var(--color-surface-2)] overflow-hidden">
-                        <div className="h-full bg-[var(--color-accent)] transition-[width] duration-200" style={{ width: `${prog!.pct}%` }} />
+                        <div className="h-full bg-[var(--color-accent)] transition-[width] duration-200" style={{ width: `${prog!.pct[c.id] ?? 0}%` }} />
                       </div>
                     )}
                   </div>
@@ -1779,7 +1783,7 @@ function FirstRun() {
               className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold hover:brightness-105">
               <Check size={16} />{t("setup.continue")}</button>
           )}
-          {busy && prog && <span className="mono text-[11px] text-[var(--color-muted)] truncate">{prog.msg} · {prog.pct.toFixed(0)}%</span>}
+          {busy && prog && <span className="mono text-[11px] text-[var(--color-muted)] truncate">{prog.msg} · {prog.overall.toFixed(0)}%</span>}
         </div>
       </motion.div>
     </div>

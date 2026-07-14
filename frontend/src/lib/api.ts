@@ -37,7 +37,7 @@ export type Capabilities = {
   device: string; tts_quant: string; asr_model: string; ffmpeg: boolean;
   languages: string[]; voice_modes: string[]; models?: ModelStack;
 };
-export type JobEvent = { type: "progress" | "done" | "error"; stage?: string; pct?: number; msg?: string; result?: unknown; error?: string; component?: string; downloaded?: number; total?: number };
+export type JobEvent = { type: "progress" | "done" | "error"; stage?: string; pct?: number; msg?: string; result?: unknown; error?: string; component?: string; downloaded?: number; total?: number; parts?: { component: string; pct: number }[] };
 
 // «Первый запуск»: статус внешних компонентов (модели/движки/системные библиотеки) + автозакачка.
 export type SetupComponent = {

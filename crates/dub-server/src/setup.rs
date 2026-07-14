@@ -772,16 +772,17 @@ pub fn download_components(
     let tmp_dir = std::env::temp_dir().join("dub-studio-setup");
     let _ = std::fs::create_dir_all(&tmp_dir);
 
-    // Файлы к загрузке (пропускаем уже целые прямые файлы — идемпотентность). Архив/wheel качаем во
-    // временный файл рядом; запоминаем метаданные для распаковки после пула.
+    // Файлы к загрузке (пропускаем уже целые прямые файлы). ci — индекс компонента в selected: прогресс
+    // считаем ПОКОМПОНЕНТНО, чтобы бар каждой модели заполнялся отдельно (все параллельно).
     struct Planned {
+        ci: usize,
         dest: PathBuf,
         target: PathBuf,
         extract: Extract,
         url: &'static str,
     }
     let mut planned: Vec<Planned> = Vec::new();
-    for c in &selected {
+    for (ci, c) in selected.iter().enumerate() {
         for f in c.files {
             let dest = repo_root.join(f.dest_rel);
             if let Some(parent) = dest.parent() {
@@ -804,7 +805,7 @@ pub fn download_components(
             } else {
                 dest.clone()
             };
-            planned.push(Planned { dest, target, extract: f.extract, url: f.url });
+            planned.push(Planned { ci, dest, target, extract: f.extract, url: f.url });
         }
     }
 
@@ -823,19 +824,22 @@ pub fn download_components(
 
     progress(json!({ "msg": "Скачиваю модели…", "stage": "download" }));
 
-    // Пробинг + нарезка на чанки + открытие файлов. Чанки ВСЕХ файлов кладём в ОДНУ очередь.
+    // Чанки всех файлов в ОДНУ очередь; счётчик прогресса — на КАЖДЫЙ компонент (comp_done[ci]).
     enum Task {
-        Range { file: Arc<File>, url: &'static str, start: u64, end: u64 },
-        Whole { url: &'static str, dest: PathBuf },
+        Range { file: Arc<File>, url: &'static str, start: u64, end: u64, ci: usize },
+        Whole { url: &'static str, dest: PathBuf, ci: usize },
     }
+    let ncomp = selected.len();
+    let comp_done: Vec<Arc<AtomicU64>> = (0..ncomp).map(|_| Arc::new(AtomicU64::new(0))).collect();
+    let mut comp_total = vec![0u64; ncomp];
     let mut tasks: Vec<Task> = Vec::new();
     let mut open_files: Vec<Arc<File>> = Vec::new(); // держим хендлы живыми до конца пула
-    let mut grand_total: u64 = 0;
     for p in &planned {
         if cancel() {
             return Err("отменено".to_string());
         }
         let (total, ranges_ok) = probe_size(p.url);
+        comp_total[p.ci] += total;
         if ranges_ok && total > 0 {
             let file = std::fs::OpenOptions::new()
                 .create(true)
@@ -849,31 +853,28 @@ pub fn download_components(
             let mut start = 0u64;
             while start < total {
                 let end = (start + CHUNK - 1).min(total - 1);
-                tasks.push(Task::Range { file: file.clone(), url: p.url, start, end });
+                tasks.push(Task::Range { file: file.clone(), url: p.url, start, end, ci: p.ci });
                 start += CHUNK;
             }
-            grand_total += total;
         } else {
-            // сервер без range -> файл целиком в один слот
-            tasks.push(Task::Whole { url: p.url, dest: p.target.clone() });
-            grand_total += total; // 0, если размер неизвестен
+            tasks.push(Task::Whole { url: p.url, dest: p.target.clone(), ci: p.ci });
         }
     }
+    let grand_total: u64 = comp_total.iter().sum();
 
     // ── Общий пул: POOL_SLOTS воркеров разбирают ОДНУ очередь чанков всех файлов. Разные модели качаются
     //    одновременно, но суммарно не больше POOL_SLOTS соединений (не 8×N -> без бана HF CDN). ──
     let n = POOL_SLOTS.min(tasks.len()).max(1);
     let queue = Arc::new(Mutex::new(std::collections::VecDeque::from(tasks)));
-    let downloaded = Arc::new(AtomicU64::new(0));
     let finished = Arc::new(AtomicUsize::new(0));
     let abort = Arc::new(AtomicBool::new(false));
     let error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
 
     std::thread::scope(|sc| {
         for _ in 0..n {
-            let (queue, downloaded, finished, abort, error) = (
+            let (queue, comp_done, finished, abort, error) = (
                 queue.clone(),
-                downloaded.clone(),
+                comp_done.clone(),
                 finished.clone(),
                 abort.clone(),
                 error.clone(),
@@ -889,10 +890,12 @@ pub fn download_components(
                         None => break, // очередь пуста
                     };
                     let res = match &task {
-                        Task::Range { file, url, start, end } => {
-                            download_range(url, file, *start, *end, &downloaded, &abort)
+                        Task::Range { file, url, start, end, ci } => {
+                            download_range(url, file, *start, *end, &comp_done[*ci], &abort)
                         }
-                        Task::Whole { url, dest } => download_whole(url, dest, &downloaded, &abort),
+                        Task::Whole { url, dest, ci } => {
+                            download_whole(url, dest, &comp_done[*ci], &abort)
+                        }
                     };
                     if let Err(e) = res {
                         if e != "отменено" {
@@ -908,23 +911,32 @@ pub fn download_components(
                 finished.fetch_add(1, Ordering::SeqCst);
             });
         }
-        // Главный поток: агрегатный прогресс по всем файлам + проверка отмены.
+        // Главный поток: агрегатный + ПОКОМПОНЕНТНЫЙ прогресс (parts) + проверка отмены.
         let t0 = std::time::Instant::now();
         loop {
             if cancel() {
                 abort.store(true, Ordering::Relaxed);
             }
-            let got = downloaded.load(Ordering::Relaxed);
+            let got: u64 = comp_done.iter().map(|a| a.load(Ordering::Relaxed)).sum();
             let secs = t0.elapsed().as_secs_f64();
             let mbps = if secs > 0.0 { (got as f64 / 1_000_000.0) / secs } else { 0.0 };
-            let pct = if grand_total > 0 { (got as f64 / grand_total as f64) * 100.0 } else { 0.0 };
+            let overall = if grand_total > 0 { (got as f64 / grand_total as f64) * 100.0 } else { 0.0 };
+            let parts: Vec<Value> = (0..ncomp)
+                .filter(|&i| comp_total[i] > 0)
+                .map(|i| {
+                    let d = comp_done[i].load(Ordering::Relaxed);
+                    let p = (d as f64 / comp_total[i] as f64 * 100.0).min(100.0);
+                    json!({ "component": selected[i].id, "pct": p })
+                })
+                .collect();
             progress(json!({
                 "stage": "download",
                 "msg": "Скачиваю модели…",
                 "downloaded": got,
                 "total": grand_total,
                 "speed_mbps": mbps,
-                "pct": pct.min(100.0),
+                "pct": overall.min(100.0),
+                "parts": parts,
             }));
             if finished.load(Ordering::SeqCst) >= n {
                 break;
