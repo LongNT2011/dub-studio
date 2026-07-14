@@ -181,6 +181,12 @@
     "dub": "Play the dub (video + voiceover)",
     "volume": "Preview volume"
   },
+  "status": {
+    "working": "Working…",
+    "idle": "Ready",
+    "log": "Activity log",
+    "clear": "Clear"
+  },
   "edit": {
     "setStart": "Start at playhead",
     "setEnd": "End at playhead",

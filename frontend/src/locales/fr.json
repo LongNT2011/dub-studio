@@ -148,6 +148,12 @@
     "dub": "Lire le doublage (vidéo + voix)",
     "volume": "Volume"
   },
+  "status": {
+    "working": "En cours…",
+    "idle": "Prêt",
+    "log": "Journal d'activité",
+    "clear": "Effacer"
+  },
   "edit": {
     "setStart": "Début au curseur",
     "setEnd": "Fin au curseur",

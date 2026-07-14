@@ -148,6 +148,12 @@
     "dub": "Reproducir el doblaje (vídeo + voz)",
     "volume": "Volumen"
   },
+  "status": {
+    "working": "Trabajando…",
+    "idle": "Listo",
+    "log": "Registro de actividad",
+    "clear": "Borrar"
+  },
   "edit": {
     "setStart": "Inicio en el cursor",
     "setEnd": "Fin en el cursor",

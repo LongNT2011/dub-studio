@@ -3,6 +3,7 @@ import type { Project } from "./lib/api";
 
 type Stage = "boot" | "setup" | "empty" | "analyzing" | "editor" | "batch";
 export type ExportItem = { id: string; name: string; status: "rendering" | "done" | "error"; msg: string; url?: string; pid?: string };
+export type Activity = { t: number; text: string; kind: "work" | "done" | "error" };   // строка лога «что делает приложение»
 
 type State = {
   stage: Stage;
@@ -12,6 +13,7 @@ type State = {
   rendered: boolean;
   rendering: boolean;                // current project's export in flight (button state; does NOT block the screen)
   exports: ExportItem[];            // non-blocking export queue shown in the bottom-right Files panel
+  activities: Activity[];           // журнал «что делает приложение» — статус-строка в шапке + разворот в лог
   past: Project[];                  // undo/redo history of Project snapshots
   future: Project[];
   rev: number;                       // preview cache-buster: bumped on every backend-confirmed frame change
@@ -33,6 +35,7 @@ type State = {
   bump: () => void;                  // invalidate the rendered preview frame -> <img> refetches
   setSelBlur: (i: number | null) => void;
   setSelTitle: (i: number | null) => void;
+  pushActivity: (text: string, kind?: Activity["kind"]) => void;   // добавить строку в журнал
 };
 
 export const useStore = create<State>((set, get) => ({
@@ -43,6 +46,7 @@ export const useStore = create<State>((set, get) => ({
   rendered: false,
   rendering: false,
   exports: [],
+  activities: [],
   past: [],
   future: [],
   rev: 0,
@@ -53,9 +57,15 @@ export const useStore = create<State>((set, get) => ({
   setStage: (stage) => set({ stage }),
   setPid: (pid) => set({ pid }),
   setProject: (project) => set({ project }),
-  setProgress: (stage, msg, pct = null) => set((s) => ({   // keep the last message on a stage-only tick; pct only during a download
-    progress: { stage, msg: msg || s.progress.msg, pct: pct ?? null },
-  })),
+  setProgress: (stage, msg, pct = null) => set((s) => {   // keep the last message on a stage-only tick; pct only during a download
+    const progress = { stage, msg: msg || s.progress.msg, pct: pct ?? null };
+    const text = (msg || stage || "").trim();
+    if (!text) return { progress };
+    const kind: Activity["kind"] = stage === "error" ? "error" : stage === "done" ? "done" : "work";
+    const last = s.activities[s.activities.length - 1];
+    if (last && last.text === text && last.kind === kind) return { progress };   // дедуп повторов
+    return { progress, activities: [...s.activities, { t: Date.now(), text, kind }].slice(-200) };
+  }),
   setRendered: (rendered) => set({ rendered }),
   setRendering: (rendering) => set({ rendering }),
   addExport: (e) => set((s) => ({ exports: [e, ...s.exports.filter((x) => x.id !== e.id)] })),   // дедуп по id: повторный экспорт того же проекта заменяет запись, а не плодит дубли
@@ -83,4 +93,11 @@ export const useStore = create<State>((set, get) => ({
   bump: () => set((s) => ({ rev: s.rev + 1 })),
   setSelBlur: (selBlur) => set({ selBlur }),
   setSelTitle: (selTitle) => set({ selTitle }),
+  pushActivity: (text, kind = "work") => set((s) => {
+    const clean = (text || "").trim();
+    if (!clean) return {};
+    const last = s.activities[s.activities.length - 1];
+    if (last && last.text === clean && last.kind === kind) return {};   // дедуп повторов
+    return { activities: [...s.activities, { t: Date.now(), text: clean, kind }].slice(-200) };
+  }),
 }));

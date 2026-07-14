@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
-import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine } from "lucide-react";
+import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine, ChevronDown, ScrollText } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useFloatable, dockSlot } from "./lib/useFloatable";
 import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent } from "./lib/api";
@@ -281,6 +281,51 @@ function HelpModal({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Статус-строка в шапке: текущее действие приложения + разворот по клику в полный журнал (что делалось).
+function StatusBar() {
+  const { t } = useTranslation();
+  const activities = useStore((s) => s.activities);
+  const progress = useStore((s) => s.progress);
+  const rendering = useStore((s) => s.rendering);
+  const [open, setOpen] = useState(false);
+  const last = activities[activities.length - 1];
+  const busy = rendering || progress.pct != null || (!!progress.stage && !["", "done", "error"].includes(progress.stage));
+  const text = busy ? (progress.msg || last?.text || t("status.working")) : (last?.text || t("status.idle"));
+  const errored = !busy && last?.kind === "error";
+  const fmt = (ms: number) => new Date(ms).toLocaleTimeString();
+  return (
+    <div className="relative flex-1 min-w-0 flex justify-center px-3">
+      <button onClick={() => setOpen((o) => !o)} title={t("status.log")}
+        className="inline-flex items-center gap-2 max-w-full px-3 py-1 rounded-md text-[12px] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors">
+        {busy
+          ? <Loader2 size={13} className="animate-spin text-[var(--color-accent)] shrink-0" />
+          : <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${errored ? "bg-[var(--color-warn)]" : "bg-[var(--color-accent)]"}`} />}
+        <span className="truncate">{text}</span>
+        {activities.length > 0 && <ChevronDown size={13} className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute top-full mt-1 left-1/2 -translate-x-1/2 z-50 w-[min(560px,92vw)] max-h-[60vh] overflow-y-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xl p-1.5">
+            <div className="flex items-center justify-between px-2 py-1 mb-1 border-b border-[var(--color-border)]">
+              <span className="text-[11px] uppercase tracking-wide text-[var(--color-muted)] inline-flex items-center gap-1.5"><ScrollText size={13} />{t("status.log")}</span>
+              {activities.length > 0 && <button onClick={() => useStore.setState({ activities: [] })} className="text-[11px] text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors">{t("status.clear")}</button>}
+            </div>
+            {activities.length === 0 && <div className="text-[11px] text-[var(--color-muted)]/60 py-3 text-center">—</div>}
+            {[...activities].reverse().map((a, i) => (
+              <div key={i} className="flex items-start gap-2 px-2 py-1 text-[12px]">
+                <span className="mono text-[10px] text-[var(--color-muted)]/70 tabnum shrink-0 mt-[3px]">{fmt(a.t)}</span>
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 mt-1.5 ${a.kind === "error" ? "bg-[var(--color-warn)]" : a.kind === "done" ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
+                <span className={`leading-snug break-words min-w-0 ${a.kind === "error" ? "text-[var(--color-warn)]" : "text-[var(--color-text)]"}`}>{a.text}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function TopBar() {
   const { t } = useTranslation();
   const [settings, setSettings] = useState(false);
@@ -302,6 +347,7 @@ function TopBar() {
           {t("app.name")}
         </span>
       </div>
+      <StatusBar />
       <div className="flex items-center gap-2">
         <div id="dock-slot" className="flex items-center gap-2" />
         {stage !== "empty" && (
@@ -636,6 +682,7 @@ function Editor() {
   const setSelBlur = useStore((s) => s.setSelBlur);
   const selTitle = useStore((s) => s.selTitle);           // selected title (shared with the canvas overlay)
   const setSelTitle = useStore((s) => s.setSelTitle);
+  const pushActivity = useStore((s) => s.pushActivity);   // журнал действий (статус-строка в шапке)
   const rendering = useStore((s) => s.rendering);
   const setRendering = useStore((s) => s.setRendering);
   const addExport = useStore((s) => s.addExport);
@@ -727,6 +774,7 @@ function Editor() {
   // a patch/PUT rejected (4xx/5xx/offline) -> surface it in the Files panel (like doExport) and re-sync from
   // the server so the optimistic local echo can't silently diverge from persisted truth
   async function surfaceErr(err: unknown) {
+    pushActivity(String(err), "error");
     addExport({ id: `err-${Date.now()}`, name: t("common.error"), status: "error", msg: String(err) });
     try { setProject(await api.getProject(pid)); } catch { /* offline -> keep optimistic state */ }
   }
@@ -743,7 +791,7 @@ function Editor() {
   }
   async function doRegen(segId: string) {                            // re-synthesize the TTS for ONE phrase (mark dirty -> /render)
     if (regenId) return;
-    setRegenId(segId);
+    setRegenId(segId); pushActivity(t("seg.regen"));
     try {
       await api.patch(pid, { op: "regen", id: segId });
       const { job_id } = await api.render(pid);                       // re-TTS only the dirty seg + re-mux -> fresh dub
@@ -807,7 +855,7 @@ function Editor() {
   }
   async function doGain(gainDb: number) {                            // монтажный гейн всей дорожки: патч + лёгкий ре-рендер (ре-TTS не нужен, сегменты из кэша)
     if (regenId) return;
-    setRegenId("__all__");
+    setRegenId("__all__"); pushActivity(t("voice.gain"));
     try {
       await api.patch(pid, { op: "gain", gain_db: gainDb });
       const { job_id } = await api.render(pid);
@@ -818,7 +866,7 @@ function Editor() {
   }
   async function doRegenAll() {                                      // re-synthesize the WHOLE dub (after switching the pack voice/speaker, or to re-roll)
     if (regenId) return;
-    setRegenId("__all__");                                          // sentinel: disables per-seg regen buttons, no per-seg spinner
+    setRegenId("__all__"); pushActivity(t("voice.regenAll"));       // sentinel: disables per-seg regen buttons, no per-seg spinner
     try {
       await api.patch(pid, { op: "regen_all" });                    // mark every segment dirty
       const { job_id } = await api.render(pid);                     // re-TTS all dirty segs + re-mux -> fresh dub
@@ -859,14 +907,15 @@ function Editor() {
     const exId = `export-${pid}`;   // одна запись на проект (повторный экспорт заменяет её, а не плодит дубли)
     const name = (p.meta.video || pid).split(/[\\/]/).pop() || pid;
     addExport({ id: exId, name, status: "rendering", msg: t("common.rendering"), pid });   // queue entry -> Files panel (no screen block)
-    setRendering(true);
+    setRendering(true); pushActivity(`${t("export.proceed")}: ${name}`);
     try {
       const { job_id } = await api.render(pid);
-      await api.watchJob(job_id, (e) => { if (e.type === "progress") updateExport(exId, { msg: e.msg || "" }); });
+      await api.watchJob(job_id, (e) => { if (e.type === "progress") { updateExport(exId, { msg: e.msg || "" }); pushActivity(e.msg || "", "work"); } });
       updateExport(exId, { status: "done", msg: "", url: `${api.outputUrl(pid)}?rev=${Date.now()}` });   // bust cache on re-export
+      pushActivity(`${t("compare.result")}: ${name}`, "done");
       setRendered(true); setDubRev(Date.now());   // /dub now serves the freshly rendered output.mp4 -> reload <audio>
     } catch (err) {
-      updateExport(exId, { status: "error", msg: String(err) });
+      updateExport(exId, { status: "error", msg: String(err) }); pushActivity(String(err), "error");
     } finally { setRendering(false); }
   }
   async function doRemix() {                                            // Gemma rewrites the WHOLE script on a theme
@@ -1620,12 +1669,13 @@ function FirstRun() {
           const m: Record<string, number> = {};
           (e.parts || []).forEach((p) => { m[p.component] = p.pct; });   // бар на каждый компонент
           setProg({ pct: m, overall: e.pct ?? 0, msg: e.msg || "" });
+          useStore.getState().pushActivity(e.msg || "", "work");         // в общий журнал шапки
         }
       });
       const s = await refresh();
       if (s.ready) { setStage("empty"); }   // всё скачано -> сразу на стартовый экран, без ручного «Продолжить»
     } catch (e) {
-      setErr(String(e));
+      setErr(String(e)); useStore.getState().pushActivity(String(e), "error");
     } finally {
       setBusy(false); setProg(null);
     }
