@@ -1,0 +1,129 @@
+<div align="center">
+
+<img src="frontend/public/favicon.svg" width="72" alt="Dub Studio"/>
+
+# Dub Studio
+
+**面向 Windows 的免费离线 AI 视频配音工作室 —— 用克隆的声音、翻译字幕和画面文字本地化，把任意短视频重新配音成另一种语言。100% 本地运行，零 Python：一个原生 `.exe`（Rust + C++/CUDA），所有模型与引擎一键下载。**
+
+[![License](https://img.shields.io/github/license/timoncool/dub-studio?style=flat-square)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/timoncool/dub-studio?style=flat-square)](https://github.com/timoncool/dub-studio/stargazers)
+[![Latest release](https://img.shields.io/github/v/release/timoncool/dub-studio?include_prereleases&style=flat-square)](https://github.com/timoncool/dub-studio/releases)
+[![Downloads](https://img.shields.io/github/downloads/timoncool/dub-studio/total?style=flat-square)](https://github.com/timoncool/dub-studio/releases)
+
+[English](README.md) · [Русский](README.ru.md) · **中文** · [Español](README.es.md) · [Português](README.pt.md) · [Français](README.fr.md)
+
+![Dub Studio —— Windows 上的 AI 视频配音](docs/screenshot.png)
+
+</div>
+
+## 这是什么
+
+**Dub Studio** 把任意短视频变成另一种语言的配音版本 —— **克隆说话人本人的音色、翻译字幕、并在画面上就地本地化嵌入文字**。拖入一个片段，智能自动流程先出初稿；随后实时编辑器让你掌控**每一条字幕、声音、模糊框、字体和标题**，即时预览。
+
+一切都在**你自己的电脑上 100% 运行** —— 无云端、无上传、无订阅。你的素材和声纹绝不离开电脑。
+
+这是 **v2 —— 完全原生重写**。没有内嵌 Python、没有 torch、没有 CUDA wheel。整条流水线是 **Rust + 原生 C++/CUDA 引擎（GGUF/ONNX）**：单进程、启动快、显存占用低。模型、引擎、CUDA/VC++ 运行库和 ffmpeg 都由应用在首次运行时**自行一键下载安装** —— 唯一需要手动安装的是 NVIDIA 驱动。
+
+## 五种模式，随时切换
+
+| 模式 | 作用 |
+|------|------|
+| 🎙️ **配音** | 完整重新配音到目标语言，**克隆原始音色** —— 按说话人自动分配或自选声音 |
+| 🗣️ **旁白（画外音）** | 翻译人声**叠加在减弱的原声之上** —— 原声仍在下方可听，平衡可调 |
+| 📝 **字幕** | 烧录**原语言**字幕、保留原声 —— 不配音、不翻译 |
+| ✨ **趣味改编** | 给个主题（“像海盗”“像新闻播报”）→ 模型**重写整个脚本**再配音 |
+| 🎬 **转录** | 干净的**说话人分离转录**、逐说话人排布、卡拉OK跟随播放、一键生成声音、导出 `.srt`/`.txt` |
+
+加载一次片段，即可在编辑器里送入任意模式。
+
+## 功能
+
+- **声音克隆** —— 克隆原始音色并说出新语言（原生 [Higgs Audio v3](https://huggingface.co/bosonai) 引擎，GGUF）。按说话人自动分配或使用自带声音包。
+- **说话人分离** —— 谁在何时说话（NVIDIA **Sortformer** v2，最多 4 个声音），每个说话人不同声音。
+- **画面文字本地化** —— OCR 检测嵌入文字（**PP-OCR** ONNX），**模糊原文**并以匹配风格叠印本地化标题 —— 其他工具没有的功能。
+- **翻译 + 视觉风格分析** —— 通过 **Gemma-4 12B**（GGUF，llama.cpp）本地翻译整段转录；视觉流程解析画面排布：字幕风格、标题、品牌、文字区域。
+- **SOTA 人声分离** —— **Mel-Band Roformer**（CUDA 上的原生 BSRoformer.cpp）将人声与音乐分离：背景音乐**得以保留**，克隆锁定干净语音。
+- **26 种字幕预设** —— karaoke / 逐词 / hormozi / 霓虹等，直接**在你的画面上**渲染（所见即所得，JASSUB 覆盖同一份 ffmpeg 烧录的 `.ass`）。
+- **卡拉OK转录** —— 播放视频，转录中当前行与当前**词**同步高亮。
+- **实时编辑器** —— 编辑转录、声音、字幕风格、模糊框、标题；**约 0.17 秒/帧预览**，每次修改即时可见。
+- **智能重生成** —— 导出时只重新合成你改动过的片段，而非整段。
+- **批量处理** —— 文件队列，统一设置，逐文件进度。
+- **前后对比** —— 原片与配音并排。
+- **6 种语言** —— EN / RU / ZH / ES / PT / FR，自动检测源语言。
+- **任意视频格式** —— MP4、MOV、MKV、WEBM、AVI 等（ffmpeg 解码）。
+- **一键安装 + 应用内自动更新** —— 首次运行下载模型、引擎、运行库与 ffmpeg；应用自我更新。
+- **完全便携** —— 不写入用户配置；删除文件夹不留痕迹。
+
+## 截图
+
+主界面 —— 五种模式、所选视频预览、语言选择、任意视频格式：
+
+![Dub Studio 主界面](docs/screenshot-home.png)
+
+转录模式 —— 说话人分离转录、逐说话人排布、卡拉OK跟随播放、一键从每个说话人生成声音：
+
+![Dub Studio 转录模式](docs/screenshot-transcribe.png)
+
+## 环境要求
+
+- **系统：** Windows 10 / 11（x64）
+- **显卡：** NVIDIA，8–16 GB 显存
+- **WebView2** —— Windows 11 预装（Windows 10 自动安装）
+- **磁盘：** 约 15 GB 用于模型、引擎与运行库（首次运行下载），外加项目空间
+
+唯一需要手动安装的是较新的 **[NVIDIA 驱动](https://www.nvidia.com/Download/index.aspx)**。其余一切 —— 模型（Higgs Audio v3、Gemma-4 12B + vision、Parakeet-TDT、Sortformer、Mel-Band Roformer）、引擎、CUDA 运行库与 ffmpeg —— 应用在首次运行时一键下载。
+
+## 快速开始
+
+1. 从 [Releases](https://github.com/timoncool/dub-studio/releases) **下载**便携版并解压到任意文件夹（或用 `-setup.exe` / `.msi` 安装）。
+2. **运行** `Dub Studio.exe`。
+3. 在**首次运行**面板点击**全部下载** —— 应用获取模型、引擎与运行库（约 15 GB，一次）。若缺 NVIDIA 驱动，按钮会打开下载页。
+4. **拖入视频**，选择目标语言 → 自动流程出初稿。在编辑器里微调后点击**导出**。
+
+> 一切都下载并存放在**应用文件夹内**。模型、缓存与项目不会去别处。
+
+## 工作原理
+
+`analyze()` 是固定的第一遍：分离 → 带词级时间戳的 ASR → 说话人分离 → 上下文翻译 + 视觉（字幕风格 / 标题 / 品牌）→ OCR（排布 / 模糊框）。产出一个可编辑的 **Project** 文档。每次编辑都是对它的补丁，约 0.17 秒/帧预览；导出只重跑**被弄脏的阶段**。
+
+**技术栈：** 原生 **Tauri 2（Rust）** 外壳在本地端口启动 `dub-server`（axum），并把窗口打开到 SPA —— React 19 + Vite + Tailwind + react-konva 覆盖 JASSUB。引擎：Parakeet-TDT（ASR，ONNX）· Sortformer（分离）· Gemma-4-12B GGUF（翻译 + 视觉，llama.cpp）· Higgs Audio v3（TTS）· Mel-Band Roformer（人声分离，BSRoformer.cpp）· PP-OCR（ONNX）· ffmpeg/NVENC。**运行时没有任何 Python 进程。**
+
+### 从源码构建
+
+```bash
+git clone https://github.com/timoncool/dub-studio.git
+cd dub-studio
+
+cd frontend && npm install && npm run build && cd ..   # 1) SPA
+cargo build --release -p dub-server                     # 2) 原生服务器 (axum)
+cd desktop && npm install && npx tauri build            # 3) 桌面外壳 (Tauri)
+```
+
+需要 Node 20+、Rust（MSVC 工具链）与 WebView2。原生引擎无需重建 —— 应用会下载预编译二进制。
+
+## 作者
+
+- **Nerual Dreming** —— [Telegram](https://t.me/nerual_dreming) | [neuro-cartel.com](https://neuro-cartel.com) | [ArtGeneration.me](https://artgeneration.me) 创始人
+- **Neuro-Soft** —— [Telegram](https://t.me/neuroport) | 便携 AI 应用
+
+## 致谢
+
+- **[Boson AI](https://huggingface.co/bosonai)** —— Higgs Audio v3 模型；**[drbaph / Higgs-Audio-v3-Studio](https://huggingface.co/drbaph/Higgs-Audio-v3-Studio)** —— GGUF 量化与原生 `audiocpp_engine.dll`。
+- **[NVIDIA Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)** 与 **[Sortformer](https://huggingface.co/nvidia)** —— ASR 与说话人分离；ONNX 权重来自 [istupakov/parakeet-tdt-0.6b-v3-onnx](https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx) 与 [altunenes/parakeet-rs](https://github.com/altunenes/parakeet-rs)。
+- **[Google Gemma](https://huggingface.co/google/gemma-4-12b-it-qat-q4_0-gguf)** —— Gemma-4 12B（翻译 + 视觉），经 [llama.cpp](https://github.com/ggml-org/llama.cpp)。
+- **[chenmozhijin / BSRoformer.cpp](https://github.com/chenmozhijin/BSRoformer.cpp)** 与 **[GaboxR67](https://huggingface.co/GaboxR67)** —— 原生引擎与 Mel-Band Roformer 模型。
+
+## 支持作者
+
+我做开源软件与 AI 研究，绝大部分成果都公开。捐助让我能做和研究更多。
+
+**[所有支持方式](DONATE.md)** | **[dalink.to/nerual_dreming](https://dalink.to/nerual_dreming)** | **[boosty.to/neuro_art](https://boosty.to/neuro_art)**
+
+- **BTC:** `1E7dHL22RpyhJGVpcvKdbyZgksSYkYeEBC`
+- **ETH (ERC20):** `0xb5db65adf478983186d4897ba92fe2c25c594a0c`
+- **USDT (TRC20):** `TQST9Lp2TjK6FiVkn4fwfGUee7NmkxEE7C`
+
+## 许可证
+
+应用代码采用 [MIT](LICENSE)。模型权重保留各自许可证（Higgs Audio v3 —— Boson AI 研究/非商业；Gemma —— Gemma Terms 等）—— 每次发布前审核。
