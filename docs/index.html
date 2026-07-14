@@ -104,6 +104,15 @@
   .gallery img{display:block;width:100%}
   .gallery figcaption{padding:12px 14px;font-size:13px;color:var(--muted)}
   .gallery figcaption b{color:var(--text)}
+  .gallery img{cursor:zoom-in}
+  .featgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:44px}
+  .feat{background:var(--bg);border:1px solid var(--border);border-radius:14px;padding:20px 22px;display:flex;gap:15px;align-items:flex-start;transition:border-color .15s,transform .15s}
+  .feat:hover{border-color:var(--accent);transform:translateY(-2px)}
+  .feat .fic{font-size:22px;line-height:1;flex-shrink:0;width:40px;height:40px;display:grid;place-items:center;background:var(--surface2);border:1px solid var(--border);border-radius:10px}
+  .feat p{color:var(--muted);font-size:14.5px;margin:0}
+  .feat p b{color:var(--text);display:block;margin-bottom:2px}
+  #lightbox{display:none;position:fixed;inset:0;z-index:100;background:rgba(6,7,9,.94);cursor:zoom-out;padding:24px;align-items:center;justify-content:center}
+  #lightbox img{max-width:96vw;max-height:92vh;border-radius:10px;box-shadow:0 24px 70px rgba(0,0,0,.7)}
   footer{border-top:1px solid var(--border);padding:40px 0;color:var(--muted);font-size:14px;text-align:center}
   footer a{color:var(--text);text-decoration:underline;text-underline-offset:2px}
   @media(max-width:640px){nav .hide-s{display:none}}
@@ -184,18 +193,18 @@
 
 <section id="features" class="band"><div class="wrap">
   <h2 data-i18n="feat_h2">Everything, running on your machine</h2>
-  <ul class="feats">
-    <li data-i18n="f1"><b>Voice cloning</b> — the original timbre speaks the new language (Higgs Audio v3).</li>
-    <li data-i18n="f2"><b>Speaker diarization</b> — a distinct voice per speaker (NVIDIA Sortformer, up to 4).</li>
-    <li data-i18n="f3"><b>On-screen text localization</b> — OCR blurs the original and prints a matched localized title.</li>
-    <li data-i18n="f4"><b>Local translation + vision</b> — Gemma-4 12B translates and reads the frame layout.</li>
-    <li data-i18n="f5"><b>SOTA vocal separation</b> — Mel-Band Roformer keeps the backing track intact.</li>
-    <li data-i18n="f6"><b>26 caption presets</b> — karaoke, word-by-word, neon and more, WYSIWYG.</li>
-    <li data-i18n="f7"><b>Live editor</b> — ~0.17 s/frame preview; every change visible instantly.</li>
-    <li data-i18n="f8"><b>Batch processing</b> — a queue of files with one setup.</li>
-    <li data-i18n="f9"><b>6 languages</b> — EN / RU / ZH / ES / PT / FR, source auto-detect.</li>
-    <li data-i18n="f10"><b>Fully portable + auto-update</b> — nothing touches your user profile.</li>
-  </ul>
+  <div class="featgrid">
+    <div class="feat"><span class="fic">🎙️</span><p data-i18n="f1"><b>Voice cloning</b> — the original timbre speaks the new language (Higgs Audio v3).</p></div>
+    <div class="feat"><span class="fic">👥</span><p data-i18n="f2"><b>Speaker diarization</b> — a distinct voice per speaker (NVIDIA Sortformer, up to 4).</p></div>
+    <div class="feat"><span class="fic">🖼️</span><p data-i18n="f3"><b>On-screen text localization</b> — OCR blurs the original and prints a matched localized title.</p></div>
+    <div class="feat"><span class="fic">🌐</span><p data-i18n="f4"><b>Local translation + vision</b> — Gemma-4 12B translates and reads the frame layout.</p></div>
+    <div class="feat"><span class="fic">🎚️</span><p data-i18n="f5"><b>SOTA vocal separation</b> — Mel-Band Roformer keeps the backing track intact.</p></div>
+    <div class="feat"><span class="fic">💬</span><p data-i18n="f6"><b>26 caption presets</b> — karaoke, word-by-word, neon and more, WYSIWYG.</p></div>
+    <div class="feat"><span class="fic">⚡</span><p data-i18n="f7"><b>Live editor</b> — ~0.17 s/frame preview; every change visible instantly.</p></div>
+    <div class="feat"><span class="fic">📦</span><p data-i18n="f8"><b>Batch processing</b> — a queue of files with one setup.</p></div>
+    <div class="feat"><span class="fic">🌍</span><p data-i18n="f9"><b>6 languages</b> — EN / RU / ZH / ES / PT / FR, source auto-detect.</p></div>
+    <div class="feat"><span class="fic">🧳</span><p data-i18n="f10"><b>Fully portable + auto-update</b> — nothing touches your user profile.</p></div>
+  </div>
 </div></section>
 
 <section id="gallery"><div class="wrap">
@@ -243,6 +252,8 @@
   <a href="https://github.com/timoncool/dub-studio/blob/master/LICENSE">MIT</a><br/>
   <span style="opacity:.6" data-i18n="foot_kw">AI video dubbing · voice cloning · video translation · automatic subtitles · offline · open source</span>
 </div></footer>
+
+<div id="lightbox"><img id="lbimg" src="" alt="screenshot"/></div>
 
 <script>
 const T={
@@ -482,6 +493,13 @@ function apply(l){
   const sel=document.getElementById("langsel");
   if(sel)sel.addEventListener("change",e=>{const v=e.target.value;localStorage.setItem("lang",v);
     if(v==="en")location.reload(); else apply(v);});
+  // lightbox — click any screenshot to view full-size
+  const lb=document.getElementById("lightbox"),lbi=document.getElementById("lbimg");
+  document.querySelectorAll(".gallery img, .shot img").forEach(img=>{
+    img.addEventListener("click",()=>{lbi.src=img.src;lb.style.display="flex";});
+  });
+  lb.addEventListener("click",()=>lb.style.display="none");
+  document.addEventListener("keydown",e=>{if(e.key==="Escape")lb.style.display="none";});
 })();
 </script>
 </body>
