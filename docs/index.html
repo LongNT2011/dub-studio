@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dub Studio — Free Offline AI Video Dubbing for Windows</title>
+<meta name="description" content="Dub Studio re-voices any short video into another language with a cloned voice, translated captions and on-screen-text localization — 100% offline on your Windows PC. Free, open source, one native .exe, zero Python." />
+<meta name="keywords" content="AI video dubbing, video dubbing software, voice cloning, video translation, automatic subtitles, speaker diarization, offline AI, local AI, free dubbing, open source, Windows, text to speech, speech recognition, voice over, transcription" />
+<link rel="canonical" href="https://timoncool.github.io/dub-studio/" />
+<link rel="icon" href="favicon.svg" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Dub Studio — Free Offline AI Video Dubbing for Windows" />
+<meta property="og:description" content="Re-voice any short video into another language with a cloned voice, translated captions and on-screen-text localization — 100% offline. Free & open source." />
+<meta property="og:image" content="https://raw.githubusercontent.com/timoncool/dub-studio/master/docs/shots/mode-dub-ru.png" />
+<meta property="og:url" content="https://timoncool.github.io/dub-studio/" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Dub Studio — Free Offline AI Video Dubbing for Windows" />
+<meta name="twitter:description" content="Re-voice any short video into another language with a cloned voice — 100% offline, free & open source." />
+<meta name="twitter:image" content="https://raw.githubusercontent.com/timoncool/dub-studio/master/docs/screenshot.png" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Dub Studio",
+  "applicationCategory": "MultimediaApplication",
+  "operatingSystem": "Windows 10, Windows 11",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "description": "Free, offline AI video dubbing studio for Windows — voice cloning, translation, subtitles and on-screen-text localization, 100% local.",
+  "url": "https://github.com/timoncool/dub-studio",
+  "downloadUrl": "https://github.com/timoncool/dub-studio/releases",
+  "softwareVersion": "2.2.1",
+  "license": "https://github.com/timoncool/dub-studio/blob/master/LICENSE"
+}
+</script>
+<style>
+  :root{--bg:#0b0c0e;--surface:#14161a;--surface2:#1b1e24;--border:#282c34;--text:#e9edf2;--muted:#9aa3b0;--accent:#c6f24e;--on-accent:#0b0c0e}
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{background:var(--bg);color:var(--text);font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+  header{position:sticky;top:0;z-index:10;backdrop-filter:blur(10px);background:rgba(11,12,14,.7);border-bottom:1px solid var(--border)}
+  header .wrap{display:flex;align-items:center;gap:16px;height:60px}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px}
+  .logo img{width:26px;height:26px}
+  nav{margin-left:auto;display:flex;gap:22px;align-items:center;font-size:14px;color:var(--muted)}
+  nav a:hover{color:var(--text)}
+  .btn{display:inline-flex;align-items:center;gap:8px;background:var(--accent);color:var(--on-accent);font-weight:700;padding:11px 20px;border-radius:10px;font-size:15px;transition:filter .15s}
+  .btn:hover{filter:brightness(1.08)}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--border)}
+  .hero{text-align:center;padding:90px 0 70px}
+  .eyebrow{font:600 12px/1 ui-monospace,monospace;letter-spacing:.22em;color:var(--muted);text-transform:uppercase}
+  .hero h1{font-size:clamp(34px,6vw,60px);line-height:1.05;font-weight:800;letter-spacing:-.02em;margin:20px auto 0;max-width:16ch}
+  .hero p{color:var(--muted);font-size:19px;max-width:60ch;margin:22px auto 0}
+  .cta{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;margin-top:34px}
+  .sub{color:var(--muted);font-size:13px;margin-top:16px}
+  .shot{margin:56px auto 0;max-width:960px;border:1px solid var(--border);border-radius:16px;overflow:hidden;box-shadow:0 30px 80px -30px rgba(0,0,0,.7)}
+  .shot img{display:block;width:100%}
+  section{padding:64px 0}
+  h2{font-size:clamp(26px,4vw,38px);font-weight:800;letter-spacing:-.02em;text-align:center}
+  .lead{color:var(--muted);text-align:center;max-width:60ch;margin:14px auto 0}
+  .modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:44px}
+  .mode{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px}
+  .mode .ic{font-size:24px}
+  .mode h3{margin:12px 0 6px;font-size:17px}
+  .mode p{color:var(--muted);font-size:14px}
+  .feats{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px 30px;margin-top:44px;list-style:none}
+  .feats li{padding-left:28px;position:relative;color:var(--muted);font-size:15px}
+  .feats li b{color:var(--text)}
+  .feats li::before{content:"";position:absolute;left:0;top:9px;width:9px;height:9px;border-radius:2px;background:var(--accent)}
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;margin-top:44px;counter-reset:s}
+  .step{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:22px}
+  .step::before{counter-increment:s;content:counter(s);display:grid;place-items:center;width:30px;height:30px;border-radius:8px;background:var(--surface2);color:var(--accent);font-weight:800;margin-bottom:12px}
+  .step p{color:var(--muted);font-size:14px}
+  .band{background:var(--surface);border-top:1px solid var(--border);border-bottom:1px solid var(--border);text-align:center}
+  .langs{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:22px}
+  .langs a{border:1px solid var(--border);border-radius:8px;padding:7px 14px;font-size:14px;color:var(--muted)}
+  .langs a:hover{border-color:var(--accent);color:var(--text)}
+  .showcase{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:26px;margin-top:44px}
+  .pair{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px}
+  .pair figcaption{font-size:14px;color:var(--muted);margin-bottom:14px;text-align:center}
+  .pair figcaption b{color:var(--text)}
+  .pair .tag{display:inline-block;font:600 11px/1 ui-monospace,monospace;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 9px;margin-bottom:10px}
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .v{position:relative}
+  .v span{position:absolute;top:8px;left:8px;z-index:2;font:600 10px/1 ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;background:rgba(11,12,14,.82);color:var(--muted);padding:5px 8px;border-radius:6px}
+  .v video{display:block;width:100%;border-radius:10px;background:#000;max-height:480px}
+  .gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:44px}
+  .gallery figure{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+  .gallery img{display:block;width:100%}
+  .gallery figcaption{padding:12px 14px;font-size:13px;color:var(--muted)}
+  .gallery figcaption b{color:var(--text)}
+  footer{border-top:1px solid var(--border);padding:40px 0;color:var(--muted);font-size:14px;text-align:center}
+  footer a{color:var(--text);text-decoration:underline;text-underline-offset:2px}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <a class="logo" href="#top"><img src="favicon.svg" alt="Dub Studio"/>Dub Studio</a>
+  <nav>
+    <a href="#showcase">Showcase</a>
+    <a href="#modes">Modes</a>
+    <a href="#features">Features</a>
+    <a href="#how">How it works</a>
+    <a href="https://github.com/timoncool/dub-studio">GitHub</a>
+    <a class="btn" href="https://github.com/timoncool/dub-studio/releases">Download</a>
+  </nav>
+</div></header>
+
+<a id="top"></a>
+<div class="wrap hero">
+  <div class="eyebrow">Local · Offline · 6 languages · Free & open source</div>
+  <h1>Dub any short video like it was made that way.</h1>
+  <p>Re-voice any clip into another language — with the speaker's own voice cloned, captions translated, and on-screen text localized right on the frame. 100% on your machine. No cloud, no upload, no subscription.</p>
+  <div class="cta">
+    <a class="btn" href="https://github.com/timoncool/dub-studio/releases">↓ Download for Windows</a>
+    <a class="btn ghost" href="https://github.com/timoncool/dub-studio">★ Star on GitHub</a>
+  </div>
+  <div class="sub">Windows 10/11 · NVIDIA GPU · one native .exe · zero Python</div>
+  <div class="shot"><img src="shots/mode-dub-ru.png" alt="Dub Studio editor — dubbed video with translated captions and localized on-screen title" loading="lazy"/></div>
+</div>
+
+<section id="showcase"><div class="wrap">
+  <h2>Before / after — real clips, dubbed offline</h2>
+  <p class="lead">Every clip below was processed end-to-end on a local GPU. Different videos, different modes, different languages — nothing left the machine.</p>
+  <div class="showcase">
+    <figure class="pair">
+      <span class="tag">🎙️ Full dub · EN → RU</span>
+      <div class="ba">
+        <div class="v"><span>Original</span><video src="showcase/ducks_EN-RU_dub__BEFORE.mp4" controls preload="metadata" playsinline></video></div>
+        <div class="v"><span>Dubbed</span><video src="showcase/ducks_EN-RU_dub__AFTER.mp4" controls preload="metadata" playsinline></video></div>
+      </div>
+      <figcaption>Voice cloned into Russian · translated captions · localized on-screen title</figcaption>
+    </figure>
+    <figure class="pair">
+      <span class="tag">🗣️ Voice-over · EN → ES</span>
+      <div class="ba">
+        <div class="v"><span>Original</span><video src="showcase/uncleboris_EN-ES_voiceover__BEFORE.mp4" controls preload="metadata" playsinline></video></div>
+        <div class="v"><span>Voice-over</span><video src="showcase/uncleboris_EN-ES_voiceover__AFTER.mp4" controls preload="metadata" playsinline></video></div>
+      </div>
+      <figcaption>Spanish voice-over the ducked original · 2 speakers, distinct voices</figcaption>
+    </figure>
+    <figure class="pair">
+      <span class="tag">✨ Funny remix · EN → RU</span>
+      <div class="ba">
+        <div class="v"><span>Original</span><video src="showcase/rusttauri_EN-RU_funny__BEFORE.mp4" controls preload="metadata" playsinline></video></div>
+        <div class="v"><span>Remixed</span><video src="showcase/rusttauri_EN-RU_funny__AFTER.mp4" controls preload="metadata" playsinline></video></div>
+      </div>
+      <figcaption>The model rewrote the whole script to a new theme, then re-dubbed it</figcaption>
+    </figure>
+    <figure class="pair">
+      <span class="tag">🎙️ Full dub · RU → EN</span>
+      <div class="ba">
+        <div class="v"><span>Original</span><video src="showcase/chatgpt_RU-EN_dub__BEFORE.mp4" controls preload="metadata" playsinline></video></div>
+        <div class="v"><span>Dubbed</span><video src="showcase/chatgpt_RU-EN_dub__AFTER.mp4" controls preload="metadata" playsinline></video></div>
+      </div>
+      <figcaption>Reverse direction — Russian dubbed into English with the cloned timbre</figcaption>
+    </figure>
+  </div>
+</div></section>
+
+<section id="modes"><div class="wrap">
+  <h2>Five modes, switchable on the fly</h2>
+  <p class="lead">Load a clip once and send it into any mode — right inside the editor.</p>
+  <div class="modes">
+    <div class="mode"><div class="ic">🎙️</div><h3>Dub</h3><p>Full re-voice into the target language with the original timbre cloned — auto-cast per speaker or pick a voice.</p></div>
+    <div class="mode"><div class="ic">🗣️</div><h3>Voice-over</h3><p>Translated voice over the ducked original — the source is still audible underneath, balance adjustable.</p></div>
+    <div class="mode"><div class="ic">📝</div><h3>Subtitles</h3><p>Burn original-language captions and keep the original audio — no dubbing, no translation.</p></div>
+    <div class="mode"><div class="ic">✨</div><h3>Funny remix</h3><p>Give a theme — the model rewrites the whole script, then re-dubs it.</p></div>
+    <div class="mode"><div class="ic">🎬</div><h3>Transcript</h3><p>Clean diarized transcript with karaoke play-along, one-click voices, and .srt / .txt export.</p></div>
+  </div>
+</div></section>
+
+<section id="features" class="band"><div class="wrap">
+  <h2>Everything, running on your machine</h2>
+  <ul class="feats">
+    <li><b>Voice cloning</b> — the original timbre speaks the new language (Higgs Audio v3).</li>
+    <li><b>Speaker diarization</b> — a distinct voice per speaker (NVIDIA Sortformer, up to 4).</li>
+    <li><b>On-screen text localization</b> — OCR blurs the original and prints a matched localized title.</li>
+    <li><b>Local translation + vision</b> — Gemma-4 12B translates and reads the frame layout.</li>
+    <li><b>SOTA vocal separation</b> — Mel-Band Roformer keeps the backing track intact.</li>
+    <li><b>26 caption presets</b> — karaoke, word-by-word, neon and more, WYSIWYG.</li>
+    <li><b>Live editor</b> — ~0.17 s/frame preview; every change visible instantly.</li>
+    <li><b>Batch processing</b> — a queue of files with one setup.</li>
+    <li><b>6 languages</b> — EN / RU / ZH / ES / PT / FR, source auto-detect.</li>
+    <li><b>Fully portable + auto-update</b> — nothing touches your user profile.</li>
+  </ul>
+</div></section>
+
+<section id="gallery"><div class="wrap">
+  <h2>Every mode, in your language</h2>
+  <p class="lead">The full editor — dub, voice-over, subtitles, funny remix and transcript — localized into 6 languages.</p>
+  <div class="gallery">
+    <figure><img src="shots/mode-dub-ru.png" alt="Full dub mode, Russian interface" loading="lazy"/><figcaption><b>Full dub</b> · Russian UI · voice cloned + localized title</figcaption></figure>
+    <figure><img src="shots/mode-voiceover-es.png" alt="Voice-over mode, Spanish interface" loading="lazy"/><figcaption><b>Voice-over</b> · Spanish UI · original-volume balance slider</figcaption></figure>
+    <figure><img src="shots/mode-subtitles-zh.png" alt="Subtitles mode, Chinese interface" loading="lazy"/><figcaption><b>Subtitles</b> · Chinese UI · styled burned-in captions</figcaption></figure>
+    <figure><img src="shots/mode-funny-ru.png" alt="Funny remix mode, Russian interface" loading="lazy"/><figcaption><b>Funny remix</b> · Russian UI · rewrite-the-script panel</figcaption></figure>
+    <figure><img src="shots/mode-transcribe-fr.png" alt="Transcript and diarization mode, French interface" loading="lazy"/><figcaption><b>Transcript + diarization</b> · French UI · karaoke play-along, .srt/.txt</figcaption></figure>
+    <figure><img src="shots/mode-dubrev-en.png" alt="Reverse dub Russian to English, English interface" loading="lazy"/><figcaption><b>Reverse dub</b> · RU → EN · English UI</figcaption></figure>
+  </div>
+</div></section>
+
+<section id="how"><div class="wrap">
+  <h2>How it works</h2>
+  <p class="lead">A smart auto-pass builds the first draft; then you fine-tune everything with a live preview.</p>
+  <div class="steps">
+    <div class="step"><p>Drop a video and pick a target language — separation, ASR, diarization, translation and OCR run in one pass.</p></div>
+    <div class="step"><p>Choose a mode: dub, voice-over, subtitles, funny remix or transcript.</p></div>
+    <div class="step"><p>Edit anything — transcript, voices, caption style, blur boxes, titles — with an instant preview.</p></div>
+    <div class="step"><p>Export the finished video. Everything runs locally on your GPU.</p></div>
+  </div>
+</div></section>
+
+<section class="band"><div class="wrap" style="text-align:center">
+  <h2>Get Dub Studio</h2>
+  <p class="lead">Free and open source. Download the portable build or the installer.</p>
+  <div class="cta"><a class="btn" href="https://github.com/timoncool/dub-studio/releases">↓ Download latest release</a></div>
+  <div class="langs">
+    <a href="https://github.com/timoncool/dub-studio/blob/master/README.md">English</a>
+    <a href="https://github.com/timoncool/dub-studio/blob/master/README.ru.md">Русский</a>
+    <a href="https://github.com/timoncool/dub-studio/blob/master/README.zh.md">中文</a>
+    <a href="https://github.com/timoncool/dub-studio/blob/master/README.es.md">Español</a>
+    <a href="https://github.com/timoncool/dub-studio/blob/master/README.pt.md">Português</a>
+    <a href="https://github.com/timoncool/dub-studio/blob/master/README.fr.md">Français</a>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  Built by <a href="https://t.me/nerual_dreming">Nerual Dreming</a> &amp; <a href="https://t.me/neuroport">Neuro-Soft</a> ·
+  <a href="https://github.com/timoncool/dub-studio">GitHub</a> ·
+  <a href="https://github.com/timoncool/dub-studio/blob/master/LICENSE">MIT license</a><br/>
+  <span style="opacity:.6">AI video dubbing · voice cloning · video translation · automatic subtitles · offline · open source</span>
+</div></footer>
+</body>
+</html>
