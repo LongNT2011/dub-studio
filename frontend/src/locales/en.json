@@ -181,7 +181,15 @@
     "dub": "Play the dub (video + voiceover)",
     "volume": "Preview volume"
   },
+  "edit": {
+    "setStart": "Start at playhead",
+    "setEnd": "End at playhead",
+    "alignLeft": "Align left",
+    "alignCenter": "Align center",
+    "alignRight": "Align right"
+  },
   "seg": {
+    "speakerHint": "Reassign this line to another speaker (uses that speaker's voice)",
     "regen": "Regenerate this line's voiceover",
     "play": "Play this line's voiceover",
     "keep": "Keep original",

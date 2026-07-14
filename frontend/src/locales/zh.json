@@ -148,7 +148,15 @@
     "dub": "播放配音（画面 + 配音）",
     "volume": "预览音量"
   },
+  "edit": {
+    "setStart": "起点设为播放头",
+    "setEnd": "终点设为播放头",
+    "alignLeft": "左对齐",
+    "alignCenter": "居中",
+    "alignRight": "右对齐"
+  },
   "seg": {
+    "speakerHint": "将此句改派给其他说话人（使用该说话人的配音）",
     "regen": "重新生成该句配音",
     "play": "播放该句配音",
     "keep": "保留原声",

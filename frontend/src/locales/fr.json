@@ -148,7 +148,15 @@
     "dub": "Lire le doublage (vidéo + voix)",
     "volume": "Volume"
   },
+  "edit": {
+    "setStart": "Début au curseur",
+    "setEnd": "Fin au curseur",
+    "alignLeft": "Aligner à gauche",
+    "alignCenter": "Centrer",
+    "alignRight": "Aligner à droite"
+  },
   "seg": {
+    "speakerHint": "Réattribuer cette ligne à un autre locuteur (utilise la voix de ce locuteur)",
     "regen": "Régénérer la voix de cette phrase",
     "play": "Écouter la voix de cette phrase",
     "keep": "Garder l'original",

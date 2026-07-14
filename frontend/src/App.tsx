@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
-import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2 } from "lucide-react";
+import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useFloatable, dockSlot } from "./lib/useFloatable";
 import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent } from "./lib/api";
@@ -709,6 +709,9 @@ function Editor() {
   const [remixText, setRemixText] = useState("");                     // funny-remix theme/instruction for Gemma
   const [remixing, setRemixing] = useState(false);
   const ss = p.captions.sub_style;
+  // уникальные спикеры проекта (для переброса фразы другому спикеру на плашке; голос спикера — в настройках голосов)
+  const speakers = Array.from(new Set(p.segments.map((s) => s.speaker).filter((s): s is string => s != null && s !== "")))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   // one undo snapshot per edit BURST (focus->type->blur), segments AND titles: snapshot on the FIRST change of a
   // field, keyed by field, cleared on blur. Not on focus (that killed redo) nor per-keystroke (that flooded history).
   const burstRef = useRef<string | null>(null);
@@ -978,6 +981,17 @@ function Editor() {
                   onClick={(e) => e.stopPropagation()}                       // editing text must not re-seek on every click
                   onBlur={(e) => { burstRef.current = null; persistSeg(seg.id, e.target.value); }}   // end the edit burst
                   className="w-full mt-1.5 bg-[var(--color-bg)]/60 border border-[var(--color-border)] rounded-lg p-1.5 text-[13px] leading-snug resize-none focus:border-[var(--color-accent)] focus:outline-none transition-colors" rows={2} />
+                {speakers.length > 1 && !seg.keep_original && (
+                  <div className="flex items-center gap-1.5 mt-1.5" onClick={(e) => e.stopPropagation()} title={t("seg.speakerHint")}>
+                    <Users size={11} className="text-[var(--color-muted)] shrink-0" />
+                    <select value={seg.speaker ?? ""}
+                      onChange={async (e) => { setRendered(false); try { setProject(await api.patch(pid, { op: "segment", id: seg.id, speaker: e.target.value })); bump(); } catch (err) { await surfaceErr(err); } }}
+                      className="flex-1 min-w-0 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-[11px] focus:border-[var(--color-accent)] focus:outline-none transition-colors">
+                      {seg.speaker == null && <option value="">—</option>}
+                      {speakers.map((s) => <option key={s} value={s}>SPK {s}</option>)}
+                    </select>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1024,6 +1038,10 @@ function Editor() {
                       <button onClick={(e) => { e.stopPropagation(); branch("blur", { idx: i, fill: b.fill ? null : "#000000" }); }}
                         title={b.fill ? t("blur.modeFill") : t("blur.modeBlur")}
                         className="shrink-0 hover:text-[var(--color-accent)] transition-colors">{b.fill ? <Square size={12} /> : <Droplet size={12} />}</button>
+                      <button onClick={(e) => { e.stopPropagation(); branch("blur", { idx: i, t0: Math.max(scrub, 0) }); }} title={t("edit.setStart")}
+                        className="shrink-0 hover:text-[var(--color-accent)] transition-colors"><ChevronFirst size={12} /></button>
+                      <button onClick={(e) => { e.stopPropagation(); branch("blur", { idx: i, t1: scrub }); }} title={t("edit.setEnd")}
+                        className="shrink-0 hover:text-[var(--color-accent)] transition-colors"><ChevronLast size={12} /></button>
                       <button onClick={(e) => { e.stopPropagation(); branch("blur_del", { idx: i }); setSelBlur(null); }} className="shrink-0 hover:text-[var(--color-warn)] transition-colors"><Trash2 size={12} /></button>
                     </div>
                   ))}
@@ -1090,6 +1108,16 @@ function Editor() {
                     <option value="">{t("style.font")}</option>
                     {Object.keys(fonts).map((f) => <option key={f} value={f}>{f}</option>)}
                   </select>
+                  <span className="inline-flex rounded border border-[var(--color-border)] overflow-hidden">
+                    {([["left", AlignLeft, "edit.alignLeft"], ["center", AlignCenter, "edit.alignCenter"], ["right", AlignRight, "edit.alignRight"]] as const).map(([a, Ic, k]) => (
+                      <button key={a} onClick={(e) => { e.stopPropagation(); branch("title", { idx: i, align: a }); }} title={t(k)}
+                        className={`px-1.5 py-1 transition-colors ${(ti.align || "center") === a ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}><Ic size={12} /></button>
+                    ))}
+                  </span>
+                  <button onClick={(e) => { e.stopPropagation(); branch("title", { idx: i, start: scrub }); }} title={t("edit.setStart")}
+                    className="px-1.5 py-1 rounded border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition-colors"><ChevronFirst size={13} /></button>
+                  <button onClick={(e) => { e.stopPropagation(); branch("title", { idx: i, end: scrub }); }} title={t("edit.setEnd")}
+                    className="px-1.5 py-1 rounded border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition-colors"><ChevronLast size={13} /></button>
                 </div>
               </div>
             ))}

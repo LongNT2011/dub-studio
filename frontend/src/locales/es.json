@@ -148,7 +148,15 @@
     "dub": "Reproducir el doblaje (vídeo + voz)",
     "volume": "Volumen"
   },
+  "edit": {
+    "setStart": "Inicio en el cursor",
+    "setEnd": "Fin en el cursor",
+    "alignLeft": "Alinear a la izquierda",
+    "alignCenter": "Centrar",
+    "alignRight": "Alinear a la derecha"
+  },
   "seg": {
+    "speakerHint": "Reasignar esta línea a otro hablante (usa la voz de ese hablante)",
     "regen": "Regenerar la voz de esta frase",
     "play": "Reproducir la voz de esta frase",
     "keep": "Mantener original",

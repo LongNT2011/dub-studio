@@ -64,8 +64,10 @@ fn op_segment(p: &mut Project, edit: &Value) -> PatchResult {
     if let Some(t) = edit.get("src_text").and_then(|x| x.as_str()) {
         seg.src_text = t.to_string();
     }
-    if let Some(v) = edit.get("voice").and_then(|x| x.as_str()) {
-        seg.voice = Some(v.to_string());
+    // переброс фразы другому спикеру: голос спикера задаётся в настройках голосов, здесь лишь меняем
+    // принадлежность -> ref_of при рендере берёт реф целевого спикера. "" -> None (снять привязку).
+    if let Some(sp) = edit.get("speaker") {
+        seg.speaker = sp.as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
     }
     // hidden / keep_original — хранятся в extra (dub-core Segment их не типизирует, но проносит).
     if let Some(h) = edit.get("hidden").and_then(|x| x.as_bool()) {
