@@ -28,8 +28,9 @@ pub fn should_rotate180(model: &mut OnnxModel, crop: &RgbImage) -> Result<bool, 
         for ox in 0..rw {
             let fx = ((ox as f32 + 0.5) * sx - 0.5).clamp(0.0, cw as f32 - 1.0);
             let x = fx.round() as usize;
+            let px = crop.get_pixel(x as u32, y as u32); // один get_pixel на ячейку вместо трёх
             for c in 0..3 {
-                let v = crop.get_pixel(x as u32, y as u32)[c] as f32 / 255.0;
+                let v = px[c] as f32 / 255.0;
                 input[[0, c, oy, ox]] = (v - 0.5) / 0.5;
             }
         }

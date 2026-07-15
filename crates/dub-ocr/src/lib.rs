@@ -374,10 +374,11 @@ fn process_frame(
     let results = recognize_batch(rec_model, dict, &crops)?;
     let mut lines_raw: Vec<(String, f32, f32, f32, f32)> = Vec::new();
     for (b, (txt, score)) in boxes.iter().zip(results) {
-        if txt.trim().is_empty() || score < score_thr {
+        let tt = txt.trim();
+        if tt.is_empty() || score < score_thr {
             continue;
         }
-        lines_raw.push((txt.trim().to_string(), b.x, b.y, b.w, b.h));
+        lines_raw.push((tt.to_string(), b.x, b.y, b.w, b.h));
     }
     Ok(merge_rows(lines_raw, 0.6))
 }
@@ -420,9 +421,10 @@ pub fn detect_regions_frames(
                 tr.last_t = t;
                 tr.texts.push(txt);
                 // де-джиттер: держим прежний бокс, если сдвиг <= jitter.
-                let moved = [(tr.bx.0, bx.0), (tr.bx.1, bx.1), (tr.bx.2, bx.2), (tr.bx.3, bx.3)]
-                    .iter()
-                    .any(|(p, q)| (p - q).abs() > jitter);
+                let moved = (tr.bx.0 - bx.0).abs() > jitter
+                    || (tr.bx.1 - bx.1).abs() > jitter
+                    || (tr.bx.2 - bx.2).abs() > jitter
+                    || (tr.bx.3 - bx.3).abs() > jitter;
                 if moved {
                     tr.bx = bx;
                 }

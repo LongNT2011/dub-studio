@@ -119,14 +119,9 @@ fn ctc_decode(flat: &[f32], t: usize, c: usize, dict: &RecDict) -> (String, f32)
 /// Распознать текст в одном кропе (PP-OCR rec + CTC greedy). Билинейный ресайз к высоте 48, [-1,1].
 pub fn recognize(model: &mut OnnxModel, dict: &RecDict, img: &RgbImage) -> Result<(String, f32), String> {
     let Some((rw, plane)) = preprocess(img) else { return Ok((String::new(), 0.0)) };
-    let mut input = Array4::<f32>::zeros((1, 3, REC_H, rw));
-    for c in 0..3 {
-        for oy in 0..REC_H {
-            for ox in 0..rw {
-                input[[0, c, oy, ox]] = plane[c * REC_H * rw + oy * rw + ox];
-            }
-        }
-    }
+    // plane уже уложен в C-order (c, oy, ox) — строим тензор напрямую, без поэлементного копирования.
+    let input = Array4::from_shape_vec((1, 3, REC_H, rw), plane)
+        .map_err(|e| format!("rec shape: {e}"))?;
     let (shape, flat) = model.run(input)?;
     if shape.len() != 3 {
         return Ok((String::new(), 0.0));

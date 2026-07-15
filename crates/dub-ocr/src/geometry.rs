@@ -13,14 +13,16 @@ pub struct Quad {
 impl Quad {
     /// Осевой bbox (x0,y0,x1,y1).
     pub fn aabb(&self) -> (f32, f32, f32, f32) {
-        let xs = self.pts.iter().map(|p| p.0);
-        let ys = self.pts.iter().map(|p| p.1);
-        (
-            xs.clone().fold(f32::INFINITY, f32::min),
-            ys.clone().fold(f32::INFINITY, f32::min),
-            xs.fold(f32::NEG_INFINITY, f32::max),
-            ys.fold(f32::NEG_INFINITY, f32::max),
-        )
+        // Один проход по 4 точкам вместо четырёх отдельных fold.
+        let (mut x0, mut y0, mut x1, mut y1) =
+            (f32::INFINITY, f32::INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+        for &(x, y) in &self.pts {
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x);
+            y1 = y1.max(y);
+        }
+        (x0, y0, x1, y1)
     }
     /// Короткая сторона прямоугольника (для min_size-фильтра как в PP-OCR).
     pub fn min_side(&self) -> f32 {

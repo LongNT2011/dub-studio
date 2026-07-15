@@ -104,10 +104,14 @@ pub fn detect(model: &mut OnnxModel, img: &RgbImage, p: &DetParams) -> Result<Ve
             let x0 = fx.floor() as usize;
             let x1 = (x0 + 1).min(src_w as usize - 1);
             let wx = fx - x0 as f32;
+            // 4 соседних пикселя читаем один раз на выходную ячейку, канал индексируем внутри.
+            let p00 = img.get_pixel(x0 as u32, y0 as u32);
+            let p10 = img.get_pixel(x1 as u32, y0 as u32);
+            let p01 = img.get_pixel(x0 as u32, y1 as u32);
+            let p11 = img.get_pixel(x1 as u32, y1 as u32);
             for c in 0..3 {
-                let sample = |xx: usize, yy: usize| img.get_pixel(xx as u32, yy as u32)[c] as f32;
-                let top = sample(x0, y0) * (1.0 - wx) + sample(x1, y0) * wx;
-                let bot = sample(x0, y1) * (1.0 - wx) + sample(x1, y1) * wx;
+                let top = p00[c] as f32 * (1.0 - wx) + p10[c] as f32 * wx;
+                let bot = p01[c] as f32 * (1.0 - wx) + p11[c] as f32 * wx;
                 let val = top * (1.0 - wy) + bot * wy;
                 input[[0, c, oy, ox]] = (val / 255.0 - 0.5) / 0.5;
             }
