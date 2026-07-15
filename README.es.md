@@ -62,7 +62,7 @@ Carga un clip una vez y envíalo a cualquier modo dentro del editor.
 - **Regeneración inteligente** —— al exportar solo se resintetizan los segmentos que cambiaste, no todo el clip.
 - **Procesamiento por lotes** —— cola de archivos, todos con una misma configuración, progreso por archivo.
 - **Comparar antes/después** —— original y doblaje lado a lado.
-- **30+ idiomas** —— dobla a cualquier idioma principal (español, chino, japonés, árabe, hindi y más), con autodetección del idioma origen.
+- **100+ idiomas** —— dobla a cualquier idioma principal (español, chino, japonés, árabe, hindi y más), con autodetección del idioma origen.
 - **Cualquier formato de vídeo** —— MP4, MOV, MKV, WEBM, AVI y más (decodificado con ffmpeg).
 - **Instalación de un botón + autoactualización** —— modelos, motores, runtime CUDA/VC++ y ffmpeg se descargan en el primer arranque; la app se actualiza sola.
 - **Descargas reanudables** —— los modelos grandes (10 GB+) se reanudan desde donde se cortaron tras una caída de conexión, en vez de reiniciar.

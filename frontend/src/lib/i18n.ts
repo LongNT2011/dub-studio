@@ -11,19 +11,21 @@ import fr from "../locales/fr.json";
 export const LANGS = ["en", "ru", "zh", "es", "pt", "fr"] as const;
 export type Lang = (typeof LANGS)[number];
 
-// Языки КОНТЕНТА (источник/цель дубляжа) — шире локалей интерфейса. Весь стек их тянет:
-// Higgs TTS v3 (100+ языков озвучки/клона), Gemma-4 перевод (100+), Whisper large-v3 ASR (99),
-// Parakeet v3 — 25 европейских. Субтитры любой письменности (CJK/арабица/деванагари) рендерятся
-// через системный fallback шрифтов Windows. Нативные имена — как язык называет сам себя.
+// Языки КОНТЕНТА (источник/цель дубляжа) — шире локалей интерфейса. Полный набор Whisper large-v3 (99):
+// весь стек их тянет — Whisper распознаёт источник (99), Gemma-4 переводит (100+), Higgs TTS v3
+// озвучивает/клонирует (100+). Субтитры любой письменности (CJK/арабица/деванагари/…) рендерятся через
+// системный fallback шрифтов Windows. Parakeet v3 (дефолтный ASR, быстрее) знает только 25 европейских —
+// для источника вне их надо переключить движок ASR на Whisper в настройках. Нативные имена (эндонимы).
 export const DUB_LANGS: { code: string; name: string }[] = [
+  // топ по аудитории
   { code: "en", name: "English" },      { code: "zh", name: "中文" },
   { code: "es", name: "Español" },      { code: "hi", name: "हिन्दी" },
   { code: "ar", name: "العربية" },      { code: "pt", name: "Português" },
-  { code: "ru", name: "Русский" },      { code: "fr", name: "Français" },
-  { code: "de", name: "Deutsch" },      { code: "ja", name: "日本語" },
-  { code: "ko", name: "한국어" },        { code: "it", name: "Italiano" },
-  { code: "tr", name: "Türkçe" },       { code: "pl", name: "Polski" },
-  { code: "nl", name: "Nederlands" },   { code: "uk", name: "Українська" },
+  { code: "ru", name: "Русский" },      { code: "ja", name: "日本語" },
+  { code: "de", name: "Deutsch" },      { code: "ko", name: "한국어" },
+  { code: "fr", name: "Français" },     { code: "tr", name: "Türkçe" },
+  { code: "it", name: "Italiano" },     { code: "pl", name: "Polski" },
+  { code: "uk", name: "Українська" },   { code: "nl", name: "Nederlands" },
   { code: "id", name: "Bahasa Indonesia" }, { code: "vi", name: "Tiếng Việt" },
   { code: "th", name: "ไทย" },          { code: "fa", name: "فارسی" },
   { code: "he", name: "עברית" },        { code: "cs", name: "Čeština" },
@@ -31,6 +33,42 @@ export const DUB_LANGS: { code: string; name: string }[] = [
   { code: "el", name: "Ελληνικά" },     { code: "hu", name: "Magyar" },
   { code: "da", name: "Dansk" },        { code: "fi", name: "Suomi" },
   { code: "bg", name: "Български" },     { code: "hr", name: "Hrvatski" },
+  // остальной набор Whisper
+  { code: "ms", name: "Bahasa Melayu" }, { code: "ta", name: "தமிழ்" },
+  { code: "no", name: "Norsk" },        { code: "ur", name: "اردو" },
+  { code: "ca", name: "Català" },       { code: "sk", name: "Slovenčina" },
+  { code: "lt", name: "Lietuvių" },     { code: "sr", name: "Српски" },
+  { code: "az", name: "Azərbaycan" },   { code: "sl", name: "Slovenščina" },
+  { code: "et", name: "Eesti" },        { code: "lv", name: "Latviešu" },
+  { code: "mk", name: "Македонски" },   { code: "eu", name: "Euskara" },
+  { code: "is", name: "Íslenska" },     { code: "hy", name: "Հայերեն" },
+  { code: "ne", name: "नेपाली" },        { code: "mn", name: "Монгол" },
+  { code: "bs", name: "Bosanski" },     { code: "kk", name: "Қазақ" },
+  { code: "sq", name: "Shqip" },        { code: "sw", name: "Kiswahili" },
+  { code: "gl", name: "Galego" },       { code: "mr", name: "मराठी" },
+  { code: "pa", name: "ਪੰਜਾਬੀ" },       { code: "si", name: "සිංහල" },
+  { code: "km", name: "ខ្មែរ" },         { code: "af", name: "Afrikaans" },
+  { code: "ka", name: "ქართული" },      { code: "be", name: "Беларуская" },
+  { code: "tg", name: "Тоҷикӣ" },       { code: "gu", name: "ગુજરાતી" },
+  { code: "am", name: "አማርኛ" },         { code: "uz", name: "Oʻzbek" },
+  { code: "ml", name: "മലയാളം" },        { code: "te", name: "తెలుగు" },
+  { code: "kn", name: "ಕನ್ನಡ" },         { code: "bn", name: "বাংলা" },
+  { code: "cy", name: "Cymraeg" },      { code: "la", name: "Latina" },
+  { code: "mi", name: "Māori" },        { code: "sn", name: "ChiShona" },
+  { code: "yo", name: "Yorùbá" },       { code: "so", name: "Soomaali" },
+  { code: "oc", name: "Occitan" },      { code: "sd", name: "سنڌي" },
+  { code: "yi", name: "ייִדיש" },        { code: "lo", name: "ລາວ" },
+  { code: "fo", name: "Føroyskt" },     { code: "ht", name: "Kreyòl ayisyen" },
+  { code: "ps", name: "پښتو" },         { code: "tk", name: "Türkmen" },
+  { code: "nn", name: "Nynorsk" },      { code: "mt", name: "Malti" },
+  { code: "sa", name: "संस्कृतम्" },      { code: "lb", name: "Lëtzebuergesch" },
+  { code: "my", name: "မြန်မာ" },        { code: "bo", name: "བོད་སྐད" },
+  { code: "tl", name: "Tagalog" },      { code: "mg", name: "Malagasy" },
+  { code: "as", name: "অসমীয়া" },       { code: "tt", name: "Татар" },
+  { code: "haw", name: "ʻŌlelo Hawaiʻi" }, { code: "ln", name: "Lingála" },
+  { code: "ha", name: "Hausa" },        { code: "ba", name: "Башҡорт" },
+  { code: "jw", name: "Basa Jawa" },    { code: "su", name: "Basa Sunda" },
+  { code: "yue", name: "粵語" },         { code: "br", name: "Brezhoneg" },
 ];
 
 const detect = (): Lang => {

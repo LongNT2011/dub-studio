@@ -347,6 +347,8 @@ async fn capabilities(State(st): State<AppState>) -> Json<Value> {
     let ffmpeg = which_ffmpeg();
     // Текущий выбор вариантов (active.json) — фронт рисует по нему селекторы движка/модели/кванта ASR.
     let sel = models::load_selection(&st.models_root);
+    // Языки контента = полный набор Whisper (99). Единый источник — dub_translate::WHISPER_LANGS.
+    let langs: Vec<&str> = dub_translate::WHISPER_LANGS.iter().map(|(c, _)| *c).collect();
     // Тот же JSON-контракт, что в app.py.capabilities(), плюс поля выбора ASR-движка.
     Json(json!({
         "device": o.device,
@@ -359,7 +361,7 @@ async fn capabilities(State(st): State<AppState>) -> Json<Value> {
             "tts": o.tts_model,
         },
         "ffmpeg": ffmpeg,
-        "languages": ["en","zh","es","hi","ar","pt","ru","fr","de","ja","ko","it","tr","pl","nl","uk","id","vi","th","fa","he","cs","sv","ro","el","hu","da","fi","bg","hr"],
+        "languages": langs,
         "voice_modes": ["clone","autocast","auto","voice"],
         // Выбор ASR: движок (parakeet|whisper), модель Whisper, квант Whisper (compute_type).
         "selection": sel,

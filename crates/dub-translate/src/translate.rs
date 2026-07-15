@@ -20,18 +20,7 @@ fn lang_name(code: &str, default: &str) -> String {
     if c.is_empty() || c == "auto" {
         return default.to_string();
     }
-    let m: HashMap<&str, &str> = [
-        ("ru", "Russian"), ("en", "English"), ("uk", "Ukrainian"), ("de", "German"),
-        ("fr", "French"), ("es", "Spanish"), ("it", "Italian"), ("pt", "Portuguese"),
-        ("zh", "Chinese"), ("ja", "Japanese"), ("ko", "Korean"), ("pl", "Polish"),
-        ("tr", "Turkish"), ("ar", "Arabic"), ("nl", "Dutch"), ("hi", "Hindi"),
-        ("id", "Indonesian"), ("vi", "Vietnamese"), ("th", "Thai"), ("fa", "Persian"),
-        ("he", "Hebrew"), ("cs", "Czech"), ("sv", "Swedish"), ("ro", "Romanian"),
-        ("el", "Greek"), ("hu", "Hungarian"), ("da", "Danish"), ("fi", "Finnish"),
-        ("bg", "Bulgarian"), ("hr", "Croatian"),
-    ]
-    .into_iter()
-    .collect();
+    let m: HashMap<&str, &str> = crate::WHISPER_LANGS.iter().copied().collect();
     m.get(c.as_str()).map(|s| s.to_string()).unwrap_or_else(|| code.to_string())
 }
 

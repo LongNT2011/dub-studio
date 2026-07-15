@@ -13,7 +13,7 @@
     "demo": "Try a demo"
   },
   "hero": {
-    "eyebrow": "LOCAL · OFFLINE · 30+ LANGUAGES",
+    "eyebrow": "LOCAL · OFFLINE · 100+ LANGUAGES",
     "headline": "Dub any short video like it was made that way.",
     "sub": "Auto-analysis runs the first pass — then you take over: voices, text, caption style, blur, with a live preview at every step.",
     "f1": "On-screen text, localized in place",
@@ -202,6 +202,8 @@
     "alignRight": "Align right"
   },
   "seg": {
+    "add": "Add phrase",
+    "addHint": "Insert your own line — dubbed with the speaker's voice and shown in subtitles",
     "speakerHint": "Reassign this line to another speaker (uses that speaker's voice)",
     "regen": "Regenerate this line's voiceover",
     "play": "Play this line's voiceover",
@@ -260,7 +262,7 @@
       "Rewrite the script and re-dub (funny mode)",
       "Subtitle styling: font, color, outline, shadow, plate",
       "Mask covers: blur or a solid rectangle over the original",
-      "30+ languages, fully offline, up to 4K"
+      "100+ languages, fully offline, up to 4K"
     ],
     "sectionsTitle": "Sections",
     "sections": [
@@ -330,6 +332,8 @@
     "error": "Error"
   },
   "comp": {
+    "langHint": "100+ languages. For a non-European source, switch ASR to Whisper in settings.",
+    "asrSwitched": "Parakeet doesn't know {{lang}} — ASR switched to Whisper (99 languages).",
     "hint": "Compose freely — audio and subtitles are independent, in any mode",
     "audioLabel": "Audio",
     "audioNone": "Original (no dub)",

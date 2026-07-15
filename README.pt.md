@@ -62,7 +62,7 @@ Carregue um clipe uma vez e envie-o para qualquer modo dentro do editor.
 - **Regeneração inteligente** —— ao exportar, só os segmentos alterados são ressintetizados, não o clipe inteiro.
 - **Processamento em lote** —— fila de arquivos, todos com uma configuração, progresso por arquivo.
 - **Comparar antes/depois** —— original e dublagem lado a lado.
-- **30+ idiomas** —— dublagem para qualquer idioma principal (espanhol, chinês, japonês, árabe, hindi e mais), com detecção automática do idioma de origem.
+- **100+ idiomas** —— dublagem para qualquer idioma principal (espanhol, chinês, japonês, árabe, hindi e mais), com detecção automática do idioma de origem.
 - **Qualquer formato de vídeo** —— MP4, MOV, MKV, WEBM, AVI e mais (decodificado via ffmpeg).
 - **Instalação de um botão + atualização automática** —— modelos, motores, runtime CUDA/VC++ e ffmpeg baixam no primeiro uso; o app se atualiza sozinho.
 - **Downloads retomáveis** —— modelos grandes (10 GB+) retomam de onde pararam após queda de conexão, em vez de recomeçar.

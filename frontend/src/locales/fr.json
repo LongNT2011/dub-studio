@@ -13,7 +13,7 @@
     "demo": "Essayer la démo"
   },
   "hero": {
-    "eyebrow": "LOCAL · HORS LIGNE · 30+ LANGUES",
+    "eyebrow": "LOCAL · HORS LIGNE · 100+ LANGUES",
     "headline": "Doublez n'importe quelle vidéo courte comme si elle avait été tournée ainsi.",
     "sub": "L'analyse automatique fait la première passe — ensuite vous contrôlez tout : voix, texte, style des sous-titres, flou, avec un aperçu en direct à chaque étape.",
     "f1": "Texte à l'écran, localisé sur place",
@@ -173,6 +173,8 @@
     "alignRight": "Aligner à droite"
   },
   "seg": {
+    "add": "Ajouter une phrase",
+    "addHint": "Insérez votre propre réplique — doublée avec la voix du locuteur et affichée dans les sous-titres",
     "speakerHint": "Réattribuer cette ligne à un autre locuteur (utilise la voix de ce locuteur)",
     "regen": "Régénérer la voix de cette phrase",
     "play": "Écouter la voix de cette phrase",
@@ -231,7 +233,7 @@
       "Réécrivez le script et redoublez (mode amusant)",
       "Style des sous-titres : police, couleur, contour, ombre, plaque",
       "Masques : flou ou un rectangle uni sur l'original",
-      "30+ langues, entièrement hors ligne, jusqu'à 4K"
+      "100+ langues, entièrement hors ligne, jusqu'à 4K"
     ],
     "sectionsTitle": "Sections",
     "sections": [
@@ -330,6 +332,8 @@
     "speakersN": "locuteurs"
   },
   "comp": {
+    "langHint": "100+ langues. Pour une source non européenne, passez l'ASR sur Whisper dans les réglages.",
+    "asrSwitched": "Parakeet ne connaît pas {{lang}} — ASR basculé sur Whisper (99 langues).",
     "hint": "Composez librement — audio et sous-titres sont indépendants, dans tout mode",
     "audioLabel": "Audio",
     "audioNone": "Original (sans doublage)",

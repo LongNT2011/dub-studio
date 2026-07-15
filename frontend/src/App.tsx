@@ -48,6 +48,13 @@ const VARIANT_SLOT: Record<string, [string, string]> = {
 const activeVariantId = (ids: string[], sel: Record<string, string>): string | undefined =>
   ids.find((id) => { const m = VARIANT_SLOT[id]; return !!m && sel[m[0]] === m[1]; });
 
+// 25 европейских языков, которые распознаёт дефолтный ASR Parakeet-TDT v3. Источник вне этого набора
+// требует Whisper (99 языков) — переключаем движок автоматически с уведомлением.
+const PARAKEET_LANGS = new Set([
+  "en", "es", "fr", "ru", "de", "it", "pl", "uk", "ro", "nl", "hu", "el", "sv",
+  "cs", "bg", "pt", "sk", "hr", "da", "fi", "lt", "sl", "lv", "et", "mt",
+]);
+
 // Модели и компоненты в настройках: список из /setup/status с кнопками скачки/докачки и прогрессом.
 function ModelsSection() {
   const { t } = useTranslation();
@@ -453,6 +460,7 @@ function TopBar() {
         <span className="flex items-center gap-2 font-bold tracking-tight">
           <img src="/favicon.svg" alt="" width={20} height={20} className="rounded-[5px] shadow-[0_0_10px_rgba(198,242,78,0.25)]" />
           {t("app.name")}
+          <span className="font-normal text-[11px] text-[var(--color-muted)] tracking-normal" title={t("app.name") + " v" + __APP_VERSION__}>v{__APP_VERSION__}</span>
         </span>
       </div>
       <StatusBar />
@@ -502,6 +510,18 @@ function DropZone() {
   const [over, setOver] = useState(false);
   const [tgt, setTgt] = useState<string>((i18n.language as string) || "ru");   // translate TO (default = UI lang)
   const [src, setSrc] = useState("auto");                                       // translate FROM (auto-detect)
+  const [asrNote, setAsrNote] = useState<string | null>(null);                  // «Parakeet не знает язык → переключили на Whisper»
+  // Выбор источника: если язык вне 25 европейских Parakeet — авто-переключаем ASR на Whisper (99 языков)
+  // с уведомлением. «auto» и европейские оставляют быстрый Parakeet.
+  function pickSrc(lang: string) {
+    setSrc(lang);
+    if (lang !== "auto" && !PARAKEET_LANGS.has(lang)) {
+      api.setSelection("asr_engine", "whisper").catch(() => {});
+      setAsrNote(DUB_LANGS.find((l) => l.code === lang)?.name ?? lang);
+    } else {
+      setAsrNote(null);
+    }
+  }
   const [file, setFile] = useState<File | null>(null);                          // staged video — analyzed on Start, not on drop
   // Композируемые опции обработки (независимы, любые комбинации). audio = аудио-выход; subs = содержимое
   // субтитров; burn = вжигать ли их на видео; funnyOn+funny = шуточный ремикс (сочетается с дубляжом/голосом).
@@ -623,7 +643,7 @@ function DropZone() {
           </div>
           <div className="mt-3.5 flex items-center justify-center gap-2 text-[12px]">
             <Languages size={14} className="text-[var(--color-accent-2)]" />
-            <select value={src} onChange={(e) => setSrc(e.target.value)}
+            <select value={src} onChange={(e) => pickSrc(e.target.value)}
               className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none">
               <option value="auto">auto</option>
               {DUB_LANGS.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
@@ -634,6 +654,9 @@ function DropZone() {
               {DUB_LANGS.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
             </select>
           </div>
+          {asrNote
+            ? <p className="mt-1 text-center text-[10px] text-[var(--color-accent-2)] leading-tight">{t("comp.asrSwitched", { lang: asrNote })}</p>
+            : <p className="mt-1 text-center text-[10px] text-[var(--color-muted)] leading-tight">{t("comp.langHint")}</p>}
           {/* АУДИО-ВЫХОД (независимо от субтитров) */}
           <div className="mt-3 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("comp.audioLabel")}</div>
           <div className="grid grid-cols-2 gap-1.5">
@@ -960,6 +983,15 @@ function Editor() {
     try { const fresh = await api.patch(pid, { op, ...extra }); setProject(fresh); bump(); return fresh; }   // style/voice/text change -> re-fetch the frame
     catch (err) { await surfaceErr(err); return null; }
   }
+  async function addSeg() {                                          // добавить СВОЮ фразу — пустой dirty-сегмент, текст вписывается ниже
+    if (regenId) return;
+    const segs = p.segments;
+    const start = segs.length ? segs[segs.length - 1].end : 0;       // в конец таймлайна по умолчанию
+    const speaker = segs[0]?.speaker ?? "0";                         // голос первого спикера (клон)
+    pushHistory(p); setRendered(false);
+    try { setProject(await api.patch(pid, { op: "add_segment", id: `u${Date.now().toString(36)}`, start, end: start + 2, speaker })); bump(); }
+    catch (e) { await surfaceErr(e); }
+  }
   async function doRegen(segId: string) {                            // re-synthesize the TTS for ONE phrase (mark dirty -> /render)
     if (regenId) return;
     setRegenId(segId); pushActivity(t("seg.regen"));
@@ -1229,6 +1261,10 @@ function Editor() {
               </div>
             );
           })}
+          <button onClick={addSeg} disabled={regenId !== null} title={t("seg.addHint")}
+            className="w-full mt-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-[var(--color-border)] text-[12px] text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] disabled:opacity-40 transition-colors">
+            <Plus size={14} />{t("seg.add")}
+          </button>
         </div>
         )}
         {lane === "blur" && (

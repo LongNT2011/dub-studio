@@ -17,18 +17,7 @@ use crate::TranslateError;
 
 /// _LANG из ctx_translate — код -> имя (для vision/перевода).
 fn lang_name(code: &str) -> String {
-    let m: std::collections::HashMap<&str, &str> = [
-        ("ru", "Russian"), ("en", "English"), ("es", "Spanish"), ("fr", "French"),
-        ("de", "German"), ("it", "Italian"), ("pt", "Portuguese"), ("ja", "Japanese"),
-        ("ko", "Korean"), ("zh", "Chinese"), ("uk", "Ukrainian"), ("pl", "Polish"),
-        ("tr", "Turkish"), ("ar", "Arabic"), ("nl", "Dutch"), ("hi", "Hindi"),
-        ("id", "Indonesian"), ("vi", "Vietnamese"), ("th", "Thai"), ("fa", "Persian"),
-        ("he", "Hebrew"), ("cs", "Czech"), ("sv", "Swedish"), ("ro", "Romanian"),
-        ("el", "Greek"), ("hu", "Hungarian"), ("da", "Danish"), ("fi", "Finnish"),
-        ("bg", "Bulgarian"), ("hr", "Croatian"),
-    ]
-    .into_iter()
-    .collect();
+    let m: std::collections::HashMap<&str, &str> = crate::WHISPER_LANGS.iter().copied().collect();
     m.get(code.to_lowercase().as_str()).map(|s| s.to_string()).unwrap_or_else(|| code.to_string())
 }
 

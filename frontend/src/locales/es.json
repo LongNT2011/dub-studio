@@ -13,7 +13,7 @@
     "demo": "Probar demo"
   },
   "hero": {
-    "eyebrow": "LOCAL · SIN CONEXIÓN · 30+ IDIOMAS",
+    "eyebrow": "LOCAL · SIN CONEXIÓN · 100+ IDIOMAS",
     "headline": "Dobla cualquier vídeo corto como si se hubiera grabado así.",
     "sub": "El análisis automático hace la primera pasada; luego controlas todo: voces, texto, estilo de subtítulos, desenfoque, con vista previa en vivo en cada paso.",
     "f1": "Texto en pantalla, localizado en su lugar",
@@ -173,6 +173,8 @@
     "alignRight": "Alinear a la derecha"
   },
   "seg": {
+    "add": "Añadir frase",
+    "addHint": "Inserta tu propia línea — doblada con la voz del hablante y en los subtítulos",
     "speakerHint": "Reasignar esta línea a otro hablante (usa la voz de ese hablante)",
     "regen": "Regenerar la voz de esta frase",
     "play": "Reproducir la voz de esta frase",
@@ -231,7 +233,7 @@
       "Reescribe el guion y vuelve a doblar (modo divertido)",
       "Estilo de subtítulos: fuente, color, contorno, sombra, placa",
       "Máscaras: desenfoque o un rectángulo sólido sobre el original",
-      "30+ idiomas, totalmente sin conexión, hasta 4K"
+      "100+ idiomas, totalmente sin conexión, hasta 4K"
     ],
     "sectionsTitle": "Secciones",
     "sections": [
@@ -330,6 +332,8 @@
     "speakersN": "hablantes"
   },
   "comp": {
+    "langHint": "100+ idiomas. Para un origen no europeo, cambia el ASR a Whisper en ajustes.",
+    "asrSwitched": "Parakeet no conoce {{lang}} — ASR cambiado a Whisper (99 idiomas).",
     "hint": "Combina libremente — audio y subtítulos son independientes, en cualquier modo",
     "audioLabel": "Audio",
     "audioNone": "Original (sin doblaje)",

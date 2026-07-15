@@ -236,6 +236,31 @@ fn op_regen_all(p: &mut Project, _edit: &Value) -> PatchResult {
     Ok(())
 }
 
+/// add_segment — вставить ПОЛЬЗОВАТЕЛЬСКУЮ фразу (start/end/speaker[/tgt_text]), помеченную dirty →
+/// на /render она синтезируется (Higgs клонирует голос спикера) и попадает в субтитры, как обычный сегмент.
+/// Текст можно дописать потом (op "segment"). Список пересортировывается по start. Своей речи в источнике
+/// нет — reference-голос берётся по speaker (render.rs ref_of: свой спикер → его клон, иначе первый).
+fn op_add_segment(p: &mut Project, edit: &Value) -> PatchResult {
+    let start = f(edit, "start").unwrap_or(0.0).max(0.0);
+    let end = f(edit, "end").unwrap_or(start + 2.0).max(start + 0.2);
+    // speaker: явный из запроса, иначе первый существующий (чтобы клон-голос был знакомым).
+    let speaker = s(edit, "speaker").or_else(|| p.segments.first().and_then(|x| x.speaker.clone()));
+    let id = s(edit, "id")
+        .filter(|x| !x.is_empty())
+        .unwrap_or_else(|| format!("u{}", p.segments.len() + 1));
+    // Строим Segment через JSON — #[serde(flatten)] extra заполняется пустым объектом сам.
+    let seg: dub_core::Segment = serde_json::from_value(serde_json::json!({
+        "id": id, "start": start, "end": end, "speaker": speaker,
+        "src_text": "", "tgt_text": s(edit, "tgt_text").unwrap_or_default(),
+        "voice": Value::Null, "dirty": true,
+    }))
+    .map_err(|e| (400, format!("bad segment: {e}")))?;
+    p.segments.push(seg);
+    p.segments
+        .sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(())
+}
+
 /// gain — монтажный гейн всей дорожки (dB). НЕ помечает dirty: ре-TTS не нужен, применяется на рендере
 /// поверх нормализации (сегменты берутся из кэша).
 fn op_gain(p: &mut Project, edit: &Value) -> PatchResult {
@@ -598,6 +623,7 @@ pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
         "caption" => op_caption(p, edit),
         "segment" => op_segment(p, edit),
         "del_segment" => op_del_segment(p, edit),
+        "add_segment" => op_add_segment(p, edit),
         "hide_segment" => op_hide_segment(p, edit),
         "del_segments" => op_del_segments(p, edit),
         "hide_segments" => op_hide_segments(p, edit),
