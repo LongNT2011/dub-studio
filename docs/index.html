@@ -231,6 +231,10 @@
     <div class="feat"><span class="fic">📦</span><p data-i18n="f8"><b>Batch processing</b> — a queue of files with one setup.</p></div>
     <div class="feat"><span class="fic">🌍</span><p data-i18n="f9"><b>6 languages</b> — EN / RU / ZH / ES / PT / FR, source auto-detect.</p></div>
     <div class="feat"><span class="fic">🧳</span><p data-i18n="f10"><b>Fully portable + auto-update</b> — nothing touches your user profile.</p></div>
+    <div class="feat"><span class="fic">🗣️</span><p data-i18n="f11"><b>Choice of ASR engine</b> — Parakeet-TDT (GPU) or Whisper (CPU); pick the model size and quant in settings.</p></div>
+    <div class="feat"><span class="fic">🎛️</span><p data-i18n="f12"><b>Composable modes</b> — mix any steps: dub without subtitles, translated subtitles without dubbing, funny dub with your own voices.</p></div>
+    <div class="feat"><span class="fic">🧠</span><p data-i18n="f13"><b>Tune for your hardware</b> — swap lighter quants per engine and cap the prefill batch + reference length to fit 8–12 GB GPUs and 32 GB RAM.</p></div>
+    <div class="feat"><span class="fic">🔁</span><p data-i18n="f14"><b>Resumable downloads</b> — large models resume from where they stopped after a dropped connection, instead of restarting.</p></div>
   </div>
 </div></section>
 
@@ -314,6 +318,7 @@ const T={
    f8:"<b>Пакетный режим</b> — очередь файлов на одной настройке.",
    f9:"<b>6 языков</b> — EN / RU / ZH / ES / PT / FR, автоопределение источника.",
    f10:"<b>Полностью портативно + автообновление</b> — ничего не трогает твой профиль.",
+   f11:"<b>Выбор ASR-движка</b> — Parakeet-TDT (GPU) или Whisper (CPU); размер модели и квант — в настройках.",f12:"<b>Композируемые режимы</b> — любые сочетания: дубляж без субтитров, перевод субтитров без дубляжа, шуточный дубляж своими голосами.",f13:"<b>Настройка под железо</b> — лёгкие кванты на каждый движок + лимиты prefill-батча и длины реф-клипа под 8–12 ГБ GPU и 32 ГБ RAM.",f14:"<b>Резюмируемая докачка</b> — большие модели при обрыве связи докачиваются с места, а не заново.",
    gal_h2:"Каждый режим — на твоём языке",gal_lead:"Полный редактор — дубляж, закадровый, субтитры, шуточный ремикс и транскрипт — локализован на 6 языков.",
    g1:"<b>Полный дубляж</b> · интерфейс RU · клон голоса + локализованный титр",
    g2:"<b>Закадровый</b> · интерфейс ES · ползунок громкости оригинала",
@@ -356,6 +361,7 @@ const T={
    f8:"<b>批量处理</b> —— 一次设置，文件排队处理。",
    f9:"<b>6 种语言</b> —— EN / RU / ZH / ES / PT / FR，自动识别源语言。",
    f10:"<b>完全便携 + 自动更新</b> —— 不动你的用户目录。",
+   f11:"<b>可选 ASR 引擎</b> —— Parakeet-TDT（GPU）或 Whisper（CPU）；在设置中选择模型大小和量化。",f12:"<b>可组合模式</b> —— 任意组合：配音但不加字幕、翻译字幕但不配音、用自己的声音做搞笑配音。",f13:"<b>按硬件调优</b> —— 每个引擎切换更轻量化，限制 prefill 批大小与参考时长，适配 8–12 GB 显卡和 32 GB 内存。",f14:"<b>可续传下载</b> —— 大模型断线后从中断处续传，而非重新开始。",
    gal_h2:"每种模式，用你的语言",gal_lead:"完整编辑器 —— 配音、旁白、字幕、恶搞混剪与转录 —— 本地化为 6 种语言。",
    g1:"<b>完整配音</b> · 俄语界面 · 声音克隆 + 本地化标题",
    g2:"<b>旁白配音</b> · 西语界面 · 原声音量平衡滑块",
@@ -398,6 +404,7 @@ const T={
    f8:"<b>Procesamiento por lotes</b> — una cola de archivos con una sola configuración.",
    f9:"<b>6 idiomas</b> — EN / RU / ZH / ES / PT / FR, con autodetección del origen.",
    f10:"<b>Totalmente portable + autoactualización</b> — no toca tu perfil de usuario.",
+   f11:"<b>Elección de motor ASR</b> —— Parakeet-TDT (GPU) o Whisper (CPU); elige tamaño de modelo y cuantización en ajustes.",f12:"<b>Modos combinables</b> —— cualquier combinación: doblaje sin subtítulos, subtítulos traducidos sin doblaje, doblaje humorístico con tus voces.",f13:"<b>Ajusta a tu hardware</b> —— cuantizaciones más ligeras por motor y límites de lote de prefill y duración de referencia para GPU de 8–12 GB y 32 GB de RAM.",f14:"<b>Descargas reanudables</b> —— los modelos grandes se reanudan desde donde se cortaron, en vez de reiniciar.",
    gal_h2:"Cada modo, en tu idioma",gal_lead:"El editor completo — doblaje, voz superpuesta, subtítulos, remix divertido y transcripción — localizado en 6 idiomas.",
    g1:"<b>Doblaje completo</b> · interfaz RU · voz clonada + título localizado",
    g2:"<b>Voz superpuesta</b> · interfaz ES · control de volumen del original",
@@ -440,6 +447,7 @@ const T={
    f8:"<b>Processamento em lote</b> — uma fila de arquivos com uma configuração.",
    f9:"<b>6 idiomas</b> — EN / RU / ZH / ES / PT / FR, com autodetecção da origem.",
    f10:"<b>Totalmente portátil + autoatualização</b> — não toca no seu perfil de usuário.",
+   f11:"<b>Escolha do motor de ASR</b> —— Parakeet-TDT (GPU) ou Whisper (CPU); escolha o tamanho do modelo e a quantização nas configurações.",f12:"<b>Modos combináveis</b> —— qualquer combinação: dublagem sem legendas, legendas traduzidas sem dublagem, dublagem humorística com suas vozes.",f13:"<b>Ajuste ao seu hardware</b> —— quantizações mais leves por motor e limites de lote de prefill e duração de referência para GPU de 8–12 GB e 32 GB de RAM.",f14:"<b>Downloads retomáveis</b> —— modelos grandes retomam de onde pararam, em vez de recomeçar.",
    gal_h2:"Cada modo, no seu idioma",gal_lead:"O editor completo — dublagem, locução, legendas, remix divertido e transcrição — localizado em 6 idiomas.",
    g1:"<b>Dublagem completa</b> · interface RU · voz clonada + título localizado",
    g2:"<b>Locução</b> · interface ES · controle de volume do original",
@@ -482,6 +490,7 @@ const T={
    f8:"<b>Traitement par lot</b> — une file de fichiers avec une seule configuration.",
    f9:"<b>6 langues</b> — EN / RU / ZH / ES / PT / FR, détection auto de la source.",
    f10:"<b>Entièrement portable + mise à jour auto</b> — ne touche pas à votre profil.",
+   f11:"<b>Choix du moteur ASR</b> —— Parakeet-TDT (GPU) ou Whisper (CPU) ; choisissez la taille du modèle et la quantification dans les réglages.",f12:"<b>Modes composables</b> —— n’importe quelle combinaison : doublage sans sous-titres, sous-titres traduits sans doublage, doublage humoristique avec vos voix.",f13:"<b>Adaptez à votre matériel</b> —— quantifications plus légères par moteur et limites de lot de prefill et de durée de référence pour GPU de 8–12 Go et 32 Go de RAM.",f14:"<b>Téléchargements reprenables</b> —— les gros modèles reprennent là où ils se sont arrêtés, au lieu de tout recommencer.",
    gal_h2:"Chaque mode, dans votre langue",gal_lead:"L'éditeur complet — doublage, voix off, sous-titres, remix drôle et transcription — localisé en 6 langues.",
    g1:"<b>Doublage complet</b> · interface RU · voix clonée + titre localisé",
    g2:"<b>Voix off</b> · interface ES · curseur de volume de l'original",
