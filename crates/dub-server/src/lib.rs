@@ -365,7 +365,9 @@ async fn capabilities(State(st): State<AppState>) -> Json<Value> {
         "selection": sel,
         "asr_engines": ["parakeet","whisper"],
         "whisper_models": ["tiny","base","small","medium","large-v3","large-v3-turbo"],
-        "whisper_computes": ["int8","int8_float32","float32","float16"],
+        // Только CPU-безопасные кванты: float16/bfloat16 GPU-only и роняют CTranslate2 на CPU (onefile
+        // бинарь идёт без CUDA-либ). int8 — дефолт (быстро), float32 — максимум точности.
+        "whisper_computes": ["int8","int8_float32","float32"],
     }))
 }
 

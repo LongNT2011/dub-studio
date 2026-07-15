@@ -204,7 +204,8 @@
     "disk": "disco",
     "whisperModel": "Whisper — modelo",
     "whisperCompute": "Quant. (compute)",
-    "whisperComputeHint": "Precisão de cálculo — velocidade/qualidade"
+    "whisperComputeHint": "Precisão de cálculo — velocidade/qualidade",
+    "notInstalled": "não instalado"
   },
   "help": {
     "title": "Sobre o Dub Studio",

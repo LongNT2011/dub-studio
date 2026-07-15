@@ -125,10 +125,16 @@ pub fn resolve_asr_choice(repo_root: &Path, mroot: &Path, sel: &Value) -> AsrCho
                 .map(String::from)
         });
         if let (true, Some(model)) = (bin.is_file(), model) {
-            let compute = pick(sel, "whisper_compute").unwrap_or("int8").to_string();
             // Девайс Whisper: onefile-бинарь без bundled CUDA-либ -> дефолт cpu (CTranslate2 CPU, работает
             // из коробки). Пользователь может задать cuda в настройках, если положил CUDA11-либы рядом.
             let device = pick(sel, "whisper_device").unwrap_or("cpu").to_string();
+            let mut compute = pick(sel, "whisper_compute").unwrap_or("int8").to_string();
+            // ГАРД: float16/bfloat16 не поддерживаются на CPU — CTranslate2 роняет процесс с
+            // "Requested float16 compute type, but the target device do not support efficient float16".
+            // На cpu коэрсим GPU-only кванты в безопасный int8, чтобы транскрипция не падала.
+            if device == "cpu" && matches!(compute.as_str(), "float16" | "bfloat16" | "int8_float16") {
+                compute = "int8".to_string();
+            }
             return AsrChoice::Whisper { bin, model_dir: mroot.join("whisper"), model, compute, device };
         }
     }

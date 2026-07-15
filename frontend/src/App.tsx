@@ -32,6 +32,22 @@ function LanguageSwitcher() {
   );
 }
 
+// Инверсия backend component_selection: id варианта -> (слот active.json, значение). Нужна, чтобы
+// показать в дропдауне РЕАЛЬНО активный вариант (а не «первый установленный»), совпадая с тем, что
+// резолвится при генерации.
+const VARIANT_SLOT: Record<string, [string, string]> = {
+  higgs: ["tts", "q8_0"], "higgs-q6_k": ["tts", "q6_k"], "higgs-q4_k_m": ["tts", "q4_k_m"],
+  parakeet: ["asr", "int8"], "parakeet-fp32": ["asr", "fp32"],
+  gemma: ["mt", "q4_0"], "gemma-q5_0": ["mt", "q5_0"], "gemma-q6_k": ["mt", "q6_k"], "gemma-q8_0": ["mt", "q8_0"],
+  roformer: ["sep", "Q8_0"], "roformer-q5": ["sep", "Q5_0"], "roformer-q4": ["sep", "Q4_0"],
+  "whisper-tiny": ["whisper_model", "tiny"], "whisper-base": ["whisper_model", "base"],
+  "whisper-small": ["whisper_model", "small"], "whisper-medium": ["whisper_model", "medium"],
+  "whisper-large-v3": ["whisper_model", "large-v3"], "whisper-large-v3-turbo": ["whisper_model", "large-v3-turbo"],
+};
+// Какой из ids сейчас активен по выбору (active.json из capabilities.selection).
+const activeVariantId = (ids: string[], sel: Record<string, string>): string | undefined =>
+  ids.find((id) => { const m = VARIANT_SLOT[id]; return !!m && sel[m[0]] === m[1]; });
+
 // Модели и компоненты в настройках: список из /setup/status с кнопками скачки/докачки и прогрессом.
 function ModelsSection() {
   const { t } = useTranslation();
@@ -41,27 +57,29 @@ function ModelsSection() {
   const [cap, setCap] = useState<Capabilities | null>(null);
   const [asrEngine, setAsrEngine] = useState<string>("parakeet");
   const [whisperCompute, setWhisperCompute] = useState<string>("int8");
-  const refresh = () => api.setupStatus().then(setStatus).catch(() => {});
-  useEffect(() => {
-    refresh();
-    api.capabilities().then((c) => {
-      setCap(c);
-      const s = c.selection ?? {};
-      setAsrEngine(s.asr_engine ?? "parakeet");
-      setWhisperCompute(s.whisper_compute ?? "int8");
-    }).catch(() => {});
-  }, []);
+  // Выбор варианта в дропдаунах поднят СЮДА (а не в локальный useState VariantPicker) — иначе ре-рендер
+  // секции ремаунтил пикер и сбрасывал выбор на дефолт. Ключ = ids[0] группы.
+  const [picks, setPicks] = useState<Record<string, string>>({});
+  const [err, setErr] = useState<string | null>(null);            // ошибки скачки/импорта — показываем, не глотаем
+  const loadCap = () => api.capabilities().then((c) => {
+    setCap(c);
+    const s = c.selection ?? {};
+    setAsrEngine(s.asr_engine ?? "parakeet");
+    setWhisperCompute(s.whisper_compute ?? "int8");
+  }).catch(() => {});
+  const refresh = () => { api.setupStatus().then(setStatus).catch(() => {}); loadCap(); };
+  useEffect(() => { refresh(); }, []);
   const dl = async (id: string) => {
     if (prog) return;
-    setProg({ id, pct: 0 });
+    setProg({ id, pct: 0 }); setErr(null);
     try {
       const { job_id } = await api.setupDownload([id]);
       await api.watchJob(job_id, (e) => { if (e.type === "progress" && (e.component === id || !e.component)) setProg({ id, pct: e.pct ?? 0 }); });
-    } catch { /* ignore */ } finally { setProg(null); await refresh(); }
+    } catch (e) { setErr(`${id}: ${e instanceof Error ? e.message : String(e)}`); } finally { setProg(null); await refresh(); }
   };
   const browseId = async (id: string) => {
     if (prog) return;
-    try { const r = await api.setupBrowse(id); if (r.picked) setStatus(r.status); } catch { /* ignore */ }
+    try { const r = await api.setupBrowse(id); if (r.picked) setStatus(r.status); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   };
   const BrowseBtn = ({ id }: { id: string }) => (
     <button onClick={() => browseId(id)} disabled={!!prog} title={t("settings.browseFolder")}
@@ -101,11 +119,14 @@ function ModelsSection() {
     );
   };
 
-  // модель с выбором кванта: дропдаун вариантов + скачать выбранный
+  // модель с выбором кванта: дропдаун вариантов + скачать выбранный. КОНТРОЛИРУЕМЫЙ — выбранное значение
+  // берётся из поднятого picks / активного выбора (active.json), НЕ из внутреннего useState (иначе ре-рендер
+  // секции сбрасывал бы дропдаун на дефолт). При смене — пишем picks и активируем на бэке (если установлен).
   const VariantPicker = ({ base, ids }: { base: string; ids: string[] }) => {
     const variants = ids.map(get).filter(Boolean) as SetupComponent[];
     const installed = variants.find((v) => v.installed);
-    const [pick, setPick] = useState<string>(installed?.id ?? variants[0]?.id ?? "");
+    const sel = cap?.selection ?? {};
+    const pick = picks[ids[0]] ?? activeVariantId(ids, sel) ?? installed?.id ?? variants[0]?.id ?? "";
     const c = get(pick);
     if (!c) return null;
     const quant = (v: SetupComponent) => (v.name.match(/\b(q\d[\w]*|int8|fp32|f16|large-v3-turbo|large-v3|tiny|base|small|medium)\b/i)?.[1] ?? v.name);
@@ -116,9 +137,15 @@ function ModelsSection() {
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${variants.some((v) => v.installed) ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
           <div className="min-w-0 flex-1">
             <div className="text-[12px] font-medium truncate">{base}</div>
-            <div className="mono text-[10px] text-[var(--color-muted)] truncate">{c.vram ? `${fmtBytes(c.vram)} VRAM · ` : ""}{fmtBytes(c.size)} {t("settings.disk")}</div>
+            <div className="mono text-[10px] text-[var(--color-muted)] truncate">{c.vram ? `${fmtBytes(c.vram)} VRAM · ` : ""}{fmtBytes(c.size)} {t("settings.disk")}{c.installed ? "" : ` · ${t("settings.notInstalled")}`}</div>
           </div>
-          <select value={pick} onChange={(e) => { const id = e.target.value; setPick(id); const sv = get(id); if (sv?.installed) api.selectModel(id).catch(() => {}); }}
+          <select value={pick} onChange={(e) => {
+              const id = e.target.value;
+              setPicks((p) => ({ ...p, [ids[0]]: id }));
+              const sv = get(id);
+              // установлен -> активируем сразу; не установлен -> активируется автоматически после скачки
+              if (sv?.installed) api.selectModel(id).then(loadCap).catch((er) => setErr(er instanceof Error ? er.message : String(er)));
+            }}
             className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none">
             {variants.map((v) => <option key={v.id} value={v.id}>{quant(v)}{v.installed ? " ✓" : ""} · {fmtBytes(v.size)}{v.vram ? ` / ${fmtBytes(v.vram)} VRAM` : ""}</option>)}
           </select>
@@ -158,6 +185,12 @@ function ModelsSection() {
         className="mb-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-dashed border-[var(--color-border)] text-[12px] text-[var(--color-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-text)] transition-colors disabled:opacity-40">
         <FolderDown size={14} />{t("settings.browseFolder")}
       </button>
+      {err && (
+        <div className="mb-3 flex items-start gap-2 px-2.5 py-2 rounded-lg border border-[var(--color-danger,#ef4444)]/40 bg-[color-mix(in_oklab,#ef4444_10%,transparent)] text-[11px]">
+          <span className="mono text-[var(--color-danger,#ef4444)] break-words flex-1">{err}</span>
+          <button onClick={() => setErr(null)} className="shrink-0 text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={12} /></button>
+        </div>
+      )}
       <Group label={t("settings.roleTts")}>
         <VariantPicker base="Higgs Audio v3" ids={["higgs", "higgs-q6_k", "higgs-q4_k_m"]} />
         {rowOf("higgs-engine")}
@@ -188,7 +221,7 @@ function ModelsSection() {
                 </div>
                 <select value={whisperCompute} onChange={(e) => { setWhisperCompute(e.target.value); api.setSelection("whisper_compute", e.target.value).catch(() => {}); }}
                   className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none">
-                  {(cap?.whisper_computes ?? ["int8", "int8_float32", "float32", "float16"]).map((q) => <option key={q} value={q}>{q}</option>)}
+                  {(cap?.whisper_computes ?? ["int8", "int8_float32", "float32"]).map((q) => <option key={q} value={q}>{q}</option>)}
                 </select>
               </div>
             </div>

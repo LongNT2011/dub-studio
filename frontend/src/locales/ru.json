@@ -233,7 +233,8 @@
     "disk": "диск",
     "whisperModel": "Whisper — модель",
     "whisperCompute": "Квант (compute)",
-    "whisperComputeHint": "Точность вычислений — скорость/качество"
+    "whisperComputeHint": "Точность вычислений — скорость/качество",
+    "notInstalled": "не установлено"
   },
   "help": {
     "title": "О Dub Studio",

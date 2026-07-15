@@ -204,7 +204,8 @@
     "disk": "磁盘",
     "whisperModel": "Whisper — 模型",
     "whisperCompute": "量化 (compute)",
-    "whisperComputeHint": "计算精度 — 速度与准确度"
+    "whisperComputeHint": "计算精度 — 速度与准确度",
+    "notInstalled": "未安装"
   },
   "help": {
     "title": "关于 Dub Studio",
