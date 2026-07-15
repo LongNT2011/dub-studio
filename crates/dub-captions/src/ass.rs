@@ -317,7 +317,7 @@ pub fn emit_title(out: &mut Vec<String>, b: &Title, width: i64, height: i64) {
     if text0.is_empty() {
         return;
     }
-    let text = if b.uppercase { text0.to_uppercase() } else { text0.clone() };
+    let text = if b.uppercase { text0.to_uppercase() } else { text0 };
     let bbox = b.bbox.clone().unwrap_or_default();
     if bbox.len() < 4 {
         return;
