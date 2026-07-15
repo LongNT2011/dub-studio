@@ -5,7 +5,7 @@ import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Downl
 import { createPortal } from "react-dom";
 import { useFloatable, dockSlot } from "./lib/useFloatable";
 import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent } from "./lib/api";
-import { LANGS, setLang, type Lang } from "./lib/i18n";
+import { LANGS, DUB_LANGS, setLang, type Lang } from "./lib/i18n";
 import { useStore } from "./store";
 import PreviewCanvas from "./components/PreviewCanvas";
 import { playSfx, sfxEnabled, setSfxEnabled } from "./lib/sfx";
@@ -626,12 +626,12 @@ function DropZone() {
             <select value={src} onChange={(e) => setSrc(e.target.value)}
               className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none">
               <option value="auto">auto</option>
-              {LANGS.map((l) => <option key={l} value={l}>{l.toUpperCase()}</option>)}
+              {DUB_LANGS.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
             </select>
             <ArrowRight size={12} className="text-[var(--color-muted)]" />
             <select value={tgt} onChange={(e) => setTgt(e.target.value)}
               className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none">
-              {LANGS.map((l) => <option key={l} value={l}>{l.toUpperCase()}</option>)}
+              {DUB_LANGS.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
             </select>
           </div>
           {/* АУДИО-ВЫХОД (независимо от субтитров) */}

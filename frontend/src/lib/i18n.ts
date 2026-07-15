@@ -11,6 +11,28 @@ import fr from "../locales/fr.json";
 export const LANGS = ["en", "ru", "zh", "es", "pt", "fr"] as const;
 export type Lang = (typeof LANGS)[number];
 
+// Языки КОНТЕНТА (источник/цель дубляжа) — шире локалей интерфейса. Весь стек их тянет:
+// Higgs TTS v3 (100+ языков озвучки/клона), Gemma-4 перевод (100+), Whisper large-v3 ASR (99),
+// Parakeet v3 — 25 европейских. Субтитры любой письменности (CJK/арабица/деванагари) рендерятся
+// через системный fallback шрифтов Windows. Нативные имена — как язык называет сам себя.
+export const DUB_LANGS: { code: string; name: string }[] = [
+  { code: "en", name: "English" },      { code: "zh", name: "中文" },
+  { code: "es", name: "Español" },      { code: "hi", name: "हिन्दी" },
+  { code: "ar", name: "العربية" },      { code: "pt", name: "Português" },
+  { code: "ru", name: "Русский" },      { code: "fr", name: "Français" },
+  { code: "de", name: "Deutsch" },      { code: "ja", name: "日本語" },
+  { code: "ko", name: "한국어" },        { code: "it", name: "Italiano" },
+  { code: "tr", name: "Türkçe" },       { code: "pl", name: "Polski" },
+  { code: "nl", name: "Nederlands" },   { code: "uk", name: "Українська" },
+  { code: "id", name: "Bahasa Indonesia" }, { code: "vi", name: "Tiếng Việt" },
+  { code: "th", name: "ไทย" },          { code: "fa", name: "فارسی" },
+  { code: "he", name: "עברית" },        { code: "cs", name: "Čeština" },
+  { code: "sv", name: "Svenska" },      { code: "ro", name: "Română" },
+  { code: "el", name: "Ελληνικά" },     { code: "hu", name: "Magyar" },
+  { code: "da", name: "Dansk" },        { code: "fi", name: "Suomi" },
+  { code: "bg", name: "Български" },     { code: "hr", name: "Hrvatski" },
+];
+
 const detect = (): Lang => {
   const stored = localStorage.getItem("lang");
   if (stored && (LANGS as readonly string[]).includes(stored)) return stored as Lang;

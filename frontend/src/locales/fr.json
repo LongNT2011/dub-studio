@@ -13,7 +13,7 @@
     "demo": "Essayer la démo"
   },
   "hero": {
-    "eyebrow": "LOCAL · HORS LIGNE · 6 LANGUES",
+    "eyebrow": "LOCAL · HORS LIGNE · 30+ LANGUES",
     "headline": "Doublez n'importe quelle vidéo courte comme si elle avait été tournée ainsi.",
     "sub": "L'analyse automatique fait la première passe — ensuite vous contrôlez tout : voix, texte, style des sous-titres, flou, avec un aperçu en direct à chaque étape.",
     "f1": "Texte à l'écran, localisé sur place",
@@ -231,7 +231,7 @@
       "Réécrivez le script et redoublez (mode amusant)",
       "Style des sous-titres : police, couleur, contour, ombre, plaque",
       "Masques : flou ou un rectangle uni sur l'original",
-      "6 langues, entièrement hors ligne, jusqu'à 4K"
+      "30+ langues, entièrement hors ligne, jusqu'à 4K"
     ],
     "sectionsTitle": "Sections",
     "sections": [

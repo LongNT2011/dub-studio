@@ -62,7 +62,7 @@ Chargez un clip une fois et envoyez-le dans n'importe quel mode depuis l'éditeu
 - **Re-génération intelligente** —— à l'export, seuls les segments modifiés sont resynthétisés, pas tout le clip.
 - **Traitement par lot** —— file de fichiers, tous avec un même réglage, progression par fichier.
 - **Comparaison avant/après** —— original et doublage côte à côte.
-- **6 langues** —— EN / RU / ZH / ES / PT / FR, détection auto de la langue source.
+- **30+ langues** —— doublage vers toute langue majeure (espagnol, chinois, japonais, arabe, hindi et plus), détection auto de la langue source.
 - **Tout format vidéo** —— MP4, MOV, MKV, WEBM, AVI et plus (décodé via ffmpeg).
 - **Installation en un bouton + mise à jour auto** —— modèles, moteurs, runtime CUDA/VC++ et ffmpeg se téléchargent au premier lancement ; l'app se met à jour seule.
 - **Téléchargements reprenables** —— les gros modèles (10 Go+) reprennent là où ils se sont arrêtés après une coupure, au lieu de tout recommencer.

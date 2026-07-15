@@ -13,7 +13,7 @@
     "demo": "Try a demo"
   },
   "hero": {
-    "eyebrow": "LOCAL · OFFLINE · 6 LANGUAGES",
+    "eyebrow": "LOCAL · OFFLINE · 30+ LANGUAGES",
     "headline": "Dub any short video like it was made that way.",
     "sub": "Auto-analysis runs the first pass — then you take over: voices, text, caption style, blur, with a live preview at every step.",
     "f1": "On-screen text, localized in place",
@@ -260,7 +260,7 @@
       "Rewrite the script and re-dub (funny mode)",
       "Subtitle styling: font, color, outline, shadow, plate",
       "Mask covers: blur or a solid rectangle over the original",
-      "6 languages, fully offline, up to 4K"
+      "30+ languages, fully offline, up to 4K"
     ],
     "sectionsTitle": "Sections",
     "sections": [

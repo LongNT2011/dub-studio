@@ -359,7 +359,7 @@ async fn capabilities(State(st): State<AppState>) -> Json<Value> {
             "tts": o.tts_model,
         },
         "ffmpeg": ffmpeg,
-        "languages": ["en","ru","zh","es","pt","fr"],
+        "languages": ["en","zh","es","hi","ar","pt","ru","fr","de","ja","ko","it","tr","pl","nl","uk","id","vi","th","fa","he","cs","sv","ro","el","hu","da","fi","bg","hr"],
         "voice_modes": ["clone","autocast","auto","voice"],
         // Выбор ASR: движок (parakeet|whisper), модель Whisper, квант Whisper (compute_type).
         "selection": sel,

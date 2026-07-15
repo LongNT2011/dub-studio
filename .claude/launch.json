@@ -7,6 +7,13 @@
       "runtimeArgs": ["run", "dev", "--", "--port", "5178", "--strictPort"],
       "cwd": "frontend",
       "port": 5178
+    },
+    {
+      "name": "landing",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8087"],
+      "cwd": "docs",
+      "port": 8087
     }
   ]
 }

@@ -13,7 +13,7 @@
     "demo": "Probar demo"
   },
   "hero": {
-    "eyebrow": "LOCAL · SIN CONEXIÓN · 6 IDIOMAS",
+    "eyebrow": "LOCAL · SIN CONEXIÓN · 30+ IDIOMAS",
     "headline": "Dobla cualquier vídeo corto como si se hubiera grabado así.",
     "sub": "El análisis automático hace la primera pasada; luego controlas todo: voces, texto, estilo de subtítulos, desenfoque, con vista previa en vivo en cada paso.",
     "f1": "Texto en pantalla, localizado en su lugar",
@@ -231,7 +231,7 @@
       "Reescribe el guion y vuelve a doblar (modo divertido)",
       "Estilo de subtítulos: fuente, color, contorno, sombra, placa",
       "Máscaras: desenfoque o un rectángulo sólido sobre el original",
-      "6 idiomas, totalmente sin conexión, hasta 4K"
+      "30+ idiomas, totalmente sin conexión, hasta 4K"
     ],
     "sectionsTitle": "Secciones",
     "sections": [

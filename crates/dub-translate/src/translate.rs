@@ -25,6 +25,10 @@ fn lang_name(code: &str, default: &str) -> String {
         ("fr", "French"), ("es", "Spanish"), ("it", "Italian"), ("pt", "Portuguese"),
         ("zh", "Chinese"), ("ja", "Japanese"), ("ko", "Korean"), ("pl", "Polish"),
         ("tr", "Turkish"), ("ar", "Arabic"), ("nl", "Dutch"), ("hi", "Hindi"),
+        ("id", "Indonesian"), ("vi", "Vietnamese"), ("th", "Thai"), ("fa", "Persian"),
+        ("he", "Hebrew"), ("cs", "Czech"), ("sv", "Swedish"), ("ro", "Romanian"),
+        ("el", "Greek"), ("hu", "Hungarian"), ("da", "Danish"), ("fi", "Finnish"),
+        ("bg", "Bulgarian"), ("hr", "Croatian"),
     ]
     .into_iter()
     .collect();

@@ -13,7 +13,7 @@
     "demo": "Testar demo"
   },
   "hero": {
-    "eyebrow": "LOCAL · OFFLINE · 6 IDIOMAS",
+    "eyebrow": "LOCAL · OFFLINE · 30+ IDIOMAS",
     "headline": "Duble qualquer vídeo curto como se tivesse sido gravado assim.",
     "sub": "A análise automática faz a primeira passagem; depois você controla tudo: vozes, texto, estilo das legendas, desfoque, com pré-visualização ao vivo a cada passo.",
     "f1": "Texto na tela, localizado no lugar",
@@ -231,7 +231,7 @@
       "Reescreva o roteiro e reduble (modo engraçado)",
       "Estilo das legendas: fonte, cor, contorno, sombra, placa",
       "Máscaras: desfoque ou um retângulo sólido sobre o original",
-      "6 idiomas, totalmente offline, até 4K"
+      "30+ idiomas, totalmente offline, até 4K"
     ],
     "sectionsTitle": "Seções",
     "sections": [
