@@ -51,6 +51,8 @@ Carga un clip una vez y envíalo a cualquier modo dentro del editor.
 
 - **Clonación de voz** —— el timbre original se clona y habla el nuevo idioma (motor nativo [Higgs Audio v3](https://huggingface.co/bosonai), GGUF). Reparto automático por hablante o tu propia voz de un pack.
 - **Diarización de hablantes** —— quién habla y cuándo (NVIDIA **Sortformer** v2, hasta 4 voces), una voz distinta por hablante.
+- **Elección de motor ASR** — transcribe con **Parakeet-TDT** (GPU, por defecto) o **Whisper** ([faster-whisper standalone de Purfview](https://github.com/Purfview/whisper-standalone-win), funciona en CPU) — elige el tamaño del modelo (tiny … large-v3-turbo) y el cuant (compute type) directamente en ajustes.
+- **Pipeline componible** — interruptores independientes en la entrada: audio (original / doblaje / voz superpuesta / transcripción) × subtítulos (ninguno / original / traducidos) × grabar en el vídeo sí/no × remix humorístico. Cualquier combinación — doblaje sin subtítulos, subtítulos traducidos sin doblaje, doblaje humorístico con tus propias voces — también en lote y en el editor.
 - **Localización de texto en pantalla** —— OCR detecta el texto incrustado (**PP-OCR** ONNX), **desenfoca el original** e imprime encima un título localizado con estilo a juego —— una función que ninguna otra herramienta tiene.
 - **Traducción + análisis visual de estilo** —— la transcripción se traduce localmente con **Gemma-4 12B** (GGUF, llama.cpp); un pase de visión lee el diseño del fotograma: estilo de subtítulos, títulos, marcas, zonas de texto.
 - **Separación vocal SOTA** —— **Mel-Band Roformer** (BSRoformer.cpp nativo en CUDA) separa la voz de la música: la pista de fondo se **conserva** y el clon se engancha a un habla limpia.
@@ -97,7 +99,7 @@ Lo único que instalas a mano es un **[controlador NVIDIA](https://www.nvidia.co
 
 `analyze()` es un primer pase fijo: separación → ASR con tiempos por palabra → diarización → traducción contextual + visión (estilo de subtítulos / títulos / marcas) → OCR (diseño / cajas de desenfoque). El resultado es un documento **Project** editable. Cada edición es un parche sobre él con vista previa ~0,17 s/fotograma; la exportación solo reejecuta **las etapas modificadas**.
 
-**Stack:** un shell nativo **Tauri 2 (Rust)** lanza `dub-server` (axum) en un puerto local y abre una ventana sobre la SPA —— React 19 + Vite + Tailwind + react-konva sobre JASSUB. Motores: Parakeet-TDT (ASR, ONNX) · Sortformer (diarización) · Gemma-4-12B GGUF (traducción + visión, llama.cpp) · Higgs Audio v3 (TTS) · Mel-Band Roformer (separación, BSRoformer.cpp) · PP-OCR (ONNX) · ffmpeg/NVENC. **Ni un solo proceso Python en tiempo de ejecución.**
+**Stack:** un shell nativo **Tauri 2 (Rust)** lanza `dub-server` (axum) en un puerto local y abre una ventana sobre la SPA —— React 19 + Vite + Tailwind + react-konva sobre JASSUB. Motores: Parakeet-TDT o Whisper (ASR) · Sortformer (diarización) · Gemma-4-12B GGUF (traducción + visión, llama.cpp) · Higgs Audio v3 (TTS) · Mel-Band Roformer (separación, BSRoformer.cpp) · PP-OCR (ONNX) · ffmpeg/NVENC. **Ni un solo proceso Python en tiempo de ejecución.**
 
 ### Compilar desde el código
 

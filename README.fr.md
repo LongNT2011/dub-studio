@@ -51,6 +51,8 @@ Chargez un clip une fois et envoyez-le dans n'importe quel mode depuis l'éditeu
 
 - **Clonage de voix** —— le timbre original est cloné et parle la nouvelle langue (moteur natif [Higgs Audio v3](https://huggingface.co/bosonai), GGUF). Distribution auto par locuteur ou votre propre voix depuis un pack.
 - **Diarisation des locuteurs** —— qui parle et quand (NVIDIA **Sortformer** v2, jusqu'à 4 voix), une voix distincte par locuteur.
+- **Choix du moteur ASR** — transcrivez avec **Parakeet-TDT** (GPU, par défaut) ou **Whisper** ([faster-whisper standalone de Purfview](https://github.com/Purfview/whisper-standalone-win), tourne sur CPU) — choisissez la taille du modèle (tiny … large-v3-turbo) et le quant (compute type) directement dans les réglages.
+- **Pipeline composable** — interrupteurs indépendants à l'entrée : audio (original / doublage / voix off / transcription) × sous-titres (aucun / original / traduits) × incrustation dans la vidéo oui/non × remix humoristique. N'importe quelle combinaison — doublage sans sous-titres, sous-titres traduits sans doublage, doublage humoristique avec vos propres voix — aussi en lot et dans l'éditeur.
 - **Localisation du texte à l'écran** —— l'OCR détecte le texte incrusté (**PP-OCR** ONNX), **floute l'original** et imprime par-dessus un titre localisé dans un style assorti —— une fonction qu'aucun autre outil n'a.
 - **Traduction + analyse visuelle du style** —— la transcription est traduite localement via **Gemma-4 12B** (GGUF, llama.cpp) ; une passe de vision lit la mise en page : style des sous-titres, titres, marques, zones de texte.
 - **Séparation vocale SOTA** —— **Mel-Band Roformer** (BSRoformer.cpp natif sur CUDA) sépare la voix de la musique : la piste de fond est **préservée** et le clone s'accroche à une parole propre.
@@ -97,7 +99,7 @@ La seule chose à installer à la main est un **[pilote NVIDIA](https://www.nvid
 
 `analyze()` est une première passe fixe : séparation → ASR avec timing par mot → diarisation → traduction contextuelle + vision (style des sous-titres / titres / marques) → OCR (mise en page / zones de flou). Le résultat est un document **Project** éditable. Chaque modification est un patch dessus avec aperçu ~0,17 s/image ; l'export ne rejoue que **les étapes salies**.
 
-**Stack :** une coque native **Tauri 2 (Rust)** lance `dub-server` (axum) sur un port local et ouvre une fenêtre sur la SPA —— React 19 + Vite + Tailwind + react-konva sur JASSUB. Moteurs : Parakeet-TDT (ASR, ONNX) · Sortformer (diarisation) · Gemma-4-12B GGUF (traduction + vision, llama.cpp) · Higgs Audio v3 (TTS) · Mel-Band Roformer (séparation, BSRoformer.cpp) · PP-OCR (ONNX) · ffmpeg/NVENC. **Aucun processus Python à l'exécution.**
+**Stack :** une coque native **Tauri 2 (Rust)** lance `dub-server` (axum) sur un port local et ouvre une fenêtre sur la SPA —— React 19 + Vite + Tailwind + react-konva sur JASSUB. Moteurs : Parakeet-TDT ou Whisper (ASR) · Sortformer (diarisation) · Gemma-4-12B GGUF (traduction + vision, llama.cpp) · Higgs Audio v3 (TTS) · Mel-Band Roformer (séparation, BSRoformer.cpp) · PP-OCR (ONNX) · ffmpeg/NVENC. **Aucun processus Python à l'exécution.**
 
 ### Compiler depuis les sources
 

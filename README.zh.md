@@ -51,6 +51,8 @@
 
 - **声音克隆** —— 克隆原始音色并说出新语言（原生 [Higgs Audio v3](https://huggingface.co/bosonai) 引擎，GGUF）。按说话人自动分配或使用自带声音包。
 - **说话人分离** —— 谁在何时说话（NVIDIA **Sortformer** v2，最多 4 个声音），每个说话人不同声音。
+- **可选 ASR 引擎** —— 用 **Parakeet-TDT**（GPU，默认）或 **Whisper**（[Purfview faster-whisper 独立版](https://github.com/Purfview/whisper-standalone-win)，可在 CPU 上运行）转写 —— 在设置里直接选择模型大小（tiny … large-v3-turbo）和量化（compute type）。
+- **可组合流水线** —— 输入端独立开关：音频（原声 / 配音 / 旁白 / 转写）× 字幕（无 / 原文 / 翻译）× 是否烧录到视频 × 搞笑改写。任意组合 —— 配音但不加字幕、翻译字幕但不配音、用自己的声音做搞笑配音 —— 批量和编辑器中同样适用。
 - **画面文字本地化** —— OCR 检测嵌入文字（**PP-OCR** ONNX），**模糊原文**并以匹配风格叠印本地化标题 —— 其他工具没有的功能。
 - **翻译 + 视觉风格分析** —— 通过 **Gemma-4 12B**（GGUF，llama.cpp）本地翻译整段转录；视觉流程解析画面排布：字幕风格、标题、品牌、文字区域。
 - **SOTA 人声分离** —— **Mel-Band Roformer**（CUDA 上的原生 BSRoformer.cpp）将人声与音乐分离：背景音乐**得以保留**，克隆锁定干净语音。
@@ -97,7 +99,7 @@
 
 `analyze()` 是固定的第一遍：分离 → 带词级时间戳的 ASR → 说话人分离 → 上下文翻译 + 视觉（字幕风格 / 标题 / 品牌）→ OCR（排布 / 模糊框）。产出一个可编辑的 **Project** 文档。每次编辑都是对它的补丁，约 0.17 秒/帧预览；导出只重跑**被弄脏的阶段**。
 
-**技术栈：** 原生 **Tauri 2（Rust）** 外壳在本地端口启动 `dub-server`（axum），并把窗口打开到 SPA —— React 19 + Vite + Tailwind + react-konva 覆盖 JASSUB。引擎：Parakeet-TDT（ASR，ONNX）· Sortformer（分离）· Gemma-4-12B GGUF（翻译 + 视觉，llama.cpp）· Higgs Audio v3（TTS）· Mel-Band Roformer（人声分离，BSRoformer.cpp）· PP-OCR（ONNX）· ffmpeg/NVENC。**运行时没有任何 Python 进程。**
+**技术栈：** 原生 **Tauri 2（Rust）** 外壳在本地端口启动 `dub-server`（axum），并把窗口打开到 SPA —— React 19 + Vite + Tailwind + react-konva 覆盖 JASSUB。引擎：Parakeet-TDT 或 Whisper（ASR）· Sortformer（分离）· Gemma-4-12B GGUF（翻译 + 视觉，llama.cpp）· Higgs Audio v3（TTS）· Mel-Band Roformer（人声分离，BSRoformer.cpp）· PP-OCR（ONNX）· ffmpeg/NVENC。**运行时没有任何 Python 进程。**
 
 ### 从源码构建
 
