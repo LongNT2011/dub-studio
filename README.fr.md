@@ -65,6 +65,8 @@ Chargez un clip une fois et envoyez-le dans n'importe quel mode depuis l'éditeu
 - **6 langues** —— EN / RU / ZH / ES / PT / FR, détection auto de la langue source.
 - **Tout format vidéo** —— MP4, MOV, MKV, WEBM, AVI et plus (décodé via ffmpeg).
 - **Installation en un bouton + mise à jour auto** —— modèles, moteurs, runtime CUDA/VC++ et ffmpeg se téléchargent au premier lancement ; l'app se met à jour seule.
+- **Téléchargements reprenables** —— les gros modèles (10 Go+) reprennent là où ils se sont arrêtés après une coupure, au lieu de tout recommencer.
+- **Adaptez à votre matériel** —— chaque moteur propose plusieurs quantifications (TTS Q8/Q6/Q4, traduction Q4…Q8, ASR int8/fp32 ou Whisper tiny…large-v3-turbo, séparation Q8/Q5/Q4) — changez-les dans les réglages ; limitez le lot de prefill et la durée de référence pour les GPU de 8–12 Go et 32 Go de RAM.
 - **Entièrement portable** —— rien n'est écrit dans votre profil ; supprimez le dossier, aucune trace.
 
 ## Captures

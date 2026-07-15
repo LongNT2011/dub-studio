@@ -67,7 +67,8 @@ Load a clip once and send it into any mode — right inside the editor.
 - **Before/after compare** — original and dub side by side.
 - **6 languages** — EN / RU / ZH / ES / PT / FR, with source-language auto-detect.
 - **Any video format** — MP4, MOV, MKV, WEBM, AVI and more (decoded via ffmpeg).
-- **One-button setup + in-app auto-update** — models, engines, CUDA/VC++ runtime and ffmpeg download on first run; the app updates itself.
+- **One-button setup + resumable downloads + in-app auto-update** — models, engines, CUDA/VC++ runtime and ffmpeg download on first run; large models (10 GB+) **resume from where they stopped** after a dropped connection instead of restarting; the app updates itself.
+- **Tune for your hardware** — every engine ships multiple quants (TTS Q8/Q6/Q4, translation Q4…Q8, ASR int8/fp32 or Whisper tiny…large-v3-turbo, separation Q8/Q5/Q4) — switch in settings; cap the **prefill batch** and **voice-reference length** to fit 8–12 GB GPUs and 32 GB RAM.
 - **Fully portable** — nothing is written to your user profile; delete the folder and no trace remains.
 
 ## Screenshots
