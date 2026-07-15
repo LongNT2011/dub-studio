@@ -13,6 +13,16 @@ use std::path::Path;
 use std::sync::Arc;
 use thiserror::Error;
 
+/// Декодировать C-строку в String (null -> пусто). Общий декодер полей C-ABI движка.
+/// # Safety: `ptr` должен быть либо null, либо валидным указателем на NUL-терминированную C-строку.
+unsafe fn cstr_to_string(ptr: *const c_char) -> String {
+    if ptr.is_null() {
+        String::new()
+    } else {
+        CStr::from_ptr(ptr).to_string_lossy().into_owned()
+    }
+}
+
 pub type ProgressCallback = Arc<dyn Fn(i32, i32, &str) + Send + Sync + 'static>;
 pub type AudioChunkCallback = Arc<dyn Fn(i32, i32, i64, &[f32], bool) + Send + Sync + 'static>;
 
@@ -458,18 +468,11 @@ impl Engine {
             if status != 0 {
                 return Err(EngineError::Generation("get_model_info failed".into()));
             }
-            let cs = |ptr: *const c_char| {
-                if ptr.is_null() {
-                    String::new()
-                } else {
-                    CStr::from_ptr(ptr).to_string_lossy().into_owned()
-                }
-            };
             Ok(ModelInfo {
-                family: cs(raw.family),
-                display_name: cs(raw.display_name),
-                weight_type: cs(raw.weight_type),
-                model_root: cs(raw.model_root),
+                family: cstr_to_string(raw.family),
+                display_name: cstr_to_string(raw.display_name),
+                weight_type: cstr_to_string(raw.weight_type),
+                model_root: cstr_to_string(raw.model_root),
             })
         }
     }
@@ -477,11 +480,7 @@ impl Engine {
     pub fn get_last_error(&self) -> String {
         unsafe {
             let ptr = (self.last_error)(self.handle);
-            if ptr.is_null() {
-                String::new()
-            } else {
-                CStr::from_ptr(ptr).to_string_lossy().into_owned()
-            }
+            cstr_to_string(ptr)
         }
     }
 
@@ -495,7 +494,7 @@ impl Engine {
         let error_msg = if raw.error.is_null() {
             None
         } else {
-            Some(unsafe { CStr::from_ptr(raw.error).to_string_lossy().into_owned() })
+            Some(unsafe { cstr_to_string(raw.error) })
         };
 
         let result = if status == 0 && !raw.samples.is_null() && raw.sample_count > 0 {
@@ -532,11 +531,7 @@ impl Engine {
             return;
         }
         let cb = unsafe { &*(user as *const ProgressCallback) };
-        let phase_str = if phase.is_null() {
-            String::new()
-        } else {
-            unsafe { CStr::from_ptr(phase).to_string_lossy().into_owned() }
-        };
+        let phase_str = unsafe { cstr_to_string(phase) };
         cb(current, total, &phase_str);
     }
 
@@ -550,11 +545,7 @@ impl Engine {
             return;
         }
         let cb = unsafe { &*(user as *const StreamCallbacks) };
-        let phase_str = if phase.is_null() {
-            String::new()
-        } else {
-            unsafe { CStr::from_ptr(phase).to_string_lossy().into_owned() }
-        };
+        let phase_str = unsafe { cstr_to_string(phase) };
         (cb.progress)(current, total, &phase_str);
     }
 
