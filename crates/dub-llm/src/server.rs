@@ -34,8 +34,13 @@ fn drain_to_tail<R: std::io::Read + Send + 'static>(reader: R, tail: LogTail) {
 
 fn tail_text(tail: &LogTail) -> String {
     tail.lock()
-        .map(|t| t.iter().cloned().collect::<Vec<_>>().join(" | "))
+        .map(|t| t.iter().map(String::as_str).collect::<Vec<_>>().join(" | "))
         .unwrap_or_default()
+}
+
+/// Положительный u32 из env-переменной (пусто/0/мусор -> None). Общий парсер knob'ов llama-server.
+fn env_u32_pos(name: &str) -> Option<u32> {
+    std::env::var(name).ok().and_then(|s| s.trim().parse::<u32>().ok()).filter(|n| *n > 0)
 }
 
 /// Параметры запуска llama-server. Пути к бинарю/модели/mmproj + серверные knob'ы Gemma.
@@ -127,7 +132,7 @@ impl LlamaServer {
         //   DUB_STUDIO_LLAMA_NGL   — слои на GPU (-1 все; можно уменьшить, если не хватает VRAM),
         //   DUB_STUDIO_LLAMA_UBATCH/_BATCH — размер батча prefill: ПРЯМОЙ рычаг против «prefill graph»
         //   (граф вычислений prefill масштабируется от ubatch; меньше ubatch = меньше пиковый буфер).
-        let ctx = std::env::var("DUB_STUDIO_LLAMA_CTX").ok().and_then(|s| s.trim().parse::<u32>().ok()).filter(|n| *n > 0).unwrap_or(opts.ctx_size);
+        let ctx = env_u32_pos("DUB_STUDIO_LLAMA_CTX").unwrap_or(opts.ctx_size);
         let ngl = std::env::var("DUB_STUDIO_LLAMA_NGL").ok().and_then(|s| s.trim().parse::<i32>().ok()).unwrap_or(opts.n_gpu_layers);
         let mut cmd = Command::new(&opts.bin);
         cmd.arg("-m")
@@ -152,13 +157,11 @@ impl LlamaServer {
             .arg("--jinja");
         // Лимит батча prefill против OOM «prefill graph» на слабой RAM. Приоритет: настройка UI
         // (opts.ubatch) -> env DUB_STUDIO_LLAMA_UBATCH -> дефолт llama (не передаём флаг).
-        let ubatch = opts.ubatch.or_else(|| {
-            std::env::var("DUB_STUDIO_LLAMA_UBATCH").ok().and_then(|s| s.trim().parse::<u32>().ok()).filter(|n| *n > 0)
-        });
+        let ubatch = opts.ubatch.or_else(|| env_u32_pos("DUB_STUDIO_LLAMA_UBATCH"));
         if let Some(v) = ubatch {
             cmd.arg("-ub").arg(v.to_string());
         }
-        if let Some(v) = std::env::var("DUB_STUDIO_LLAMA_BATCH").ok().and_then(|s| s.trim().parse::<u32>().ok()).filter(|n| *n > 0) {
+        if let Some(v) = env_u32_pos("DUB_STUDIO_LLAMA_BATCH") {
             cmd.arg("-b").arg(v.to_string());
         }
         if let Some(mmproj) = &opts.mmproj {
