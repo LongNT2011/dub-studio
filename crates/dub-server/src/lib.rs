@@ -850,7 +850,7 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
         higgs_threads: st.opts.num_threads,
         max_stretch: st.opts.max_stretch as f64,
         voices_dir: st.voices_dir.clone(),
-        tdt_dir: models::resolve_asr(&st.models_root, &sel),
+        asr: models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel),
         ref_secs: models::higgs_ref_secs(&st.models_root),
     };
 
@@ -918,7 +918,7 @@ async fn dub_audio_project(State(st): State<AppState>, AxPath(pid): AxPath<Strin
         higgs_threads: st.opts.num_threads,
         max_stretch: st.opts.max_stretch as f64,
         voices_dir: st.voices_dir.clone(),
-        tdt_dir: models::resolve_asr(&st.models_root, &sel),
+        asr: models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel),
         ref_secs: models::higgs_ref_secs(&st.models_root),
     };
     let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {

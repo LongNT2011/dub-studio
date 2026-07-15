@@ -36,7 +36,7 @@ pub struct RenderPaths {
     pub higgs_threads: i32,
     pub max_stretch: f64,
     pub voices_dir: PathBuf,   // каталог голосов-паков + записей с микрофона
-    pub tdt_dir: PathBuf,      // TDT-модель ASR — авто-транскрипция реф-клипа пак-голоса (ref_text клона)
+    pub asr: crate::models::AsrChoice, // выбранный ASR-движок — авто-транскрипция реф-клипа (ref_text клона)
     pub ref_secs: f64,         // длина реф-клипа клона голоса, сек (настройка «Экономия RAM», дефолт 12.0)
 }
 
@@ -99,7 +99,12 @@ pub fn run(
     // ── КАПШЕНЫ + BURN (только если subs.burn) ─────────────────────────────────
     // subs.burn=false -> НИКАКИХ наложений (ни субтитров, ни титров/блюра): чистое видео + новая
     // дорожка. Композируемость: дубляж/закадр без субтитров на картинке.
-    let captioned = if proj.subs.burn {
+    // Есть ли ВООБЩЕ что накладывать? subs=none + нет титров + нет блюр-боксов (band уже исключён при
+    // subs=none) -> накладывать нечего, полный ffmpeg-транскод бессмыслен (экономия времени, баг-репорт).
+    let has_overlay = proj.subs.mode != "none"
+        || !proj.captions.titles.is_empty()
+        || !collect_blur_boxes(proj).is_empty();
+    let captioned = if proj.subs.burn && has_overlay {
         emit(progress, "build", "сборка ASS (титры + дублированные субтитры)");
         let ass_path = wd.join("caps.ass");
         let sub_covers = build_ass(proj, &ass_path, vw, vh, total)?;
@@ -269,8 +274,10 @@ fn build_dub(
     } else {
         build_speaker_refs(&segs, &vocals16, wd, paths.ref_secs)?
     };
-    if use_pack && paths.tdt_dir.is_dir() {
-        let mut asr = dub_asr::Asr::new(&paths.tdt_dir);
+    if use_pack {
+        // Реф-транскрипция выбранным движком (Parakeet/Whisper), а НЕ захардкоженным Parakeet — иначе у
+        // Whisper-only юзера (без Parakeet-модели) ref_text молча не считался бы. build_engine сам решает.
+        let mut asr = crate::models::build_engine(&paths.asr);
         for (spk, refp) in &pack_refs {
             if let Ok(rsegs) = asr.transcribe(refp, "auto") {
                 let txt = rsegs
@@ -288,8 +295,8 @@ fn build_dub(
     // КЛОН: реф-клипы, обрезанные из-за уменьшенного ref_secs (в build_speaker_refs текст НЕ выставлен),
     // ПЕРЕтранскрибируем — чтобы ref_text совпал с укороченным реф-аудио (иначе клон рассинхронится).
     // Реф не обрезан (текст уже есть) -> не трогаем, поведение по умолчанию (12с) неизменно.
-    if !use_pack && paths.tdt_dir.is_dir() {
-        let mut asr = dub_asr::Asr::new(&paths.tdt_dir);
+    if !use_pack {
+        let mut asr = crate::models::build_engine(&paths.asr);
         for (spk, refp) in &spk_refs {
             if ref_texts.contains_key(spk) {
                 continue;
@@ -359,7 +366,14 @@ fn build_dub(
     let mut cursor = 0.0f64;
     let n_all = proj.segments.len();
     for &(fi, s) in segs.iter() {
-        let raw = wd.join(format!("seg_{:03}.wav", fi));
+        // Кэш-файл сегмента — ПО ЕГО ID, не по индексу fi. Кэш переиспользуется между рендерами (не-dirty
+        // сегменты не ре-синтезируются). При индекс-имени удаление/перестановка сегмента сдвигает индексы —
+        // и чистый сегмент подхватил бы seg_{fi}.wav ПРЕДЫДУЩЕГО жильца индекса => чужая речь/длительность =
+        // ДРИФТ дубляжа (регресс кэша порта; питон синтезил заново каждый рендер). ID стабилен -> кэш привязан
+        // к контенту. Слот next.start (nxt) остаётся по индексу — это про таймлайн-позицию, не про кэш.
+        let sid: String = s.id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+        let sid = if sid.is_empty() { format!("i{fi}") } else { sid };
+        let raw = wd.join(format!("seg_{sid}.wav"));
         // 'оставить оригинал': вырезаем ИСХОДНУЮ речь сюда, без TTS и без atempo-подгонки (порт _build_dub keep-ветки).
         // Режем СРАЗУ в 24к моно (питон media.trim(..., sr=24000)) — timeline кладёт по sr ПЕРВОГО файла (TTS=24к),
         // без ресемпла; 44.1к-вырез играл бы не на той скорости. Без промежуточного 16к (не терять ВЧ).

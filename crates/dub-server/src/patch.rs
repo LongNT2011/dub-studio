@@ -96,32 +96,42 @@ fn op_subpos(p: &mut Project, edit: &Value) -> PatchResult {
 /// Помечает все сегменты dirty. ValueError (неизвестное значение) -> 400.
 fn op_mode(p: &mut Project, edit: &Value) -> PatchResult {
     let value = s(edit, "value").unwrap_or_default();
+    // Композируемость: пресет режима НЕ трогает ЯВНЫЙ выбор «без субтитров». Иначе клик по чипу режима
+    // (op_mode) воскрешал бы субтитры, которые юзер выключил через subs_content=none (баг-репорт code-review:
+    // «subs=none всё равно прожигает субтитры» — через редактор). subs.mode остаётся под управлением
+    // независимого subs_content-контрола, пресет задаёт лишь его дефолт, когда он НЕ «none».
+    let keep_no_subs = p.subs.mode == "none";
+    let set_subs = |p: &mut Project, m: &str| {
+        if !keep_no_subs {
+            p.subs.mode = m.into();
+        }
+    };
     match value.as_str() {
         "subtitles" => {
             p.mode = "nodub".into();
-            p.subs.mode = "transcribe".into(); // субтитры = язык оригинала, без перевода
+            set_subs(p, "transcribe"); // субтитры = язык оригинала, без перевода
             p.audio.rewrite = None;
         }
         "dub" => {
             p.mode = "dub".into();
-            p.subs.mode = "translate".into();
+            set_subs(p, "translate");
             p.audio.rewrite = None;
         }
         "voiceover" => {
             // закадровый: перевод+TTS поверх приглушённого оригинала (громкость — audio.voiceover_gain_db)
             p.mode = "voiceover".into();
-            p.subs.mode = "translate".into();
+            set_subs(p, "translate");
             p.audio.rewrite = None;
         }
         "transcribe" => {
             // транскрипт+диаризация: без дубляжа/перевода, субтитры на языке оригинала
             p.mode = "transcribe".into();
-            p.subs.mode = "transcribe".into();
+            set_subs(p, "transcribe");
             p.audio.rewrite = None;
         }
         "funny" => {
             p.mode = "dub".into();
-            p.subs.mode = "translate".into();
+            set_subs(p, "translate");
             if p.audio.rewrite.is_none() {
                 p.audio.rewrite = Some("make it a funny, playful dub".into());
             }

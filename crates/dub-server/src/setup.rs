@@ -840,9 +840,13 @@ pub fn setup_status(repo_root: &Path) -> SetupStatus {
         .iter()
         .map(|c| component_status(repo_root, c))
         .collect();
+    // ready = всё СКАЧИВАЕМОЕ/бандл-обязательное на месте. External (драйвер NVIDIA) НЕ гейтит: его
+    // detect_driver() (LoadLibraryW nvcuda.dll) даёт ложные негативы (нет NVIDIA / DLL не в пути / CPU-бокс)
+    // -> раньше первый экран ВИСЕЛ на 100%, хотя всё скачано (баг-репорт). Драйвер остаётся строкой-
+    // предупреждением (driver_ok ниже), но не блокирует вход в приложение.
     let ready = comps
         .iter()
-        .filter(|c| c.requirement == Requirement::Required)
+        .filter(|c| c.requirement == Requirement::Required && c.delivery != Delivery::External)
         .all(|c| c.installed);
     let download_pending = comps
         .iter()
