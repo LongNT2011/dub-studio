@@ -870,6 +870,14 @@ pub fn setup_status(repo_root: &Path) -> SetupStatus {
 /// Колбэк прогресса скачивания: сервер оборачивает его в SSE-событие джобы.
 pub type ProgressCb<'a> = dyn Fn(Value) + 'a;
 
+/// Путь манифеста завершённых чанков рядом с загружаемым файлом (<file>.done). Хранит offset'ы готовых
+/// чанков (u64 LE) -> при следующем запуске резюмируем, пропуская их (докачка больших файлов).
+fn done_manifest_path(dl_target: &Path) -> PathBuf {
+    let mut s = dl_target.as_os_str().to_os_string();
+    s.push(".done");
+    PathBuf::from(s)
+}
+
 /// Скачать набор компонентов по id (идемпотентно: уже целые файлы пропускаем). Возвращает JSON-результат
 /// с итоговым статусом каждого компонента. Тело синхронное (вызывается из spawn_blocking джобы).
 pub fn download_components(
@@ -944,7 +952,8 @@ pub fn download_components(
 
     // Чанки всех файлов в ОДНУ очередь; счётчик прогресса — на КАЖДЫЙ компонент (comp_done[ci]).
     enum Task {
-        Range { file: Arc<File>, url: &'static str, start: u64, end: u64, ci: usize },
+        // done — манифест завершённых чанков (дозапись offset при успехе) для РЕЗЮМА при следующем запуске.
+        Range { file: Arc<File>, url: &'static str, start: u64, end: u64, ci: usize, done: Arc<Mutex<File>> },
         Whole { url: &'static str, dest: PathBuf, ci: usize },
     }
     let ncomp = selected.len();
@@ -972,19 +981,46 @@ pub fn download_components(
             p.target.clone() // архивы качаем в tmp напрямую — extract их сам валидирует
         };
         if ranges_ok && total > 0 {
+            // РЕЗЮМ большого файла: .part уже нужного размера И рядом манифест .done -> дочитываем ТОЛЬКО
+            // недостающие чанки (обрыв Xet на 12ГБ больше НЕ заставляет качать с нуля). Иначе — свежая закачка.
+            let done_path = done_manifest_path(&dl_target);
+            let resuming = std::fs::metadata(&dl_target).map(|m| m.len() == total).unwrap_or(false)
+                && done_path.is_file();
+            let completed: std::collections::HashSet<u64> = if resuming {
+                std::fs::read(&done_path)
+                    .ok()
+                    .map(|b| b.chunks_exact(8).filter_map(|c| <[u8; 8]>::try_from(c).ok().map(u64::from_le_bytes)).collect())
+                    .unwrap_or_default()
+            } else {
+                let _ = std::fs::remove_file(&done_path); // свежая закачка -> старый манифест долой
+                std::collections::HashSet::new()
+            };
             let file = std::fs::OpenOptions::new()
                 .create(true)
                 .write(true)
-                .truncate(true)
+                .truncate(!resuming) // резюм -> НЕ обнуляем уже скачанное
                 .open(&dl_target)
                 .map_err(|e| format!("создать {}: {e}", dl_target.display()))?;
-            file.set_len(total).map_err(|e| format!("set_len: {e}"))?;
+            if !resuming {
+                file.set_len(total).map_err(|e| format!("set_len: {e}"))?;
+            }
             let file = Arc::new(file);
             open_files.push(file.clone());
+            let done = Arc::new(Mutex::new(
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&done_path)
+                    .map_err(|e| format!("манифест {}: {e}", done_path.display()))?,
+            ));
             let mut start = 0u64;
             while start < total {
                 let end = (start + CHUNK - 1).min(total - 1);
-                tasks.push(Task::Range { file: file.clone(), url: p.url, start, end, ci: p.ci });
+                if completed.contains(&start) {
+                    comp_done[p.ci].fetch_add(end - start + 1, Ordering::Relaxed); // учесть в прогрессе, не качать
+                } else {
+                    tasks.push(Task::Range { file: file.clone(), url: p.url, start, end, ci: p.ci, done: done.clone() });
+                }
                 start += CHUNK;
             }
         } else {
@@ -1021,8 +1057,8 @@ pub fn download_components(
                         None => break, // очередь пуста
                     };
                     let res = match &task {
-                        Task::Range { file, url, start, end, ci } => {
-                            download_range(url, file, *start, *end, &comp_done[*ci], &abort)
+                        Task::Range { file, url, start, end, ci, done } => {
+                            download_range(url, file, *start, *end, &comp_done[*ci], &abort, done)
                         }
                         Task::Whole { url, dest, ci } => {
                             download_whole(url, dest, &comp_done[*ci], &abort)
@@ -1078,23 +1114,30 @@ pub fn download_components(
 
     drop(open_files); // закрыть хендлы до распаковки (иначе zip не откроет файл на чтение)
 
-    // Сбой/отмена: удаляем только НЕДОкачанные .part и tmp-архивы (готовые финальные файлы не трогаем).
-    let cleanup = || {
+    // Сбой vs отмена. При СБОЕ (обрыв сети) НЕ удаляем .part и .done-манифест — следующий запуск ДОКАЧАЕТ
+    // недостающие чанки (главный фикс для больших файлов на флаки-сети). При ОТМЕНЕ пользователем — чистим
+    // всё (он не хочет продолжать). Готовые финальные файлы не трогаем в любом случае.
+    let cleanup = |keep_for_resume: bool| {
+        if keep_for_resume {
+            return; // .part + .done остаются -> докачка при повторе
+        }
         for (part, _, _) in &parts {
             let _ = std::fs::remove_file(part);
+            let _ = std::fs::remove_file(done_manifest_path(part));
         }
         for p in &planned {
             if p.extract != Extract::None {
                 let _ = std::fs::remove_file(&p.target);
+                let _ = std::fs::remove_file(done_manifest_path(&p.target));
             }
         }
     };
     if let Some(e) = error.lock().unwrap().take() {
-        cleanup();
+        cleanup(true); // сохранить прогресс для докачки
         return Err(e);
     }
     if cancel() {
-        cleanup();
+        cleanup(false); // отмена -> удалить незавершённое
         return Err("отменено".to_string());
     }
 
@@ -1120,6 +1163,7 @@ pub fn download_components(
         }
         std::fs::rename(part, target)
             .map_err(|e| format!("переименовать {}: {e}", target.display()))?;
+        let _ = std::fs::remove_file(done_manifest_path(part)); // файл целиком собран -> манифест не нужен
     }
 
     // Распаковка/финализация архивов — последовательно, вне сети.
@@ -1210,8 +1254,9 @@ fn probe_size(url: &str) -> (u64, bool) {
 }
 
 /// Сколько раз повторяем ОДИН диапазон при сбое. HF Xet-CAS (cas-bridge.xethub.hf.co) роняет соединения
-/// под параллелью (Peer disconnected) ИЛИ отдаёт неполный range — это ТРАНЗИЕНТНО, ретрай спасает.
-const RANGE_RETRIES: u32 = 6;
+/// под параллелью (Peer disconnected) ИЛИ отдаёт неполный range — это ТРАНЗИЕНТНО, ретрай спасает. 8 (не 6):
+/// на больших файлах (Gemma Q8 ~12ГБ, 750 чанков) вероятность транзиентного дропа выше; плюс есть докачка.
+const RANGE_RETRIES: u32 = 8;
 
 /// Скачать ОДИН диапазон [start,end] в общий файл по офсету (write_at, без seek-гонок). abort -> стоп всех.
 /// Порт Higgs download_range (ureq + Range) + РЕТРАИ (Xet-CAS дропает под параллелью). downloaded — общий
@@ -1224,6 +1269,7 @@ fn download_range(
     end: u64,
     downloaded: &Arc<AtomicU64>,
     abort: &Arc<AtomicBool>,
+    done: &Arc<Mutex<File>>,
 ) -> Result<(), String> {
     let want = end - start + 1;
     let mut last = String::new();
@@ -1234,7 +1280,15 @@ fn download_range(
         let mut got = 0u64;
         let res = download_range_once(url, file, start, end, downloaded, abort, &mut got);
         match res {
-            Ok(()) if got == want => return Ok(()),
+            Ok(()) if got == want => {
+                // чанк целиком -> пометить в манифесте (offset LE) для докачки при следующем запуске
+                if let Ok(mut m) = done.lock() {
+                    use std::io::Write;
+                    let _ = m.write_all(&start.to_le_bytes());
+                    let _ = m.flush();
+                }
+                return Ok(());
+            }
             Ok(()) => last = format!("неполный range: {got}/{want} байт"),
             Err(e) if e == "отменено" => return Err(e),
             Err(e) => last = e,
