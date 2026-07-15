@@ -204,6 +204,7 @@ pub fn fetch_voice(dir: &std::path::Path, name: &str) -> Result<(), String> {
     }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let client = hf_client()?;
+    let base = std::path::Path::new(name).file_name().and_then(|s| s.to_str()).unwrap_or(name);
     for ext in ["mp3", "txt"] {
         let url = format!("https://huggingface.co/datasets/{VOICES_DATASET}/resolve/main/{name}.{ext}");
         let resp = client.get(&url).send().map_err(|e| format!("GET {ext}: {e}"))?;
@@ -212,7 +213,6 @@ pub fn fetch_voice(dir: &std::path::Path, name: &str) -> Result<(), String> {
             return Err(format!("HTTP {} для {name}.{ext}", resp.status().as_u16()));
         }
         let bytes = resp.bytes().map_err(|e| format!("тело {ext}: {e}"))?;
-        let base = std::path::Path::new(name).file_name().and_then(|s| s.to_str()).unwrap_or(name);
         let mut f = std::fs::File::create(dir.join(format!("{base}.{ext}"))).map_err(|e| e.to_string())?;
         f.write_all(&bytes).map_err(|e| e.to_string())?;
     }

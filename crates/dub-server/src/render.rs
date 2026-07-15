@@ -1030,6 +1030,7 @@ mod tests {
         let (vw, vh) = (464i64, 824i64);
         let mut proj = Project::default();
         proj.mode = "dub".into();
+        proj.subs.mode = "translate".into(); // включить субтитры (subs=none даёт пустой ASS с фикса #47)
         proj.captions.sub_y = Some(634);
         proj.captions.sub_y_locked = false;
         // sub_style как у ducks: белый Oswald caps на тёмной полосе (vision background -> BorderStyle=3).
@@ -1075,6 +1076,7 @@ mod tests {
         let (vw, vh) = (464i64, 824i64);
         let mut proj = Project::default();
         proj.mode = "dub".into();
+        proj.subs.mode = "translate".into(); // включить субтитры (subs=none даёт пустой ASS с фикса #47)
         proj.captions.sub_y = Some(634);
         let mut boxes = Vec::new();
         for t in [0.75, 1.0, 1.25, 1.5].iter() {

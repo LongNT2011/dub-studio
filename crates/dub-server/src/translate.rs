@@ -35,7 +35,7 @@ pub fn stage(
     if proj.segments.is_empty() {
         return;
     }
-    let rewrite = if args.rewrite.is_empty() { None } else { Some(args.rewrite.clone()) };
+    let rewrite = if args.rewrite.is_empty() { None } else { Some(args.rewrite.as_str()) };
     let do_translate = wants_translate(proj) || rewrite.is_some();
     if !do_translate {
         // transcribe-режим: tgt = исходный текст, БЕЗ MT (parity с pipeline «transcribe» веткой).
@@ -49,10 +49,9 @@ pub fn stage(
     // src == tgt -> оставить исходник, ноль MT (same_lang в питоне). src берём из query (auto -> не знаем
     // язык детерминированно тут; ASR его не вернул типизированно, потому same_lang проверяем лишь по
     // явному src_lang — как str(src).lower()==tgt в питоне при известном src).
-    let src = args.src_lang.clone();
-    let same_lang = !src.is_empty()
-        && src.to_lowercase() != "auto"
-        && src.to_lowercase() == proj.tgt_lang.to_lowercase();
+    let src = &args.src_lang;
+    let src_lc = src.to_lowercase();
+    let same_lang = !src.is_empty() && src_lc != "auto" && src_lc == proj.tgt_lang.to_lowercase();
     if same_lang && rewrite.is_none() {
         for s in &mut proj.segments {
             s.tgt_text = s.src_text.clone();
@@ -118,9 +117,8 @@ pub fn stage(
     };
 
     emit(progress, "vision", "ctx-проход: vision layout/scene + перевод транскрипта");
-    let progress_log = progress;
-    let res = ctx_run(&client, &cfg, &mut segs, rewrite.as_deref(), |m| {
-        emit(progress_log, "vision", m);
+    let res = ctx_run(&client, &cfg, &mut segs, rewrite, |m| {
+        emit(progress, "vision", m);
     });
 
     // Сервер больше не нужен -> глушим (освобождаем VRAM, как del llm в питоне перед TTS/берном).
