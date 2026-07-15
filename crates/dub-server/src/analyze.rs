@@ -153,7 +153,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
             );
             let turns: Vec<Turn> = d.turns.clone();
             let mut sp = asr
-                .transcribe_turns(&vocals16, &turns)
+                .transcribe_turns(&vocals16, &turns, &args.src_lang)
                 .map_err(|e| format!("transcribe_turns: {e}"))?;
             // diarize-first складывает реплики ПО СПИКЕРАМ, не по времени -> сортируем по start
             // (как segs.sort в питоне), чтобы порядок сегментов был временной.

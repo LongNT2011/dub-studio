@@ -205,7 +205,14 @@
     "whisperModel": "Whisper — 模型",
     "whisperCompute": "量化 (compute)",
     "whisperComputeHint": "计算精度 — 速度与准确度",
-    "notInstalled": "未安装"
+    "notInstalled": "未安装",
+    "perfTitle": "性能 / 内存",
+    "llamaUbatch": "Gemma prefill 批大小",
+    "llamaUbatchHint": "越小越省内存（避免 32GB 溢出）",
+    "higgsRef": "声音克隆参考时长",
+    "higgsRefHint": "越短越省 TTS 内存（利于 32GB）",
+    "auto": "自动",
+    "sec": "秒"
   },
   "help": {
     "title": "关于 Dub Studio",

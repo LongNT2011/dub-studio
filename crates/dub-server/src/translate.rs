@@ -74,7 +74,9 @@ pub fn stage(
     }
 
     emit(progress, "translate", "поднимаю llama-server (Gemma + mmproj)");
-    let mut opts = ServerOpts::new(&paths.llama_bin, &paths.mt_model);
+    // Лимит prefill-батча из настройки «Экономия RAM» (active.json.llama_ubatch) — против OOM на слабой RAM.
+    let mut opts = ServerOpts::new(&paths.llama_bin, &paths.mt_model)
+        .with_ubatch(crate::models::sel_num(&paths.models_root, "llama_ubatch").map(|f| f as u32));
     if paths.mmproj.is_file() {
         opts = opts.with_mmproj(&paths.mmproj);
     }

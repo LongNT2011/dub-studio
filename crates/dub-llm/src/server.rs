@@ -50,6 +50,9 @@ pub struct ServerOpts {
     pub n_gpu_layers: i32,
     /// Контекст. Питон ctx_translate: n_ctx=12288.
     pub ctx_size: u32,
+    /// Размер prefill-батча (-ub). None -> дефолт llama. Видимая настройка «Экономия RAM»: меньше =
+    /// меньше пиковый буфер графа prefill (против OOM на 32ГБ). Приоритетнее env DUB_STUDIO_LLAMA_UBATCH.
+    pub ubatch: Option<u32>,
     /// Секунд ждать готовности (загрузка 7ГБ GGUF в VRAM небыстрая).
     pub ready_timeout_secs: u64,
 }
@@ -62,12 +65,19 @@ impl ServerOpts {
             mmproj: None,
             n_gpu_layers: -1,
             ctx_size: 12288,
+            ubatch: None,
             ready_timeout_secs: 300,
         }
     }
 
     pub fn with_mmproj(mut self, mmproj: impl Into<PathBuf>) -> Self {
         self.mmproj = Some(mmproj.into());
+        self
+    }
+
+    /// Задать prefill-батч (из настройки «Экономия RAM»). None -> дефолт llama.
+    pub fn with_ubatch(mut self, ubatch: Option<u32>) -> Self {
+        self.ubatch = ubatch.filter(|n| *n > 0);
         self
     }
 }
@@ -111,6 +121,14 @@ impl LlamaServer {
             )));
         }
         let port = free_port()?;
+        // Env-оверрайды памяти для слабых машин (баг-репорт: OOM «prefill graph» на 32ГБ RAM — на 64ГБ
+        // тот же клип проходит). Дают подобрать без пересборки:
+        //   DUB_STUDIO_LLAMA_CTX   — контекст (меньше = меньше KV-кэш),
+        //   DUB_STUDIO_LLAMA_NGL   — слои на GPU (-1 все; можно уменьшить, если не хватает VRAM),
+        //   DUB_STUDIO_LLAMA_UBATCH/_BATCH — размер батча prefill: ПРЯМОЙ рычаг против «prefill graph»
+        //   (граф вычислений prefill масштабируется от ubatch; меньше ubatch = меньше пиковый буфер).
+        let ctx = std::env::var("DUB_STUDIO_LLAMA_CTX").ok().and_then(|s| s.trim().parse::<u32>().ok()).filter(|n| *n > 0).unwrap_or(opts.ctx_size);
+        let ngl = std::env::var("DUB_STUDIO_LLAMA_NGL").ok().and_then(|s| s.trim().parse::<i32>().ok()).unwrap_or(opts.n_gpu_layers);
         let mut cmd = Command::new(&opts.bin);
         cmd.arg("-m")
             .arg(&opts.model)
@@ -119,9 +137,9 @@ impl LlamaServer {
             .arg("--port")
             .arg(port.to_string())
             .arg("-ngl")
-            .arg(opts.n_gpu_layers.to_string())
+            .arg(ngl.to_string())
             .arg("-c")
-            .arg(opts.ctx_size.to_string())
+            .arg(ctx.to_string())
             // flash-attn как flash_attn=True в питоне (макс. GPU-ускорение). В новых сборках это enum on/off/auto.
             .arg("--flash-attn")
             .arg("on")
@@ -132,6 +150,17 @@ impl LlamaServer {
             // (enable_thinking:false из client.rs) -> Gemma-4 «думает», сжигает max_tokens на reasoning_content,
             // а content приходит ПУСТЫМ -> перевод/rewrite молча откатываются на оригинал (сломан весь MT).
             .arg("--jinja");
+        // Лимит батча prefill против OOM «prefill graph» на слабой RAM. Приоритет: настройка UI
+        // (opts.ubatch) -> env DUB_STUDIO_LLAMA_UBATCH -> дефолт llama (не передаём флаг).
+        let ubatch = opts.ubatch.or_else(|| {
+            std::env::var("DUB_STUDIO_LLAMA_UBATCH").ok().and_then(|s| s.trim().parse::<u32>().ok()).filter(|n| *n > 0)
+        });
+        if let Some(v) = ubatch {
+            cmd.arg("-ub").arg(v.to_string());
+        }
+        if let Some(v) = std::env::var("DUB_STUDIO_LLAMA_BATCH").ok().and_then(|s| s.trim().parse::<u32>().ok()).filter(|n| *n > 0) {
+            cmd.arg("-b").arg(v.to_string());
+        }
         if let Some(mmproj) = &opts.mmproj {
             if mmproj.is_file() {
                 // --mmproj + дефолтный offload на GPU (быстрее); проектор Gemma лёгкий (~175МБ).

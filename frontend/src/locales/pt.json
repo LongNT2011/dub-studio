@@ -205,7 +205,14 @@
     "whisperModel": "Whisper — modelo",
     "whisperCompute": "Quant. (compute)",
     "whisperComputeHint": "Precisão de cálculo — velocidade/qualidade",
-    "notInstalled": "não instalado"
+    "notInstalled": "não instalado",
+    "perfTitle": "Desempenho / RAM",
+    "llamaUbatch": "Lote prefill do Gemma",
+    "llamaUbatchHint": "Menor = menos RAM (evita OOM em 32 GB)",
+    "higgsRef": "Duração da referência de clonagem",
+    "higgsRefHint": "Mais curta = menos RAM de TTS (ajuda em 32 GB)",
+    "auto": "Auto",
+    "sec": "s"
   },
   "help": {
     "title": "Sobre o Dub Studio",

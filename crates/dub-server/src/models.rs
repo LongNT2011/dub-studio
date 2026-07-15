@@ -68,12 +68,32 @@ pub fn component_selection(id: &str) -> Vec<(&'static str, String)> {
 }
 
 /// Разрешённые слоты для прямой установки через POST /engine/select {key,value} (без скачивания):
-/// переключение движка/модели/кванта в настройках. Возврат true, если слот допустим.
+/// переключение движка/модели/кванта + видимые в настройках лимиты RAM. Возврат true, если слот допустим.
 pub fn is_selection_key(key: &str) -> bool {
     matches!(
         key,
         "tts" | "asr" | "mt" | "sep" | "asr_engine" | "whisper_model" | "whisper_compute" | "whisper_device"
+            // Лимиты RAM (видимые контролы в настройках, НЕ авто-магия): против OOM на слабой памяти.
+            | "llama_ubatch"    // размер prefill-батча Gemma (меньше = меньше пиковый буфер графа prefill)
+            | "higgs_ref_secs"  // длина реф-клипа клона голоса (меньше = меньше prefill Higgs; <12с спасает 32ГБ)
     )
+}
+
+/// Прочитать числовой слот выбора (llama_ubatch/higgs_ref_secs) из active.json. Значение может лежать
+/// строкой ("256") или числом — обе формы принимаем. None/пусто -> дефолт у вызывающего.
+pub fn sel_num(mroot: &Path, key: &str) -> Option<f64> {
+    let v = load_selection(mroot);
+    match v.get(key) {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+/// Длина реф-клипа клона голоса в секундах: настройка higgs_ref_secs (видимая в UI), дефолт 12.0.
+/// Пользователь на 32ГБ RAM может уменьшить (баг-репорт: >12с не влезает в prefill Higgs, ручная резка <12с спасает).
+pub fn higgs_ref_secs(mroot: &Path) -> f64 {
+    sel_num(mroot, "higgs_ref_secs").filter(|s| *s > 0.0 && *s <= 60.0).unwrap_or(12.0)
 }
 
 /// Выбор ASR-движка для одной джобы: Parakeet (каталог TDT) либо Whisper (бинарь + модель + квант + девайс).
@@ -132,7 +152,9 @@ pub fn resolve_asr_choice(repo_root: &Path, mroot: &Path, sel: &Value) -> AsrCho
             // ГАРД: float16/bfloat16 не поддерживаются на CPU — CTranslate2 роняет процесс с
             // "Requested float16 compute type, but the target device do not support efficient float16".
             // На cpu коэрсим GPU-only кванты в безопасный int8, чтобы транскрипция не падала.
-            if device == "cpu" && matches!(compute.as_str(), "float16" | "bfloat16" | "int8_float16") {
+            if device == "cpu"
+                && matches!(compute.as_str(), "float16" | "bfloat16" | "int8_float16" | "int8_bfloat16")
+            {
                 compute = "int8".to_string();
             }
             return AsrChoice::Whisper { bin, model_dir: mroot.join("whisper"), model, compute, device };

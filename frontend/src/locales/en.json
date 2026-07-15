@@ -234,7 +234,14 @@
     "whisperModel": "Whisper — model",
     "whisperCompute": "Quant (compute)",
     "whisperComputeHint": "Compute precision — speed vs accuracy",
-    "notInstalled": "not installed"
+    "notInstalled": "not installed",
+    "perfTitle": "Performance / RAM",
+    "llamaUbatch": "Gemma prefill batch",
+    "llamaUbatchHint": "Lower = less RAM (avoids OOM on 32 GB)",
+    "higgsRef": "Voice-clone reference length",
+    "higgsRefHint": "Shorter = less TTS RAM (helps 32 GB)",
+    "auto": "Auto",
+    "sec": "s"
   },
   "help": {
     "title": "About Dub Studio",

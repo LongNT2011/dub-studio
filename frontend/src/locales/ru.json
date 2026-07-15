@@ -234,7 +234,14 @@
     "whisperModel": "Whisper — модель",
     "whisperCompute": "Квант (compute)",
     "whisperComputeHint": "Точность вычислений — скорость/качество",
-    "notInstalled": "не установлено"
+    "notInstalled": "не установлено",
+    "perfTitle": "Производительность / RAM",
+    "llamaUbatch": "Prefill-батч Gemma",
+    "llamaUbatchHint": "Меньше = меньше RAM (против OOM на 32ГБ)",
+    "higgsRef": "Длина реф-клипа клона",
+    "higgsRefHint": "Короче = меньше RAM для TTS (спасает 32ГБ)",
+    "auto": "Авто",
+    "sec": "с"
   },
   "help": {
     "title": "О Dub Studio",

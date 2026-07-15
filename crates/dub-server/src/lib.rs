@@ -368,6 +368,9 @@ async fn capabilities(State(st): State<AppState>) -> Json<Value> {
         // Только CPU-безопасные кванты: float16/bfloat16 GPU-only и роняют CTranslate2 на CPU (onefile
         // бинарь идёт без CUDA-либ). int8 — дефолт (быстро), float32 — максимум точности.
         "whisper_computes": ["int8","int8_float32","float32"],
+        // Видимые лимиты RAM (настройки, не авто-магия): против OOM на слабой памяти. "0" = авто (дефолт).
+        "llama_ubatches": ["0","512","256","128"],      // prefill-батч Gemma (меньше = меньше RAM)
+        "higgs_ref_secs_opts": ["12","8","6","4"],       // длина реф-клипа клона (сек; <12 спасает 32ГБ)
     }))
 }
 
@@ -848,6 +851,7 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
         max_stretch: st.opts.max_stretch as f64,
         voices_dir: st.voices_dir.clone(),
         tdt_dir: models::resolve_asr(&st.models_root, &sel),
+        ref_secs: models::higgs_ref_secs(&st.models_root),
     };
 
     let dir_for_job = dir.clone();
@@ -915,6 +919,7 @@ async fn dub_audio_project(State(st): State<AppState>, AxPath(pid): AxPath<Strin
         max_stretch: st.opts.max_stretch as f64,
         voices_dir: st.voices_dir.clone(),
         tdt_dir: models::resolve_asr(&st.models_root, &sel),
+        ref_secs: models::higgs_ref_secs(&st.models_root),
     };
     let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
         let cb = |ev: Value| progress(ev);

@@ -124,8 +124,8 @@ impl AsrEngine for WhisperAsr {
     /// Per-speaker: whole-clip ОДИН прогон (сабпроцесс дорогой на старт), затем слова раскладываем по
     /// репликам (по середине слова во временном окне реплики; слово вне всех окон -> ближайшая реплика),
     /// внутри каждой — обычная сегментация. Времена уже абсолютные.
-    fn transcribe_turns(&mut self, wav: &Path, turns: &[Turn]) -> Result<Vec<SpeakerSegment>, AsrError> {
-        let words = self.run_words(wav, "auto")?;
+    fn transcribe_turns(&mut self, wav: &Path, turns: &[Turn], lang: &str) -> Result<Vec<SpeakerSegment>, AsrError> {
+        let words = self.run_words(wav, lang)?;
         if turns.is_empty() {
             // нет реплик -> single-speaker (0), как fallback
             return Ok(segment_words(&words, 0.6, 8.0)

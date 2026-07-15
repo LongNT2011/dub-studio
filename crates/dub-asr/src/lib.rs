@@ -130,7 +130,7 @@ pub struct SpeakerSegment {
 /// деталей. Методы берут `&Path` (объект-трейт: без дженериков).
 pub trait AsrEngine {
     fn transcribe(&mut self, wav: &Path, lang: &str) -> Result<Vec<Segment>, AsrError>;
-    fn transcribe_turns(&mut self, wav: &Path, turns: &[Turn]) -> Result<Vec<SpeakerSegment>, AsrError>;
+    fn transcribe_turns(&mut self, wav: &Path, turns: &[Turn], lang: &str) -> Result<Vec<SpeakerSegment>, AsrError>;
 }
 
 /// ASR-движок: держит загруженную TDT-модель тёплой между вызовами.
@@ -228,7 +228,8 @@ impl AsrEngine for Asr {
     fn transcribe(&mut self, wav: &Path, lang: &str) -> Result<Vec<Segment>, AsrError> {
         Asr::transcribe(self, wav, lang)
     }
-    fn transcribe_turns(&mut self, wav: &Path, turns: &[Turn]) -> Result<Vec<SpeakerSegment>, AsrError> {
+    // Parakeet-TDT сам определяет язык (мультиязычная модель) — lang игнорируем, как и в whole-clip.
+    fn transcribe_turns(&mut self, wav: &Path, turns: &[Turn], _lang: &str) -> Result<Vec<SpeakerSegment>, AsrError> {
         Asr::transcribe_turns(self, wav, turns)
     }
 }

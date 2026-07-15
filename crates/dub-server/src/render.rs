@@ -37,6 +37,7 @@ pub struct RenderPaths {
     pub max_stretch: f64,
     pub voices_dir: PathBuf,   // каталог голосов-паков + записей с микрофона
     pub tdt_dir: PathBuf,      // TDT-модель ASR — авто-транскрипция реф-клипа пак-голоса (ref_text клона)
+    pub ref_secs: f64,         // длина реф-клипа клона голоса, сек (настройка «Экономия RAM», дефолт 12.0)
 }
 
 pub type Progress<'a> = dyn Fn(Value) + Send + Sync + 'a;
@@ -247,8 +248,9 @@ fn build_dub(
                 let src = ["wav", "mp3"].iter().map(|e| paths.voices_dir.join(format!("{nm}.{e}"))).find(|p| p.is_file());
                 if let Some(src) = src {
                     let out = wd.join(format!("ref_pack_{i}.wav"));
-                    // реф КАПИТСЯ до 12с (как клон-рефы): длинный реф -> Higgs не выделяет prefill-граф.
-                    if media::trim(&src, &out, 0.0, 12.0, 16_000).is_ok() {
+                    // реф КАПИТСЯ до paths.ref_secs (дефолт 12с; на слабой RAM юзер уменьшает в настройках —
+                    // длинный реф раздувает prefill-граф Higgs -> OOM на 32ГБ).
+                    if media::trim(&src, &out, 0.0, paths.ref_secs, 16_000).is_ok() {
                         map.insert(spk.clone(), out);
                     }
                 }
@@ -265,7 +267,7 @@ fn build_dub(
     let (spk_refs, mut ref_texts) = if use_pack {
         (std::collections::BTreeMap::new(), std::collections::BTreeMap::new())
     } else {
-        build_speaker_refs(&segs, &vocals16, wd)?
+        build_speaker_refs(&segs, &vocals16, wd, paths.ref_secs)?
     };
     if use_pack && paths.tdt_dir.is_dir() {
         let mut asr = dub_asr::Asr::new(&paths.tdt_dir);
@@ -454,6 +456,7 @@ fn build_speaker_refs(
     segs: &[(usize, &dub_core::Segment)],
     vocals16: &Path,
     wd: &Path,
+    ref_secs: f64,
 ) -> Result<SpkRefs, String> {
     let mut refs: std::collections::BTreeMap<String, PathBuf> = std::collections::BTreeMap::new();
     // ref_text клона = src_text выбранного сегмента (сегменты ≤8с -> совпадает с ≤12с реф-клипом).
@@ -470,7 +473,7 @@ fn build_speaker_refs(
             .map(|(_, s)| *s);
         let Some(cand) = cand else { continue };
         let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
-        media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + 12.0), 16_000)?;
+        media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + ref_secs), 16_000)?;
         refs.insert(spk.clone(), ref_wav);
         let t = cand.src_text.trim();
         if !t.is_empty() {
@@ -774,7 +777,12 @@ pub(crate) fn build_ass(proj: &Project, out_ass: &Path, vw: i64, vh: i64, total:
         .iter()
         .filter_map(|o| o.text.as_deref().map(|t| (o.seg_id.as_str(), t)))
         .collect();
-    let subs: Vec<Sub> = proj
+    // Режим «без субтитров» (subs.mode=none) -> НЕ рисуем строки субтитров вообще. Титры/локализация
+    // экранного текста живут отдельно (proj.captions.titles) и не затрагиваются. Раньше build_ass
+    // рендерил сегменты безусловно -> в режиме «без субтитров» они всё равно прожигались (баг-репорт).
+    let subs: Vec<Sub> = if proj.subs.mode == "none" {
+        Vec::new()
+    } else { proj
         .segments
         .iter()
         .filter(|s| {   // hidden -> нет субтитра; keep_original -> играет оригинал, субтитра нет (порт write_artifacts)
@@ -798,7 +806,7 @@ pub(crate) fn build_ass(proj: &Project, out_ass: &Path, vw: i64, vh: i64, total:
                 y: Some(seg_y(s.start, end)),
             }
         })
-        .collect();
+        .collect() };
 
     let preset = proj.captions.preset.name.clone();
     let caption_style = preset.as_deref().filter(|n| *n != "match");
@@ -823,11 +831,16 @@ pub(crate) fn build_ass(proj: &Project, out_ass: &Path, vw: i64, vh: i64, total:
 }
 
 /// Blur-боксы из Project (project.captions.blur_boxes, hidden исключаются). Порт caption_plan blur_boxes.
+/// В режиме «без субтитров» (subs.mode=none) НЕ блюрим band-полосу (место оригинальных субтитров) — раз
+/// мы не накладываем свои субтитры, незачем и закрашивать оригинал (баг-репорт: лишний блюр + прогон).
+/// OCR-блюр экранного текста/титров (не-band) остаётся — локализация картинки от субтитров не зависит.
 fn collect_blur_boxes(proj: &Project) -> Vec<BlurBox> {
+    let drop_band = proj.subs.mode == "none";
     proj.captions
         .blur_boxes
         .iter()
         .filter(|b| !b.hidden)
+        .filter(|b| !(drop_band && b.extra.get("band").and_then(|v| v.as_bool()).unwrap_or(false)))
         .map(|b| BlurBox { x: b.x, y: b.y, w: b.w, h: b.h, t0: b.t0, t1: b.t1, fill: b.fill.clone() })
         .collect()
 }

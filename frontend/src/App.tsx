@@ -238,6 +238,30 @@ function ModelsSection() {
       </Group>
       <Group label={t("settings.roleDiar")}>{rowOf("sortformer")}</Group>
       <Group label={t("settings.roleRuntime")}>{rowOf("onnxruntime")}{rowOf("ffmpeg")}{rowOf("cuda-runtime")}{rowOf("vcruntime")}{rowOf("ocr")}</Group>
+      {/* Производительность / экономия RAM — ВИДИМЫЕ контролы (не авто-магия): против OOM на слабой памяти. */}
+      <Group label={t("settings.perfTitle")}>
+        {[
+          { key: "llama_ubatch", label: t("settings.llamaUbatch"), hint: t("settings.llamaUbatchHint"), opts: cap?.llama_ubatches ?? ["0", "512", "256", "128"], def: "0", fmt: (v: string) => (v === "0" ? t("settings.auto") : v) },
+          { key: "higgs_ref_secs", label: t("settings.higgsRef"), hint: t("settings.higgsRefHint"), opts: cap?.higgs_ref_secs_opts ?? ["12", "8", "6", "4"], def: "12", fmt: (v: string) => `${v}${t("settings.sec")}` },
+        ].map((row) => {
+          const cur = cap?.selection?.[row.key] ?? row.def;
+          return (
+            <div key={row.key} className="px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
+              <div className="flex items-center gap-2.5">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--color-muted)]" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium truncate">{row.label}</div>
+                  <div className="mono text-[10px] text-[var(--color-muted)] truncate">{row.hint}</div>
+                </div>
+                <select value={cur} onChange={(e) => { api.setSelection(row.key, e.target.value).then(loadCap).catch((er) => setErr(er instanceof Error ? er.message : String(er))); }}
+                  className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none">
+                  {row.opts.map((o) => <option key={o} value={o}>{row.fmt(o)}</option>)}
+                </select>
+              </div>
+            </div>
+          );
+        })}
+      </Group>
     </div>
   );
 }
@@ -1859,6 +1883,10 @@ function FirstRun() {
       const s = await refresh();
       if (s.ready) { setStage("empty"); playSfx("success"); }   // всё скачано -> сразу на стартовый экран, без ручного «Продолжить»
     } catch (e) {
+      // SSE-стрим мог оборваться на длинной (часы, десятки ГБ) скачке, хотя джоба ЗАВЕРШИЛАСЬ и всё встало
+      // на диск -> перепроверяем реальный статус: если готово, всё равно уходим на стартовый экран (иначе
+      // экран «Первого запуска» завис бы на 100%, хотя всё скачано — баг-репорт).
+      try { const s = await refresh(); if (s.ready) { setStage("empty"); playSfx("success"); return; } } catch { /* refresh тоже упал */ }
       setErr(String(e)); useStore.getState().pushActivity(String(e), "error");
     } finally {
       setBusy(false); setProg(null);
