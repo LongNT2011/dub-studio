@@ -201,7 +201,10 @@
     "roleDiar": "Diarización",
     "roleRuntime": "Motores y runtime",
     "browseFolder": "Importar de carpeta",
-    "disk": "disco"
+    "disk": "disco",
+    "whisperModel": "Whisper — modelo",
+    "whisperCompute": "Cuant. (compute)",
+    "whisperComputeHint": "Precisión de cómputo — velocidad/calidad"
   },
   "help": {
     "title": "Acerca de Dub Studio",

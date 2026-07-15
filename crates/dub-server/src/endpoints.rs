@@ -64,12 +64,33 @@ pub async fn set_opts(State(st): State<AppState>, Json(edit): Json<Value>) -> Re
 // манифеста настроек. Пишем models/active.json; резолв при следующей генерации подхватит выбор без
 // рестарта. Это ФАКТИЧЕСКИЙ свап-слот (в отличие от set_opts, который остался эхо-совместимостью).
 pub async fn select_model(State(st): State<AppState>, Json(body): Json<Value>) -> Response {
+    // Форма 1: {"key":"asr_engine","value":"whisper"} — прямая установка слота (движок/модель/квант ASR
+    // и т.п.) из настроек, без скачивания. Ключ валидируем по белому списку.
+    if let (Some(key), Some(val)) =
+        (body.get("key").and_then(Value::as_str), body.get("value").and_then(Value::as_str))
+    {
+        if !crate::models::is_selection_key(key) {
+            return (StatusCode::BAD_REQUEST, format!("unknown selection key: {key:?}")).into_response();
+        }
+        if val.trim().is_empty() {
+            return (StatusCode::BAD_REQUEST, "empty value").into_response();
+        }
+        if let Err(e) = crate::models::set_selection(&st.models_root, key, val) {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("write selection: {e}")).into_response();
+        }
+        return Json(crate::models::load_selection(&st.models_root)).into_response();
+    }
+    // Форма 2: {"id":"whisper-small"} — id компонента манифеста -> набор слотов (активация при скачивании
+    // и переключение варианта). Пустой набор -> неизвестный компонент.
     let id = body.get("id").and_then(Value::as_str).unwrap_or("");
-    let Some((engine, variant)) = crate::models::component_selection(id) else {
+    let pairs = crate::models::component_selection(id);
+    if pairs.is_empty() {
         return (StatusCode::BAD_REQUEST, format!("unknown model component: {id:?}")).into_response();
-    };
-    if let Err(e) = crate::models::set_selection(&st.models_root, engine, &variant) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, format!("write selection: {e}")).into_response();
+    }
+    for (engine, variant) in pairs {
+        if let Err(e) = crate::models::set_selection(&st.models_root, engine, &variant) {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("write selection: {e}")).into_response();
+        }
     }
     Json(crate::models::load_selection(&st.models_root)).into_response()
 }

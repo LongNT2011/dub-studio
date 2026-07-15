@@ -8,6 +8,8 @@
 //! dubengine/asr.py и dubengine/diarize.py: паузы >0.6с, конец предложения .!?…, макс 8.0с.
 
 mod segment;
+mod whisper;
+pub use whisper::WhisperAsr;
 
 use parakeet_rs::sortformer::{DiarizationConfig, Sortformer};
 use parakeet_rs::{ExecutionConfig, ParakeetTDT, TimestampMode, Transcriber};
@@ -123,6 +125,14 @@ pub struct SpeakerSegment {
     pub speaker: i32,
 }
 
+/// Единый интерфейс ASR-движка: транскрипция whole-clip и per-speaker (реплики). Реализуют Parakeet
+/// (`Asr`) и Whisper (`WhisperAsr`) — analyze выбирает движок по настройке (models/active.json), не зная
+/// деталей. Методы берут `&Path` (объект-трейт: без дженериков).
+pub trait AsrEngine {
+    fn transcribe(&mut self, wav: &Path, lang: &str) -> Result<Vec<Segment>, AsrError>;
+    fn transcribe_turns(&mut self, wav: &Path, turns: &[Turn]) -> Result<Vec<SpeakerSegment>, AsrError>;
+}
+
 /// ASR-движок: держит загруженную TDT-модель тёплой между вызовами.
 pub struct Asr {
     tdt_dir: PathBuf,
@@ -211,6 +221,15 @@ impl Asr {
             }
         }
         Ok(out)
+    }
+}
+
+impl AsrEngine for Asr {
+    fn transcribe(&mut self, wav: &Path, lang: &str) -> Result<Vec<Segment>, AsrError> {
+        Asr::transcribe(self, wav, lang)
+    }
+    fn transcribe_turns(&mut self, wav: &Path, turns: &[Turn]) -> Result<Vec<SpeakerSegment>, AsrError> {
+        Asr::transcribe_turns(self, wav, turns)
     }
 }
 

@@ -201,7 +201,10 @@
     "roleDiar": "说话人分离",
     "roleRuntime": "引擎与运行时",
     "browseFolder": "从文件夹导入",
-    "disk": "磁盘"
+    "disk": "磁盘",
+    "whisperModel": "Whisper — 模型",
+    "whisperCompute": "量化 (compute)",
+    "whisperComputeHint": "计算精度 — 速度与准确度"
   },
   "help": {
     "title": "关于 Dub Studio",

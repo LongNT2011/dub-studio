@@ -320,6 +320,120 @@ pub fn manifest() -> Vec<Component> {
             markers: &[Marker { rel: "models/tdt-fp32/encoder-model.onnx", expect: 41_770_866 }, Marker { rel: "models/tdt-fp32/encoder-model.onnx.data", expect: 2_435_420_160 }, Marker { rel: "models/tdt-fp32/vocab.txt", expect: 93_939 }],
             external_url: None,
         },
+        // ── АЛЬТЕРНАТИВНЫЙ ASR-ДВИЖОК: Whisper (Purfview standalone faster-whisper) ──────────
+        // Бинарь-onefile (CTranslate2 CPU из коробки; GPU опц. с CUDA11-либами). Выбор в настройках:
+        // движок Parakeet/Whisper + РАЗНЫЕ модели (tiny…large-v3-turbo) + РАЗНЫЕ кванты (compute_type).
+        Component {
+            id: "whisper-engine",
+            name: "Whisper-Faster (движок ASR)",
+            purpose: "Альтернативный движок распознавания речи (faster-whisper) вместо Parakeet",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 87_654_143,
+            files: &[
+                FileSpec { url: "https://github.com/Purfview/whisper-standalone-win/releases/download/faster-whisper/Whisper-Faster_r192.3_windows.zip", dest_rel: "tools/whisper/_whisper.zip", size: 0, extract: Extract::ZipFlat },
+            ],
+            markers: &[Marker { rel: "tools/whisper/whisper-faster.exe", expect: 0 }],
+            external_url: None,
+        },
+        Component {
+            id: "whisper-tiny",
+            name: "Whisper tiny (модель ASR)",
+            purpose: "ASR Whisper — самая лёгкая и быстрая модель",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 78_203_619,
+            files: &[
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-tiny/resolve/main/model.bin", dest_rel: "models/whisper/faster-whisper-tiny/model.bin", size: 75_538_270, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-tiny/resolve/main/config.json", dest_rel: "models/whisper/faster-whisper-tiny/config.json", size: 2_249, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-tiny/resolve/main/tokenizer.json", dest_rel: "models/whisper/faster-whisper-tiny/tokenizer.json", size: 2_203_239, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-tiny/resolve/main/vocabulary.txt", dest_rel: "models/whisper/faster-whisper-tiny/vocabulary.txt", size: 459_861, extract: Extract::None },
+            ],
+            markers: &[Marker { rel: "models/whisper/faster-whisper-tiny/model.bin", expect: 75_538_270 }, Marker { rel: "models/whisper/faster-whisper-tiny/tokenizer.json", expect: 2_203_239 }],
+            external_url: None,
+        },
+        Component {
+            id: "whisper-base",
+            name: "Whisper base (модель ASR)",
+            purpose: "ASR Whisper — лёгкая модель, точнее tiny",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 147_882_941,
+            files: &[
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-base/resolve/main/model.bin", dest_rel: "models/whisper/faster-whisper-base/model.bin", size: 145_217_532, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-base/resolve/main/config.json", dest_rel: "models/whisper/faster-whisper-base/config.json", size: 2_309, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-base/resolve/main/tokenizer.json", dest_rel: "models/whisper/faster-whisper-base/tokenizer.json", size: 2_203_239, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-base/resolve/main/vocabulary.txt", dest_rel: "models/whisper/faster-whisper-base/vocabulary.txt", size: 459_861, extract: Extract::None },
+            ],
+            markers: &[Marker { rel: "models/whisper/faster-whisper-base/model.bin", expect: 145_217_532 }, Marker { rel: "models/whisper/faster-whisper-base/tokenizer.json", expect: 2_203_239 }],
+            external_url: None,
+        },
+        Component {
+            id: "whisper-small",
+            name: "Whisper small (модель ASR)",
+            purpose: "ASR Whisper — сбалансированная модель",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 486_212_372,
+            files: &[
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-small/resolve/main/model.bin", dest_rel: "models/whisper/faster-whisper-small/model.bin", size: 483_546_902, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-small/resolve/main/config.json", dest_rel: "models/whisper/faster-whisper-small/config.json", size: 2_370, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-small/resolve/main/tokenizer.json", dest_rel: "models/whisper/faster-whisper-small/tokenizer.json", size: 2_203_239, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-small/resolve/main/vocabulary.txt", dest_rel: "models/whisper/faster-whisper-small/vocabulary.txt", size: 459_861, extract: Extract::None },
+            ],
+            markers: &[Marker { rel: "models/whisper/faster-whisper-small/model.bin", expect: 483_546_902 }, Marker { rel: "models/whisper/faster-whisper-small/tokenizer.json", expect: 2_203_239 }],
+            external_url: None,
+        },
+        Component {
+            id: "whisper-medium",
+            name: "Whisper medium (модель ASR)",
+            purpose: "ASR Whisper — высокая точность",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 1_530_571_735,
+            files: &[
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-medium/resolve/main/model.bin", dest_rel: "models/whisper/faster-whisper-medium/model.bin", size: 1_527_906_378, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-medium/resolve/main/config.json", dest_rel: "models/whisper/faster-whisper-medium/config.json", size: 2_257, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-medium/resolve/main/tokenizer.json", dest_rel: "models/whisper/faster-whisper-medium/tokenizer.json", size: 2_203_239, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-medium/resolve/main/vocabulary.txt", dest_rel: "models/whisper/faster-whisper-medium/vocabulary.txt", size: 459_861, extract: Extract::None },
+            ],
+            markers: &[Marker { rel: "models/whisper/faster-whisper-medium/model.bin", expect: 1_527_906_378 }, Marker { rel: "models/whisper/faster-whisper-medium/tokenizer.json", expect: 2_203_239 }],
+            external_url: None,
+        },
+        Component {
+            id: "whisper-large-v3",
+            name: "Whisper large-v3 (модель ASR)",
+            purpose: "ASR Whisper — максимальная точность (large-v3)",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 3_090_835_702,
+            files: &[
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/main/model.bin", dest_rel: "models/whisper/faster-whisper-large-v3/model.bin", size: 3_087_284_237, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/main/config.json", dest_rel: "models/whisper/faster-whisper-large-v3/config.json", size: 2_394, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/main/preprocessor_config.json", dest_rel: "models/whisper/faster-whisper-large-v3/preprocessor_config.json", size: 340, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/main/tokenizer.json", dest_rel: "models/whisper/faster-whisper-large-v3/tokenizer.json", size: 2_480_617, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Systran/faster-whisper-large-v3/resolve/main/vocabulary.json", dest_rel: "models/whisper/faster-whisper-large-v3/vocabulary.json", size: 1_068_114, extract: Extract::None },
+            ],
+            markers: &[Marker { rel: "models/whisper/faster-whisper-large-v3/model.bin", expect: 3_087_284_237 }, Marker { rel: "models/whisper/faster-whisper-large-v3/tokenizer.json", expect: 2_480_617 }],
+            external_url: None,
+        },
+        Component {
+            id: "whisper-large-v3-turbo",
+            name: "Whisper large-v3-turbo (модель ASR)",
+            purpose: "ASR Whisper — почти large-v3, но заметно быстрее (turbo)",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 1_621_665_983,
+            files: &[
+                FileSpec { url: "https://huggingface.co/deepdml/faster-whisper-large-v3-turbo-ct2/resolve/main/model.bin", dest_rel: "models/whisper/faster-whisper-large-v3-turbo/model.bin", size: 1_617_884_929, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/deepdml/faster-whisper-large-v3-turbo-ct2/resolve/main/config.json", dest_rel: "models/whisper/faster-whisper-large-v3-turbo/config.json", size: 2_263, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/deepdml/faster-whisper-large-v3-turbo-ct2/resolve/main/preprocessor_config.json", dest_rel: "models/whisper/faster-whisper-large-v3-turbo/preprocessor_config.json", size: 340, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/deepdml/faster-whisper-large-v3-turbo-ct2/resolve/main/tokenizer.json", dest_rel: "models/whisper/faster-whisper-large-v3-turbo/tokenizer.json", size: 2_710_337, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/deepdml/faster-whisper-large-v3-turbo-ct2/resolve/main/vocabulary.json", dest_rel: "models/whisper/faster-whisper-large-v3-turbo/vocabulary.json", size: 1_068_114, extract: Extract::None },
+            ],
+            markers: &[Marker { rel: "models/whisper/faster-whisper-large-v3-turbo/model.bin", expect: 1_617_884_929 }, Marker { rel: "models/whisper/faster-whisper-large-v3-turbo/tokenizer.json", expect: 2_710_337 }],
+            external_url: None,
+        },
         Component {
             id: "sortformer",
             name: "Sortformer v2 (диаризация)",
@@ -1034,7 +1148,7 @@ pub fn download_components(
         // Скачанный вариант модели -> делаем активным (models/active.json). Резолв при следующей
         // генерации подхватит без рестарта; иначе скан взял бы дефолт (q8_0 первым) и альт бы не применился.
         if st.installed {
-            if let Some((engine, variant)) = crate::models::component_selection(c.id) {
+            for (engine, variant) in crate::models::component_selection(c.id) {
                 let _ = crate::models::set_selection(&crate::models_root(repo_root), engine, &variant);
             }
         }

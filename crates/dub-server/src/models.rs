@@ -37,24 +37,112 @@ fn pick<'a>(sel: &'a Value, engine: &str) -> Option<&'a str> {
     sel.get(engine).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
 }
 
-/// Отобразить id компонента манифеста -> (engine, variant-токен) для записи выбора при скачивании.
-/// None — компонент не является переключаемым вариантом модели (движок/рантайм/OCR и т.п.).
-pub fn component_selection(id: &str) -> Option<(&'static str, String)> {
-    Some(match id {
-        "higgs" => ("tts", "q8_0".into()),
-        "higgs-q6_k" => ("tts", "q6_k".into()),
-        "higgs-q4_k_m" => ("tts", "q4_k_m".into()),
-        "parakeet" => ("asr", "int8".into()),
-        "parakeet-fp32" => ("asr", "fp32".into()),
-        "gemma" => ("mt", "q4_0".into()),
-        "gemma-q5_0" => ("mt", "q5_0".into()),
-        "gemma-q6_k" => ("mt", "q6_k".into()),
-        "gemma-q8_0" => ("mt", "q8_0".into()),
-        "roformer" => ("sep", "Q8_0".into()),
-        "roformer-q5" => ("sep", "Q5_0".into()),
-        "roformer-q4" => ("sep", "Q4_0".into()),
-        _ => return None,
-    })
+/// Отобразить id компонента манифеста -> список (slot, значение) для записи выбора при скачивании.
+/// Пусто — компонент не является переключаемым вариантом модели (движок/рантайм/OCR и т.п.).
+/// ASR-варианты пишут ДВА слота: движок (asr_engine) + вариант этого движка (asr-квант / whisper-модель),
+/// чтобы скачивание Whisper-модели сразу делало Whisper активным движком (и наоборот для Parakeet).
+pub fn component_selection(id: &str) -> Vec<(&'static str, String)> {
+    match id {
+        "higgs" => vec![("tts", "q8_0".into())],
+        "higgs-q6_k" => vec![("tts", "q6_k".into())],
+        "higgs-q4_k_m" => vec![("tts", "q4_k_m".into())],
+        "parakeet" => vec![("asr_engine", "parakeet".into()), ("asr", "int8".into())],
+        "parakeet-fp32" => vec![("asr_engine", "parakeet".into()), ("asr", "fp32".into())],
+        "whisper-tiny" => vec![("asr_engine", "whisper".into()), ("whisper_model", "tiny".into())],
+        "whisper-base" => vec![("asr_engine", "whisper".into()), ("whisper_model", "base".into())],
+        "whisper-small" => vec![("asr_engine", "whisper".into()), ("whisper_model", "small".into())],
+        "whisper-medium" => vec![("asr_engine", "whisper".into()), ("whisper_model", "medium".into())],
+        "whisper-large-v3" => vec![("asr_engine", "whisper".into()), ("whisper_model", "large-v3".into())],
+        "whisper-large-v3-turbo" => {
+            vec![("asr_engine", "whisper".into()), ("whisper_model", "large-v3-turbo".into())]
+        }
+        "gemma" => vec![("mt", "q4_0".into())],
+        "gemma-q5_0" => vec![("mt", "q5_0".into())],
+        "gemma-q6_k" => vec![("mt", "q6_k".into())],
+        "gemma-q8_0" => vec![("mt", "q8_0".into())],
+        "roformer" => vec![("sep", "Q8_0".into())],
+        "roformer-q5" => vec![("sep", "Q5_0".into())],
+        "roformer-q4" => vec![("sep", "Q4_0".into())],
+        _ => vec![],
+    }
+}
+
+/// Разрешённые слоты для прямой установки через POST /engine/select {key,value} (без скачивания):
+/// переключение движка/модели/кванта в настройках. Возврат true, если слот допустим.
+pub fn is_selection_key(key: &str) -> bool {
+    matches!(
+        key,
+        "tts" | "asr" | "mt" | "sep" | "asr_engine" | "whisper_model" | "whisper_compute" | "whisper_device"
+    )
+}
+
+/// Выбор ASR-движка для одной джобы: Parakeet (каталог TDT) либо Whisper (бинарь + модель + квант + девайс).
+#[derive(Debug, Clone)]
+pub enum AsrChoice {
+    Parakeet(PathBuf),
+    Whisper { bin: PathBuf, model_dir: PathBuf, model: String, compute: String, device: String },
+}
+
+impl AsrChoice {
+    /// Строка для лога `[models]` — видно, каким движком реально пойдёт транскрипция.
+    pub fn describe(&self) -> String {
+        match self {
+            AsrChoice::Parakeet(d) => format!("Parakeet ({})", d.display()),
+            AsrChoice::Whisper { model, compute, device, .. } => {
+                format!("Whisper {model} (compute={compute}, device={device})")
+            }
+        }
+    }
+}
+
+/// Путь к бинарю Whisper: env DUB_STUDIO_WHISPER_BIN, иначе <repo>/tools/whisper/whisper-faster.exe.
+pub fn whisper_bin(repo_root: &Path) -> PathBuf {
+    if let Ok(p) = std::env::var("DUB_STUDIO_WHISPER_BIN") {
+        return PathBuf::from(p);
+    }
+    let name = if cfg!(windows) { "whisper-faster.exe" } else { "whisper-faster" };
+    repo_root.join("tools").join("whisper").join(name)
+}
+
+/// Каталог Whisper-моделей: <mroot>/whisper (внутри — faster-whisper-<size>). Есть ли модель на диске.
+fn whisper_model_installed(mroot: &Path, size: &str) -> bool {
+    mroot.join("whisper").join(format!("faster-whisper-{size}")).join("model.bin").is_file()
+}
+
+/// Резолв активного ASR: если выбран движок whisper И бинарь+модель на диске — Whisper (модель = выбор,
+/// иначе первый установленный по убыванию качества); иначе — Parakeet (существующий резолв каталога TDT).
+/// Так «выбрал Whisper + скачал модель» применяется без рестарта, а недо-настроенный Whisper тихо
+/// откатывается на Parakeet (analyze не падает).
+pub fn resolve_asr_choice(repo_root: &Path, mroot: &Path, sel: &Value) -> AsrChoice {
+    if pick(sel, "asr_engine") == Some("whisper") {
+        let bin = whisper_bin(repo_root);
+        // выбранная модель, если скачана; иначе — лучшая из установленных.
+        let want = pick(sel, "whisper_model").filter(|m| whisper_model_installed(mroot, m));
+        let model = want.map(String::from).or_else(|| {
+            ["large-v3-turbo", "large-v3", "medium", "small", "base", "tiny"]
+                .into_iter()
+                .find(|m| whisper_model_installed(mroot, m))
+                .map(String::from)
+        });
+        if let (true, Some(model)) = (bin.is_file(), model) {
+            let compute = pick(sel, "whisper_compute").unwrap_or("int8").to_string();
+            // Девайс Whisper: onefile-бинарь без bundled CUDA-либ -> дефолт cpu (CTranslate2 CPU, работает
+            // из коробки). Пользователь может задать cuda в настройках, если положил CUDA11-либы рядом.
+            let device = pick(sel, "whisper_device").unwrap_or("cpu").to_string();
+            return AsrChoice::Whisper { bin, model_dir: mroot.join("whisper"), model, compute, device };
+        }
+    }
+    AsrChoice::Parakeet(resolve_asr(mroot, sel))
+}
+
+/// Построить ASR-движок из выбора (boxed trait-object): analyze не знает деталей резолва.
+pub fn build_engine(choice: &AsrChoice) -> Box<dyn dub_asr::AsrEngine> {
+    match choice {
+        AsrChoice::Parakeet(dir) => Box::new(dub_asr::Asr::new(dir)),
+        AsrChoice::Whisper { bin, model_dir, model, compute, device } => {
+            Box::new(dub_asr::WhisperAsr::new(bin, model_dir, model, compute, device))
+        }
+    }
 }
 
 /// Higgs TTS: папки higgs-{q8_0,q6_k,q4_k_m}, внутри файл {q}.gguf. Возврат (каталог, квант-строка

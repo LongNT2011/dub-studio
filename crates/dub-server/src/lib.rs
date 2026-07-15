@@ -81,7 +81,7 @@ pub fn verify_captions_e2e(
     let paths = analyze::AnalyzePaths {
         input: input_video.to_path_buf(),
         work_dir: work_dir.to_path_buf(),
-        tdt_dir: unused.clone(),
+        asr: models::AsrChoice::Parakeet(unused.clone()), // ocr::stage не трогает ASR (verify-путь)
         sortformer_onnx: unused.clone(),
         llama_bin: dub_llm::resolve_llama_bin(&repo_root.join("tools").join("llama")),
         mt_model,
@@ -345,7 +345,9 @@ pub fn build_router(state: AppState) -> Router {
 async fn capabilities(State(st): State<AppState>) -> Json<Value> {
     let o = &st.opts;
     let ffmpeg = which_ffmpeg();
-    // Тот же JSON-контракт, что в app.py.capabilities().
+    // Текущий выбор вариантов (active.json) — фронт рисует по нему селекторы движка/модели/кванта ASR.
+    let sel = models::load_selection(&st.models_root);
+    // Тот же JSON-контракт, что в app.py.capabilities(), плюс поля выбора ASR-движка.
     Json(json!({
         "device": o.device,
         "tts_quant": o.tts_quant,
@@ -359,6 +361,11 @@ async fn capabilities(State(st): State<AppState>) -> Json<Value> {
         "ffmpeg": ffmpeg,
         "languages": ["en","ru","zh","es","pt","fr"],
         "voice_modes": ["clone","autocast","auto","voice"],
+        // Выбор ASR: движок (parakeet|whisper), модель Whisper, квант Whisper (compute_type).
+        "selection": sel,
+        "asr_engines": ["parakeet","whisper"],
+        "whisper_models": ["tiny","base","small","medium","large-v3","large-v3-turbo"],
+        "whisper_computes": ["int8","int8_float32","float32","float16"],
     }))
 }
 
@@ -744,12 +751,12 @@ async fn analyze_project(
     // квант -> применяется без рестарта. См. models::resolve_*.
     let sel = models::load_selection(&st.models_root);
     let (mt_model, mmproj) = models::resolve_mt(&st.models_root, &sel);
-    let asr_dir = models::resolve_asr(&st.models_root, &sel);
-    eprintln!("[models] analyze: MT={} · ASR={}", mt_model.display(), asr_dir.display());
+    let asr = models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel);
+    eprintln!("[models] analyze: MT={} · ASR={}", mt_model.display(), asr.describe());
     let paths = analyze::AnalyzePaths {
         input,
         work_dir: dir.clone(),
-        tdt_dir: asr_dir,
+        asr,
         sortformer_onnx: st.sortformer_onnx.clone(),
         llama_bin: st.llama_bin.clone(),
         mt_model,

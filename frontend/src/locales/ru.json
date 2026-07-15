@@ -230,7 +230,10 @@
     "roleDiar": "Диаризация",
     "roleRuntime": "Движки и рантайм",
     "browseFolder": "Указать готовую папку",
-    "disk": "диск"
+    "disk": "диск",
+    "whisperModel": "Whisper — модель",
+    "whisperCompute": "Квант (compute)",
+    "whisperComputeHint": "Точность вычислений — скорость/качество"
   },
   "help": {
     "title": "О Dub Studio",

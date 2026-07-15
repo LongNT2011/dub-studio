@@ -230,7 +230,10 @@
     "roleDiar": "Diarization",
     "roleRuntime": "Engines & runtime",
     "browseFolder": "Import from folder",
-    "disk": "disk"
+    "disk": "disk",
+    "whisperModel": "Whisper — model",
+    "whisperCompute": "Quant (compute)",
+    "whisperComputeHint": "Compute precision — speed vs accuracy"
   },
   "help": {
     "title": "About Dub Studio",

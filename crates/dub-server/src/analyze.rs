@@ -8,7 +8,7 @@
 //!
 //! Фазы прогресса (msg + stage) повторяют питон: extract_audio / diarize / asr.
 
-use dub_asr::{Asr, Turn};
+use dub_asr::Turn;
 use dub_core::{Meta, Project, Segment};
 use serde_json::{json, Value};
 
@@ -29,7 +29,7 @@ pub struct AnalyzeArgs {
 pub struct AnalyzePaths {
     pub input: std::path::PathBuf,   // исходное видео (source.txt)
     pub work_dir: std::path::PathBuf, // workspace/<pid>
-    pub tdt_dir: std::path::PathBuf, // каталог TDT-модели
+    pub asr: crate::models::AsrChoice, // выбранный ASR-движок (Parakeet/Whisper) на эту джобу
     pub sortformer_onnx: std::path::PathBuf, // sortformer .onnx
     pub llama_bin: std::path::PathBuf, // llama-server(.exe) — сайдкар перевода/vision
     pub mt_model: std::path::PathBuf, // Gemma GGUF
@@ -142,7 +142,8 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     };
 
     // 4) транскрипция. n_spk>1 -> transcribe_turns (каждая реплика одного спикера); иначе whole-clip.
-    let mut asr = Asr::new(&paths.tdt_dir);
+    //    Движок выбран настройкой (Parakeet/Whisper) — analyze не знает деталей (build_engine).
+    let mut asr = crate::models::build_engine(&paths.asr);
     let (segments, n_spk): (Vec<Segment>, usize) = match &diar {
         Some(d) if d.n_speakers > 1 && !d.turns.is_empty() => {
             emit(

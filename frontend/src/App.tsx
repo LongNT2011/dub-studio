@@ -37,8 +37,20 @@ function ModelsSection() {
   const { t } = useTranslation();
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [prog, setProg] = useState<{ id: string; pct: number } | null>(null);
+  // Выбор ASR-движка (parakeet|whisper) + квант Whisper (compute) — из capabilities.selection.
+  const [cap, setCap] = useState<Capabilities | null>(null);
+  const [asrEngine, setAsrEngine] = useState<string>("parakeet");
+  const [whisperCompute, setWhisperCompute] = useState<string>("int8");
   const refresh = () => api.setupStatus().then(setStatus).catch(() => {});
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => {
+    refresh();
+    api.capabilities().then((c) => {
+      setCap(c);
+      const s = c.selection ?? {};
+      setAsrEngine(s.asr_engine ?? "parakeet");
+      setWhisperCompute(s.whisper_compute ?? "int8");
+    }).catch(() => {});
+  }, []);
   const dl = async (id: string) => {
     if (prog) return;
     setProg({ id, pct: 0 });
@@ -96,7 +108,7 @@ function ModelsSection() {
     const [pick, setPick] = useState<string>(installed?.id ?? variants[0]?.id ?? "");
     const c = get(pick);
     if (!c) return null;
-    const quant = (v: SetupComponent) => (v.name.match(/\b(q\d[\w]*|int8|fp32|f16)\b/i)?.[1] ?? v.name);
+    const quant = (v: SetupComponent) => (v.name.match(/\b(q\d[\w]*|int8|fp32|f16|large-v3-turbo|large-v3|tiny|base|small|medium)\b/i)?.[1] ?? v.name);
     const active = prog?.id === c.id;
     return (
       <div className="px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
@@ -151,7 +163,37 @@ function ModelsSection() {
         {rowOf("higgs-engine")}
       </Group>
       <Group label={t("settings.roleAsr")}>
-        <VariantPicker base="Parakeet-TDT 0.6B v3" ids={["parakeet", "parakeet-fp32"]} />
+        {/* Движок ASR: Parakeet-TDT (GPU, дефолт) ИЛИ Whisper (много моделей + квантов, CPU из коробки). */}
+        <div className="flex gap-1 mb-1.5">
+          {["parakeet", "whisper"].map((e) => (
+            <button key={e} onClick={() => { setAsrEngine(e); api.setSelection("asr_engine", e).catch(() => {}); }}
+              className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${asrEngine === e ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+              {e === "parakeet" ? "Parakeet-TDT" : "Whisper"}
+            </button>
+          ))}
+        </div>
+        {asrEngine === "parakeet" ? (
+          <VariantPicker base="Parakeet-TDT 0.6B v3" ids={["parakeet", "parakeet-fp32"]} />
+        ) : (
+          <>
+            {rowOf("whisper-engine")}
+            <VariantPicker base={t("settings.whisperModel")} ids={["whisper-tiny", "whisper-base", "whisper-small", "whisper-medium", "whisper-large-v3", "whisper-large-v3-turbo"]} />
+            {/* Квант Whisper (compute_type) — точность/скорость вычислений, без отдельной скачки. */}
+            <div className="px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
+              <div className="flex items-center gap-2.5">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--color-accent)]" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium truncate">{t("settings.whisperCompute")}</div>
+                  <div className="mono text-[10px] text-[var(--color-muted)] truncate">{t("settings.whisperComputeHint")}</div>
+                </div>
+                <select value={whisperCompute} onChange={(e) => { setWhisperCompute(e.target.value); api.setSelection("whisper_compute", e.target.value).catch(() => {}); }}
+                  className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none">
+                  {(cap?.whisper_computes ?? ["int8", "int8_float32", "float32", "float16"]).map((q) => <option key={q} value={q}>{q}</option>)}
+                </select>
+              </div>
+            </div>
+          </>
+        )}
       </Group>
       <Group label={t("settings.roleMt")}>
         <VariantPicker base="Gemma-4 12B QAT + vision" ids={["gemma", "gemma-q5_0", "gemma-q6_k", "gemma-q8_0"]} />

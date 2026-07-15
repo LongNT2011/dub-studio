@@ -36,6 +36,9 @@ export type ModelStack = { asr: string; llm: string; vision: string; tts: string
 export type Capabilities = {
   device: string; tts_quant: string; asr_model: string; ffmpeg: boolean;
   languages: string[]; voice_modes: string[]; models?: ModelStack;
+  // Выбор ASR-движка (active.json): движок parakeet|whisper + модель/квант Whisper.
+  selection?: Record<string, string>;
+  asr_engines?: string[]; whisper_models?: string[]; whisper_computes?: string[];
 };
 export type JobEvent = { type: "progress" | "done" | "error"; stage?: string; pct?: number; msg?: string; result?: unknown; error?: string; component?: string; downloaded?: number; total?: number; parts?: { component: string; pct: number }[] };
 
@@ -82,6 +85,9 @@ export const api = {
   // Сделать вариант модели (квант) активным: id компонента настроек -> пишет models/active.json на бэке.
   selectModel: (id: string) =>
     fetch(`${BASE}/engine/select`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(j<Record<string, string>>),
+  // Прямая установка слота выбора (движок/модель/квант ASR) без скачивания: {key,value} -> active.json.
+  setSelection: (key: string, value: string) =>
+    fetch(`${BASE}/engine/select`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, value }) }).then(j<Record<string, string>>),
   voices: () => fetch(`${BASE}/voices`).then(j<{ voices: string[] }>),
   recordDevices: () => fetch(`${BASE}/record/devices`).then(j<{ devices: string[] }>),
   recordLevel: () => fetch(`${BASE}/record/level`).then(j<{ level: number }>),
