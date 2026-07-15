@@ -342,6 +342,10 @@ pub fn detect_regions(
     let frame_lines: Vec<(f32, Vec<Line>)> =
         frame_lines_idx.into_iter().map(|(_, t, l)| (t, l)).collect();
 
+    // Кадры больше не нужны -> убираем каталог work_dir/frames (иначе сотни PNG оставались на диске,
+    // юзеры жаловались на «сохраняет в папку frames»).
+    let _ = std::fs::remove_dir_all(&fdir);
+
     let (regions, raw) = detect_regions_frames(&frame_lines, fps, min_dur, iou_thr, pad, jitter);
     Ok((regions, raw))
 }

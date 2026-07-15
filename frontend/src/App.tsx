@@ -537,7 +537,7 @@ function DropZone() {
   const [audio, setAudio] = useState<"nodub" | "dub" | "voiceover" | "transcribe">("dub");
   const [subs, setSubs] = useState<"none" | "transcribe" | "translate">("translate");
   const [burn, setBurn] = useState(true);
-  const [detectText, setDetectText] = useState(true);                           // OCR-детекция вшитого текста (блюр/локализация титров). Дорогая на 4K — можно выключить.
+  const [detectText, setDetectText] = useState(false);                          // OCR-детекция вшитого текста (блюр/локализация титров). Дорогая на 4K -> ПО УМОЛЧАНИЮ ВЫКЛ (юзеры жаловались, что дубляж без сабов всё равно сканирует кадры); кто хочет блюр вшитых субтитров — включает галочкой.
   const [funnyOn, setFunnyOn] = useState(false);
   const [funny, setFunny] = useState("");                                       // Gemma rewrite instruction (тема ремикса)
   const [preview, setPreview] = useState<string | null>(null);                  // objectURL превью выбранного видео (первый кадр)
@@ -2085,7 +2085,7 @@ function FirstRun() {
 
 // Пакетная обработка: DropZone кладёт выбранные файлы + настройки сюда, BatchView читает (без раздувания стора).
 const batchState: { files: File[]; tgt: string; src: string; audio: string; subs: string; burn: boolean; detectText: boolean; funnyOn: boolean; funny: string } =
-  { files: [], tgt: "ru", src: "auto", audio: "dub", subs: "translate", burn: true, detectText: true, funnyOn: false, funny: "" };
+  { files: [], tgt: "ru", src: "auto", audio: "dub", subs: "translate", burn: true, detectText: false, funnyOn: false, funny: "" };
 
 type BatchItem = { name: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string };
 

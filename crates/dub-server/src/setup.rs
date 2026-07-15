@@ -658,7 +658,14 @@ fn vram_estimate(id: &str) -> u64 {
 fn marker_ok(repo_root: &Path, m: &Marker) -> bool {
     let p = repo_root.join(m.rel);
     match std::fs::metadata(&p) {
-        Ok(meta) if meta.is_file() => m.expect == 0 || meta.len() == m.expect,
+        // Файл на месте и не оборван. Размер сверяем С ДОПУСКОМ (≥97% expect), а не точным ==: апстрим-веса
+        // на HF могут слегка отличаться от зашитого expect (переезд/переупаковка) -> точное == давало ложный
+        // «не установлено» → ready навсегда false → «Скачать всё» в бесконечном цикле (баг-репорт беты).
+        // Частичная закачка живёт в .part и сюда не попадает (download финализирует только полный файл),
+        // поэтому ≥97% ловит реальные обрывки, но терпит дрейф размера в обе стороны.
+        Ok(meta) if meta.is_file() => {
+            m.expect == 0 || meta.len().saturating_mul(100) >= m.expect.saturating_mul(97)
+        }
         _ => false,
     }
 }
