@@ -36,7 +36,7 @@ fn exec_config() -> ExecutionConfig {
     })
 }
 
-pub use segment::{segment_words, Segment, Word};
+pub use segment::{segment_words, Segment, Word, SEG_MAX_GAP, SEG_MAX_DUR};
 
 /// Целевая частота parakeet-rs.
 pub const TARGET_SR: u32 = 16_000;
@@ -163,7 +163,7 @@ impl Asr {
     pub fn transcribe(&mut self, wav: impl AsRef<Path>, _lang: &str) -> Result<Vec<Segment>, AsrError> {
         let (audio, sr) = load_wav_16k_mono(wav.as_ref())?;
         let words = self.transcribe_words(&audio, sr)?;
-        Ok(segment_words(&words, 0.6, 8.0))
+        Ok(segment_words(&words, SEG_MAX_GAP, SEG_MAX_DUR))
     }
 
     /// Прогнать модель на семплах 16k/mono и получить словные таймстемпы (TimestampMode::Words).
@@ -177,17 +177,17 @@ impl Asr {
         Ok(res
             .tokens
             .into_iter()
-            .filter(|t| !t.text.trim().is_empty())
-            .map(|t| Word {
-                word: t.text.trim().to_string(),
-                start: t.start as f64,
-                end: (t.end as f64).max(t.start as f64),
-            })
-            .map(|mut w| {
-                if w.end <= w.start {
-                    w.end = audio_end.max(w.start);
+            .filter_map(|t| {
+                let word = t.text.trim();
+                if word.is_empty() {
+                    return None;
                 }
-                w
+                let start = t.start as f64;
+                let mut end = (t.end as f64).max(start);
+                if end <= start {
+                    end = audio_end.max(start);
+                }
+                Some(Word { word: word.to_string(), start, end })
             })
             .collect())
     }
@@ -211,7 +211,7 @@ impl Asr {
             let clip = &audio[a..b];
             let words = self.transcribe_words(clip, sr)?;
             // Паузная разбивка ВНУТРИ реплики, чтобы длинный монолог не стал одним гигантским сегментом.
-            for s in segment_words(&words, 0.6, 8.0) {
+            for s in segment_words(&words, SEG_MAX_GAP, SEG_MAX_DUR) {
                 out.push(SpeakerSegment {
                     start: t.start + s.start,
                     end: t.start + s.end,
@@ -264,8 +264,10 @@ pub fn diarize(
     let mut labels: Vec<i32> = raw.iter().map(|t| t.speaker).collect();
     labels.sort_unstable();
     labels.dedup();
+    let remap: std::collections::HashMap<i32, i32> =
+        labels.iter().enumerate().map(|(i, &l)| (l, i as i32)).collect();
     for t in &mut raw {
-        t.speaker = labels.iter().position(|&l| l == t.speaker).unwrap_or(0) as i32;
+        t.speaker = remap[&t.speaker];
     }
     Ok(raw)
 }
@@ -366,8 +368,9 @@ pub fn turns(
 
 /// Прочитать WAV, свести в моно и ресемплировать в 16 кГц (parakeet-rs требует ровно 16k моно).
 fn load_wav_16k_mono(path: &Path) -> Result<(Vec<f32>, u32), AsrError> {
-    let mut reader = hound::WavReader::open(path)
-        .map_err(|e| AsrError::WavRead(path.display().to_string(), e.to_string()))?;
+    let disp = path.display().to_string();
+    let wav_err = |e: hound::Error| AsrError::WavRead(disp.clone(), e.to_string());
+    let mut reader = hound::WavReader::open(path).map_err(wav_err)?;
     let spec = reader.spec();
     let ch = spec.channels.max(1) as usize;
 
@@ -375,14 +378,14 @@ fn load_wav_16k_mono(path: &Path) -> Result<(Vec<f32>, u32), AsrError> {
         hound::SampleFormat::Float => reader
             .samples::<f32>()
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AsrError::WavRead(path.display().to_string(), e.to_string()))?,
+            .map_err(wav_err)?,
         hound::SampleFormat::Int => {
             let max = (1i64 << (spec.bits_per_sample - 1)) as f32;
             reader
                 .samples::<i32>()
                 .map(|s| s.map(|v| v as f32 / max))
                 .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| AsrError::WavRead(path.display().to_string(), e.to_string()))?
+                .map_err(wav_err)?
         }
     };
 

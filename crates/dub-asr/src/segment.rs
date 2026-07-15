@@ -3,6 +3,11 @@
 
 use serde::Serialize;
 
+/// Дефолтные параметры сегментации (порт из dubengine/asr.py): разрыв на паузе > SEG_MAX_GAP сек и
+/// жёсткий кап длины реплики SEG_MAX_DUR сек. Единый источник для всех ASR-движков (Parakeet/Whisper).
+pub const SEG_MAX_GAP: f64 = 0.6;
+pub const SEG_MAX_DUR: f64 = 8.0;
+
 /// Слово со временем (секунды).
 #[derive(Debug, Clone, Serialize)]
 pub struct Word {
@@ -21,7 +26,7 @@ pub struct Segment {
 }
 
 fn ends_sentence(word: &str) -> bool {
-    matches!(word.chars().last(), Some('.') | Some('!') | Some('?') | Some('…'))
+    word.ends_with(['.', '!', '?', '…'])
 }
 
 /// Склейка слов сегмента через пробел (эквивалент `join(" ").trim()`, без промежуточного Vec).

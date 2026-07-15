@@ -8,7 +8,7 @@
 //! глушим `HF_HUB_OFFLINE=1` (оффлайн-first). Диаризация остаётся на Sortformer (как у Parakeet): для
 //! per-speaker раскладываем слова whole-clip по репликам, затем сегментируем внутри каждой.
 
-use crate::segment::{segment_words, Segment, Word};
+use crate::segment::{segment_words, Segment, Word, SEG_MAX_GAP, SEG_MAX_DUR};
 use crate::{AsrEngine, AsrError, SpeakerSegment, Turn};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -48,11 +48,15 @@ impl WhisperAsr {
     /// Прогнать whisper-faster.exe на WAV, вернуть словный поток (абсолютные секунды). lang="auto" ->
     /// авто-детект (флаг --language не передаём). Оффлайн: HF_HUB_OFFLINE=1, модель из --model_dir.
     fn run_words(&self, wav: &Path, lang: &str) -> Result<Vec<Word>, AsrError> {
+        let cwd = std::env::current_dir().ok();
         let abs = |p: &Path| -> PathBuf {
             if p.is_absolute() {
                 p.to_path_buf()
             } else {
-                std::env::current_dir().map(|c| c.join(p)).unwrap_or_else(|_| p.to_path_buf())
+                match &cwd {
+                    Some(c) => c.join(p),
+                    None => p.to_path_buf(),
+                }
             }
         };
         // Свежий выходной каталог рядом с WAV — читаем единственный *.json, старьё не мешает.
@@ -91,8 +95,8 @@ impl WhisperAsr {
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);
             let stdout = String::from_utf8_lossy(&out.stdout);
-            let tail: Vec<&str> = stderr.lines().chain(stdout.lines()).rev().take(10).collect();
-            let tail: Vec<&str> = tail.into_iter().rev().collect();
+            let mut tail: Vec<&str> = stderr.lines().chain(stdout.lines()).rev().take(10).collect();
+            tail.reverse();
             return Err(AsrError::Parakeet(format!(
                 "whisper код {:?}: {}",
                 out.status.code(),
@@ -118,7 +122,7 @@ impl WhisperAsr {
 impl AsrEngine for WhisperAsr {
     fn transcribe(&mut self, wav: &Path, lang: &str) -> Result<Vec<Segment>, AsrError> {
         let words = self.run_words(wav, lang)?;
-        Ok(segment_words(&words, 0.6, 8.0))
+        Ok(segment_words(&words, SEG_MAX_GAP, SEG_MAX_DUR))
     }
 
     /// Per-speaker: whole-clip ОДИН прогон (сабпроцесс дорогой на старт), затем слова раскладываем по
@@ -128,7 +132,7 @@ impl AsrEngine for WhisperAsr {
         let words = self.run_words(wav, lang)?;
         if turns.is_empty() {
             // нет реплик -> single-speaker (0), как fallback
-            return Ok(segment_words(&words, 0.6, 8.0)
+            return Ok(segment_words(&words, SEG_MAX_GAP, SEG_MAX_DUR)
                 .into_iter()
                 .map(|s| SpeakerSegment { start: s.start, end: s.end, text: s.text, speaker: 0 })
                 .collect());
@@ -161,7 +165,7 @@ impl AsrEngine for WhisperAsr {
                 continue;
             }
             let spk = turns[i].speaker;
-            for s in segment_words(&ws, 0.6, 8.0) {
+            for s in segment_words(&ws, SEG_MAX_GAP, SEG_MAX_DUR) {
                 out.push(SpeakerSegment { start: s.start, end: s.end, text: s.text, speaker: spk });
             }
         }
