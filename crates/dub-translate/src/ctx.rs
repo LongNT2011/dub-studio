@@ -100,6 +100,8 @@ pub fn run(
     for (j, t) in title_texts.iter().enumerate() {
         lines_all.push(format!("{}. {}", n_seg + j + 1, t));
     }
+    let numbered = lines_all.join("\n");
+
     let mut ctx = String::new();
     if let Some(sc) = extra["scene_context"].as_str() {
         if !sc.is_empty() {
@@ -112,8 +114,8 @@ pub fn run(
         }
     }
 
-    // TP — ДОСЛОВНО. rewrite -> творческий; иначе точный перевод. Промпт-фабрика на ОКНО строк (чанкинг ниже).
-    let make_tp = |numbered: &str| if let Some(instr) = rewrite {
+    // TP — ДОСЛОВНО. rewrite -> творческий; иначе точный перевод.
+    let tp = if let Some(instr) = rewrite {
         // Творческий ре-дубляж: ЗАМЕНИТЬ содержимое на тему/стиль инструкции, НЕ переводить исходник.
         // «rewrite each line» (как в питоне) наша Q4-QAT читала как «переведи» -> тема не менялась;
         // явное «ignore the source meaning, it's only a rhythm template» заставляет реально переписать (проверено).
@@ -132,26 +134,18 @@ numbering, match tone/slang/intent. Use ALL the context below (what the words al
         )
     };
 
-    // ЧАНКОВАННЫЙ перевод окнами по TR_CHUNK строк. Длинный фильм (тысячи сегментов) НЕ влезает в контекст
-    // Gemma одним промптом, а max_tokens=80+45N взорвался бы. Нумерация ГЛОБАЛЬНАЯ (lines_all уже "N. text"),
-    // ответы каждого окна кладём в общий by_n по тем же N. Контекст (сцена/аудио) идёт в КАЖДОЕ окно. Так
-    // analyze тянет ролики ЛЮБОЙ разумной длины — контекст и max_tokens ограничены окном, не длиной фильма.
-    const TR_CHUNK: usize = 40;
+    let mt = (80 + 45 * lines_all.len()) as u32;
+    let s = Sampling::new(0.2, 0.95, mt).top_k(64);
+    let raw = strip_think(&llm.chat(&[Message::user_text(tp)], &s)?);
+
+    // by_n = {N: перевод} из ответа. re.finditer(r"(?m)^\s*(\d+)[.)\]:]\s*(.+?)\s*$")
     let re = Regex::new(r"(?m)^\s*(\d+)[.)\]:]\s*(.+?)\s*$").unwrap();
     let mut by_n: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
-    let mut w0 = 0usize;
-    while w0 < lines_all.len() {
-        let w1 = (w0 + TR_CHUNK).min(lines_all.len());
-        let numbered = lines_all[w0..w1].join("\n");
-        let mt = (80 + 45 * (w1 - w0)) as u32; // ограничен окном (<= ~1880), не растёт с длиной фильма
-        let s = Sampling::new(0.2, 0.95, mt).top_k(64);
-        let raw = strip_think(&llm.chat(&[Message::user_text(make_tp(&numbered))], &s)?);
-        for c in re.captures_iter(&raw) {
-            if let Ok(n) = c[1].parse::<usize>() {
-                by_n.insert(n, c[2].trim().to_string()); // дубль номера -> держим ПОСЛЕДНЕЕ (как питон-dict)
-            }
+    for c in re.captures_iter(&raw) {
+        if let Ok(n) = c[1].parse::<usize>() {
+            // дубль номера строки: держим ПОСЛЕДНЕЕ вхождение (питон dict-comprehension), НЕ первое (or_insert)
+            by_n.insert(n, c[2].trim().to_string());
         }
-        w0 = w1;
     }
     for (i, s) in segs.iter_mut().enumerate() {
         let t = by_n.get(&(i + 1)).cloned().unwrap_or_default();
