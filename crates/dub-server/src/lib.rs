@@ -927,12 +927,30 @@ async fn dub_audio_project(State(st): State<AppState>, AxPath(pid): AxPath<Strin
         asr: models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel),
         ref_secs: models::higgs_ref_secs(&st.models_root),
     };
+    let dir_for_job = dir.clone();
     let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
         let cb = |ev: Value| progress(ev);
         let text = std::fs::read_to_string(&proj_path).map_err(|e| e.to_string())?;
         let proj = Project::from_json(&text).map_err(|e| e.to_string())?;
         let regen = proj.segments.iter().any(|s| s.dirty);
         let out = render::dub_audio(&proj, &paths, regen, &cb)?;
+        // Правки запечены в озвучку (seg_XXX.wav) -> сбросить dirty, как делает render_project. Иначе
+        // последующий Экспорт (render видит dirty) РЕ-РОЛЛИТ уже одобренный дубляж — регресс «скидывается».
+        // Перечитываем project.json, чтобы не затереть правки, пришедшие во время job.
+        if regen {
+            let baked: std::collections::HashMap<String, String> =
+                proj.segments.iter().map(|s| (s.id.clone(), s.tgt_text.clone())).collect();
+            if let Ok(t2) = std::fs::read_to_string(&proj_path) {
+                if let Ok(mut cur) = Project::from_json(&t2) {
+                    for s in &mut cur.segments {
+                        if baked.get(&s.id) == Some(&s.tgt_text) {
+                            s.dirty = false;
+                        }
+                    }
+                    let _ = save_project_atomic(&dir_for_job, &cur);
+                }
+            }
+        }
         Ok(json!({ "audio": out.to_string_lossy() }))
     });
     let job_id = st.jobs.enqueue(job).await;
