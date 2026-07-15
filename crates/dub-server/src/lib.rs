@@ -74,6 +74,7 @@ pub fn verify_captions_e2e(
         src_lang: "auto".into(),
         subs: proj.subs.mode.clone(),
         rewrite: String::new(),
+        burn: proj.subs.burn,
     };
     let sel = models::load_selection(&mroot);
     let (mt_model, mmproj) = models::resolve_mt(&mroot, &sel);
@@ -737,6 +738,7 @@ async fn analyze_project(
         src_lang: qget("src_lang", "auto"),
         subs: qget("subs", "auto"),
         rewrite: qget("rewrite", ""),
+        burn: qget("burn", "1") != "0",
     };
     // Активный вариант модели резолвится ПРИ КАЖДОЙ джобе (не морозится на старте): скачал/выбрал
     // квант -> применяется без рестарта. См. models::resolve_*.

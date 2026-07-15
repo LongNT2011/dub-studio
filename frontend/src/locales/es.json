@@ -317,5 +317,20 @@
     "exportTxt": "Exportar .txt",
     "empty": "No hay líneas en la transcripción",
     "speakersN": "hablantes"
+  },
+  "comp": {
+    "hint": "Combina libremente — audio y subtítulos son independientes, en cualquier modo",
+    "audioLabel": "Audio",
+    "audioNone": "Original (sin doblaje)",
+    "audioDub": "Doblaje",
+    "audioVoiceover": "Voz superpuesta",
+    "subsLabel": "Subtítulos",
+    "subsNone": "Sin subtítulos",
+    "subsOriginal": "Original",
+    "subsTranslate": "Traducidos",
+    "burn": "En el vídeo",
+    "burnHint": "Grabar subtítulos/títulos en el vídeo (apagado = vídeo limpio, p. ej. doblaje sin subtítulos)",
+    "funny": "Remix divertido",
+    "voiceHint": "Voz: clon / reparto auto / del pack"
   }
 }

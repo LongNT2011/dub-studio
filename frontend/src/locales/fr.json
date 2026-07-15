@@ -317,5 +317,20 @@
     "exportTxt": "Exporter .txt",
     "empty": "Aucune ligne dans la transcription",
     "speakersN": "locuteurs"
+  },
+  "comp": {
+    "hint": "Composez librement — audio et sous-titres sont indépendants, dans tout mode",
+    "audioLabel": "Audio",
+    "audioNone": "Original (sans doublage)",
+    "audioDub": "Doublage",
+    "audioVoiceover": "Voix off",
+    "subsLabel": "Sous-titres",
+    "subsNone": "Sans sous-titres",
+    "subsOriginal": "Original",
+    "subsTranslate": "Traduits",
+    "burn": "Sur la vidéo",
+    "burnHint": "Incruster sous-titres/titres sur la vidéo (désactivé = vidéo propre, ex. doublage sans sous-titres)",
+    "funny": "Remix drôle",
+    "voiceHint": "Voix : clone / casting auto / du pack"
   }
 }

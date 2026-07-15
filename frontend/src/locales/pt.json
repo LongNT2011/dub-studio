@@ -317,5 +317,20 @@
     "exportTxt": "Exportar .txt",
     "empty": "Sem linhas na transcrição",
     "speakersN": "falantes"
+  },
+  "comp": {
+    "hint": "Combine livremente — áudio e legendas são independentes, em qualquer modo",
+    "audioLabel": "Áudio",
+    "audioNone": "Original (sem dublagem)",
+    "audioDub": "Dublagem",
+    "audioVoiceover": "Locução",
+    "subsLabel": "Legendas",
+    "subsNone": "Sem legendas",
+    "subsOriginal": "Original",
+    "subsTranslate": "Traduzidas",
+    "burn": "No vídeo",
+    "burnHint": "Gravar legendas/títulos no vídeo (desligado = vídeo limpo, ex. dublagem sem legendas)",
+    "funny": "Remix divertido",
+    "voiceHint": "Voz: clone / elenco auto / do pacote"
   }
 }

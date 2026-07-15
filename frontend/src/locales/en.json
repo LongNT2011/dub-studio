@@ -317,5 +317,20 @@
     "reinstallHint": "Ships with the app — reinstall if missing",
     "done": "Done",
     "error": "Error"
+  },
+  "comp": {
+    "hint": "Compose freely — audio and subtitles are independent, in any mode",
+    "audioLabel": "Audio",
+    "audioNone": "Original (no dub)",
+    "audioDub": "Dub",
+    "audioVoiceover": "Voice-over",
+    "subsLabel": "Subtitles",
+    "subsNone": "No subtitles",
+    "subsOriginal": "Original",
+    "subsTranslate": "Translated",
+    "burn": "On video",
+    "burnHint": "Burn subtitles/titles onto the video (off = clean video, e.g. dub without subtitles)",
+    "funny": "Funny remix",
+    "voiceHint": "Choose voice: clone / auto-cast / from pack"
   }
 }

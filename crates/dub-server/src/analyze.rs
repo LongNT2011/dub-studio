@@ -22,6 +22,7 @@ pub struct AnalyzeArgs {
     pub src_lang: String,
     pub subs: String,   // auto | none | translate | transcribe
     pub rewrite: String,
+    pub burn: bool,     // вжигать ли субтитры/титры на видео (композируемость; дефолт true)
 }
 
 /// Пути к моделям/входу для одной джобы analyze.
@@ -246,6 +247,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     proj.mode = mode;
     proj.tgt_lang = args.tgt_lang.clone();
     proj.subs.mode = subs_mode;
+    proj.subs.burn = args.burn; // композируемость: вжигать субтитры/титры или нет
     proj.segments = segments;
     proj.work_dir = Some(paths.work_dir.to_string_lossy().into_owned());
     if !args.rewrite.is_empty() {

@@ -95,29 +95,35 @@ pub fn run(
         paths.input.clone()
     };
 
-    // ── КАПШЕНЫ ────────────────────────────────────────────────────────────────
-    emit(progress, "build", "сборка ASS (титры + дублированные субтитры)");
-    let ass_path = wd.join("caps.ass");
-    let sub_covers = build_ass(proj, &ass_path, vw, vh, total)?;
-
-    // ── BURN ───────────────────────────────────────────────────────────────────
-    emit(progress, "burn", "вжигание субтитров + блюр (ffmpeg + libass, NVENC)");
-    let mut blur_boxes = collect_blur_boxes(proj);
-    blur_boxes.extend(sub_covers.iter().map(cover_to_blur)); // блюр-подложка ПОД нашим текстом
-    let captioned = wd.join("captioned.mp4");
-    dub_captions::burn(
-        &paths.input,
-        &ass_path,
-        &captioned,
-        &blur_boxes,
-        Some((vw, vh)),
-        proj.render.blur,
-        true, // gpu_encode (NVENC)
-        true, // gpu_decode
-        proj.render.burn_cq,
-        Some(&src_codec),
-        proj.render.blur_sigma,
-    )?;
+    // ── КАПШЕНЫ + BURN (только если subs.burn) ─────────────────────────────────
+    // subs.burn=false -> НИКАКИХ наложений (ни субтитров, ни титров/блюра): чистое видео + новая
+    // дорожка. Композируемость: дубляж/закадр без субтитров на картинке.
+    let captioned = if proj.subs.burn {
+        emit(progress, "build", "сборка ASS (титры + дублированные субтитры)");
+        let ass_path = wd.join("caps.ass");
+        let sub_covers = build_ass(proj, &ass_path, vw, vh, total)?;
+        emit(progress, "burn", "вжигание субтитров + блюр (ffmpeg + libass, NVENC)");
+        let mut blur_boxes = collect_blur_boxes(proj);
+        blur_boxes.extend(sub_covers.iter().map(cover_to_blur)); // блюр-подложка ПОД нашим текстом
+        let captioned = wd.join("captioned.mp4");
+        dub_captions::burn(
+            &paths.input,
+            &ass_path,
+            &captioned,
+            &blur_boxes,
+            Some((vw, vh)),
+            proj.render.blur,
+            true, // gpu_encode (NVENC)
+            true, // gpu_decode
+            proj.render.burn_cq,
+            Some(&src_codec),
+            proj.render.blur_sigma,
+        )?;
+        captioned
+    } else {
+        emit(progress, "burn", "субтитры/титры отключены (subs.burn=off)");
+        paths.input.clone()
+    };
 
     // ── MUX ────────────────────────────────────────────────────────────────────
     emit(progress, "mux", "муксирование видео + аудио");

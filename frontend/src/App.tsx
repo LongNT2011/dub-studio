@@ -404,8 +404,13 @@ function DropZone() {
   const [tgt, setTgt] = useState<string>((i18n.language as string) || "ru");   // translate TO (default = UI lang)
   const [src, setSrc] = useState("auto");                                       // translate FROM (auto-detect)
   const [file, setFile] = useState<File | null>(null);                          // staged video — analyzed on Start, not on drop
-  const [mode, setMode] = useState<"dub" | "voiceover" | "subtitles" | "funny" | "transcribe">("dub");       // output mode chosen up front
-  const [funny, setFunny] = useState("");                                       // Gemma rewrite instruction (funny mode)
+  // Композируемые опции обработки (независимы, любые комбинации). audio = аудио-выход; subs = содержимое
+  // субтитров; burn = вжигать ли их на видео; funnyOn+funny = шуточный ремикс (сочетается с дубляжом/голосом).
+  const [audio, setAudio] = useState<"nodub" | "dub" | "voiceover" | "transcribe">("dub");
+  const [subs, setSubs] = useState<"none" | "transcribe" | "translate">("translate");
+  const [burn, setBurn] = useState(true);
+  const [funnyOn, setFunnyOn] = useState(false);
+  const [funny, setFunny] = useState("");                                       // Gemma rewrite instruction (тема ремикса)
   const [preview, setPreview] = useState<string | null>(null);                  // objectURL превью выбранного видео (первый кадр)
   useEffect(() => {                                                             // создаём/освобождаем objectURL под выбранный файл
     if (!file) { setPreview(null); return; }
@@ -423,16 +428,17 @@ function DropZone() {
       s.setPid(project_id);
       // subtitles = ОРИГИНАЛ: исходная дорожка + субтитры на языке оригинала (без дубляжа, без перевода);
       // voiceover = закадровый (перевод+TTS, оригинал слышно приглушённым); transcribe = транскрипт+диаризация.
-      const eMode = mode === "subtitles" ? "nodub" : mode === "transcribe" ? "transcribe" : mode === "voiceover" ? "voiceover" : "dub";
-      const eSubs = mode === "subtitles" ? "transcribe" : mode === "transcribe" ? "transcribe" : "auto";
-      const eRewrite = mode === "funny" ? funny.trim() : "";       // funny = rewrite the script + dub, in this pass
-      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite);
+      // Композируемо: аудио-выход, содержимое субтитров, шуточный ремикс — независимы.
+      const eMode = audio;                                          // nodub | dub | voiceover | transcribe
+      const eSubs = audio === "transcribe" ? "transcribe" : subs;   // none | transcribe(оригинал) | translate
+      const eRewrite = funnyOn && (audio === "dub" || audio === "voiceover") ? funny.trim() : "";
+      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, burn);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       s.setProject(await api.getProject(project_id));
       // Озвучку готовим ЗДЕСЬ, на экране загрузки (не собирая видео — кадры даёт per-frame preview),
       // чтобы редактор открылся с готовым дубом (плей сразу играет). Иначе рендер блокировал бы превью
       // после открытия -> чёрный экран, и слушать дуб можно было бы только после экспорта.
-      if (mode === "dub" || mode === "funny" || mode === "voiceover") {
+      if (audio === "dub" || audio === "voiceover") {
         try {
           const r = await api.render(project_id);   // полный дубляж на экране ЗАГРУЗКИ (1:1 питон: analyze -> analyzed.mp4): TTS+микс+бёрн+mux -> output.mp4
           await api.watchJob(r.job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "voicing", e.msg || "", e.pct ?? null); });
@@ -527,18 +533,46 @@ function DropZone() {
               {LANGS.map((l) => <option key={l} value={l}>{l.toUpperCase()}</option>)}
             </select>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-1.5">
-            {([["dub", AudioLines], ["voiceover", Mic2], ["subtitles", Captions], ["funny", Sparkles], ["transcribe", FileText]] as const).map(([m, Icon]) => (
-              <button key={m} onClick={() => setMode(m)}
-                className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-[12px] font-medium transition-colors ${m === "transcribe" ? "col-span-2" : ""} ${mode === m ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
-                <Icon size={14} />{t(`mode.${m}`)}</button>
+          {/* АУДИО-ВЫХОД (независимо от субтитров) */}
+          <div className="mt-3 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("comp.audioLabel")}</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            {([["nodub", Captions, "audioNone"], ["dub", AudioLines, "audioDub"], ["voiceover", Mic2, "audioVoiceover"], ["transcribe", FileText, "mode.transcribe"]] as const).map(([a, Icon, key]) => (
+              <button key={a} onClick={() => setAudio(a)}
+                className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-[12px] font-medium transition-colors ${audio === a ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+                <Icon size={14} />{key.includes(".") ? t(key) : t(`comp.${key}`)}</button>
             ))}
           </div>
-          {mode === "funny" && (
-            <textarea value={funny} onChange={(e) => setFunny(e.target.value)} rows={2} placeholder={t("remix.placeholder")}
-              className="mt-2 w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-2 text-[12px] focus:border-[var(--color-accent)] focus:outline-none resize-none" />
+          {/* ШУТОЧНЫЙ РЕМИКС — сочетается с дубляжом/закадром (и с выбранными голосами в редакторе) */}
+          {(audio === "dub" || audio === "voiceover") && (
+            <label className="mt-2 flex items-center gap-2 text-[12px] cursor-pointer select-none">
+              <input type="checkbox" checked={funnyOn} onChange={(e) => setFunnyOn(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
+              <Sparkles size={13} className="text-[var(--color-accent-2)]" />{t("comp.funny")}
+            </label>
           )}
-          <button onClick={run} disabled={!file || (mode === "funny" && !funny.trim())}
+          {funnyOn && (audio === "dub" || audio === "voiceover") && (
+            <textarea value={funny} onChange={(e) => setFunny(e.target.value)} rows={2} placeholder={t("remix.placeholder")}
+              className="mt-1.5 w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-2 text-[12px] focus:border-[var(--color-accent)] focus:outline-none resize-none" />
+          )}
+          {/* СУБТИТРЫ (независимо от аудио) */}
+          {audio !== "transcribe" && (
+            <>
+              <div className="mt-3 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("comp.subsLabel")}</div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {([["none", "subsNone"], ["transcribe", "subsOriginal"], ["translate", "subsTranslate"]] as const).map(([sv, key]) => (
+                  <button key={sv} onClick={() => setSubs(sv)}
+                    className={`px-2 py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${subs === sv ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+                    {t(`comp.${key}`)}</button>
+                ))}
+              </div>
+              {subs !== "none" && (
+                <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none" title={t("comp.burnHint")}>
+                  <input type="checkbox" checked={burn} onChange={(e) => setBurn(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
+                  {t("comp.burn")}
+                </label>
+              )}
+            </>
+          )}
+          <button onClick={run} disabled={!file || (funnyOn && (audio === "dub" || audio === "voiceover") && !funny.trim())}
             className="mt-2.5 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-40 hover:brightness-105 transition">
             {t("drop.start")} <ArrowRight size={16} /></button>
           <button onClick={() => batchRef.current?.click()}
@@ -552,7 +586,7 @@ function DropZone() {
       <input ref={inputRef} type="file" accept={VIDEO_ACCEPT} className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f); }} />
       <input ref={batchRef} type="file" multiple accept={VIDEO_ACCEPT} className="hidden"
-        onChange={(e) => { const fs = [...(e.target.files || [])]; if (fs.length) { batchState.files = fs; batchState.tgt = tgt; batchState.src = src; batchState.mode = mode; s.setStage("batch"); } }} />
+        onChange={(e) => { const fs = [...(e.target.files || [])]; if (fs.length) { batchState.files = fs; batchState.tgt = tgt; batchState.src = src; batchState.audio = audio; batchState.subs = subs; batchState.burn = burn; batchState.funnyOn = funnyOn; batchState.funny = funny; s.setStage("batch"); } }} />
     </div>
   );
 }
@@ -1242,7 +1276,19 @@ function Editor() {
               </button>
             ))}
           </div>
-          <span className="text-[12px] text-[var(--color-muted)] truncate hidden xl:inline">{t(`mode.${mode}_desc`)}</span>
+          <span className="text-[12px] text-[var(--color-muted)] truncate hidden 2xl:inline">{t(`mode.${mode}_desc`)}</span>
+          <div className="flex items-center gap-1.5 shrink-0" title={t("comp.hint")}>
+            <select value={p.subs.mode} onChange={(e) => branch("subs_content", { value: e.target.value })}
+              className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none">
+              <option value="none">{t("comp.subsNone")}</option>
+              <option value="transcribe">{t("comp.subsOriginal")}</option>
+              <option value="translate">{t("comp.subsTranslate")}</option>
+            </select>
+            <button onClick={() => branch("subs_burn", { on: p.subs.burn === false })} title={t("comp.burnHint")}
+              className={`px-2.5 py-1 rounded-md text-[12px] border transition-colors ${p.subs.burn !== false ? "bg-[var(--color-accent)] text-[var(--color-on-accent)] border-transparent font-medium" : "border-[var(--color-border)] text-[var(--color-muted)]"}`}>
+              {t("comp.burn")}
+            </button>
+          </div>
           <div className="flex-1" />
           <button onClick={doUndo} disabled={!canUndo} title="Ctrl+Z"
             className="p-1.5 rounded-md text-[var(--color-muted)] hover:text-[var(--color-text)] disabled:opacity-30 transition-colors"><Undo2 size={16} /></button>
@@ -1908,7 +1954,8 @@ function FirstRun() {
 }
 
 // Пакетная обработка: DropZone кладёт выбранные файлы + настройки сюда, BatchView читает (без раздувания стора).
-const batchState: { files: File[]; tgt: string; src: string; mode: string } = { files: [], tgt: "ru", src: "auto", mode: "dub" };
+const batchState: { files: File[]; tgt: string; src: string; audio: string; subs: string; burn: boolean; funnyOn: boolean; funny: string } =
+  { files: [], tgt: "ru", src: "auto", audio: "dub", subs: "translate", burn: true, funnyOn: false, funny: "" };
 
 type BatchItem = { name: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string };
 
@@ -1918,14 +1965,15 @@ function BatchView() {
   const { t } = useTranslation();
   const setStage = useStore((s) => s.setStage);
   const filesRef = useRef<File[]>(batchState.files);
-  const { tgt, src, mode } = batchState;
+  const { tgt, src, audio, subs, burn, funnyOn, funny } = batchState;
   const [items, setItems] = useState<BatchItem[]>(() => filesRef.current.map((f) => ({ name: f.name, status: "queued", pid: null, pct: 0 })));
   const [running, setRunning] = useState(false);
   const [doneN, setDoneN] = useState(0);
 
-  const eMode = mode === "subtitles" ? "nodub" : mode === "transcribe" ? "transcribe" : mode === "voiceover" ? "voiceover" : "dub";
-  const eSubs = mode === "subtitles" ? "transcribe" : mode === "transcribe" ? "transcribe" : "auto";   // субтитры = оригинал (без перевода)
-  const doRender = mode === "dub" || mode === "funny" || mode === "voiceover";
+  const eMode = audio;
+  const eSubs = audio === "transcribe" ? "transcribe" : subs;
+  const eRewrite = funnyOn && (audio === "dub" || audio === "voiceover") ? funny.trim() : "";
+  const doRender = audio === "dub" || audio === "voiceover";
 
   async function start() {
     setRunning(true);
@@ -1935,7 +1983,7 @@ function BatchView() {
         upd({ status: "analyzing", pct: 0 });
         const { project_id } = await api.createProject(filesRef.current[i]);
         upd({ pid: project_id });
-        const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, "");
+        const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, burn);
         await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0 }); });
         if (doRender) {
           upd({ status: "rendering", pct: 0 });

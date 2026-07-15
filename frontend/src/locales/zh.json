@@ -317,5 +317,20 @@
     "exportTxt": "导出 .txt",
     "empty": "转录中没有内容",
     "speakersN": "位说话人"
+  },
+  "comp": {
+    "hint": "自由组合 —— 音频与字幕相互独立，任意模式",
+    "audioLabel": "音频",
+    "audioNone": "原声（不配音）",
+    "audioDub": "配音",
+    "audioVoiceover": "旁白配音",
+    "subsLabel": "字幕",
+    "subsNone": "无字幕",
+    "subsOriginal": "原文",
+    "subsTranslate": "翻译",
+    "burn": "烧录到视频",
+    "burnHint": "将字幕/标题烧录到视频（关 = 纯净视频，如配音无字幕）",
+    "funny": "恶搞混剪",
+    "voiceHint": "声音：克隆 / 自动分配 / 声音包"
   }
 }

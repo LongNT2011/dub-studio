@@ -132,6 +132,43 @@ fn op_mode(p: &mut Project, edit: &Value) -> PatchResult {
     Ok(())
 }
 
+/// dub — независимо задать аудио-выход: none (оригинал, без дубляжа) | dub | voiceover. Развязано от
+/// субтитров и шуточного ремикса (audio.rewrite сохраняется) — можно комбинировать: шуточный дубляж +
+/// свои голоса, дубляж без субтитров, перевод субтитров без дубляжа и т.д.
+fn op_dub(p: &mut Project, edit: &Value) -> PatchResult {
+    let v = s(edit, "value").unwrap_or_default();
+    match v.as_str() {
+        "none" => p.mode = "nodub".into(),
+        "dub" => p.mode = "dub".into(),
+        "voiceover" => p.mode = "voiceover".into(),
+        other => return Err((400, format!("unknown audio output {other:?}"))),
+    }
+    // dub/voiceover требуют TTS -> пометить сегменты dirty (следующий /render синтезирует озвучку).
+    if p.mode == "dub" || p.mode == "voiceover" {
+        mark_all_dirty(p);
+    }
+    Ok(())
+}
+
+/// subs_burn — вжигать ли субтитры/титры на видео (композируемость: дубляж без сабов и т.п.).
+/// {on: bool}. Меняет только наложение на выходе — НЕ трогает TTS (dirty не ставим), следующий
+/// /render пересоберёт видео с учётом флага.
+fn op_subs_burn(p: &mut Project, edit: &Value) -> PatchResult {
+    p.subs.burn = edit.get("on").and_then(Value::as_bool).unwrap_or(true);
+    Ok(())
+}
+
+/// subs_content — независимо задать содержимое субтитров: none (нет) | transcribe (язык оригинала) |
+/// translate (перевод). Развязывает субтитры от аудио-режима (перевод сабов без дубляжа и наоборот).
+fn op_subs_content(p: &mut Project, edit: &Value) -> PatchResult {
+    let v = s(edit, "value").unwrap_or_default();
+    match v.as_str() {
+        "none" | "transcribe" | "translate" => p.subs.mode = v,
+        other => return Err((400, format!("unknown subs content {other:?}"))),
+    }
+    Ok(())
+}
+
 /// translate — сменить целевой язык (+режим subs=translate; funny -> rewrite). Порт api.translate.
 /// Помечает все сегменты dirty (перевод/дубляж перегенерятся на следующем analyze/render). Смена языка
 /// требует ре-перевода, но analyze здесь не запускаем — это GPU-джоба; PATCH лишь фиксирует намерение.
@@ -568,6 +605,9 @@ pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
         "title_add" => op_title_add(p, edit),
         "subpos" => op_subpos(p, edit),
         "mode" => op_mode(p, edit),
+        "dub" => op_dub(p, edit),
+        "subs_burn" => op_subs_burn(p, edit),
+        "subs_content" => op_subs_content(p, edit),
         "translate" => op_translate(p, edit),
         "rewrite" => op_rewrite(p, edit),
         "recast" => op_recast(p, edit),

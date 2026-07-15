@@ -118,6 +118,10 @@ pub struct Segment {
 pub struct Subs {
     #[serde(default = "default_none")]
     pub mode: String, // none | translate | transcribe
+    /// Вжигать ли субтитры в видео. По умолчанию true (как раньше). false = дубляж/закадр БЕЗ субтитров
+    /// на картинке — независимая галочка (композируемость режимов: дубляж без сабов, перевод без дубляжа).
+    #[serde(default = "default_true")]
+    pub burn: bool,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -130,6 +134,7 @@ impl Default for Subs {
     fn default() -> Self {
         Subs {
             mode: default_none(),
+            burn: true,
             extra: Extra::new(),
         }
     }
