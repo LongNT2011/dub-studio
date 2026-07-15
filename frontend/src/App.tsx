@@ -106,7 +106,7 @@ function ModelsSection() {
             <div className="text-[12px] font-medium truncate">{base}</div>
             <div className="mono text-[10px] text-[var(--color-muted)] truncate">{c.vram ? `${fmtBytes(c.vram)} VRAM · ` : ""}{fmtBytes(c.size)} {t("settings.disk")}</div>
           </div>
-          <select value={pick} onChange={(e) => setPick(e.target.value)}
+          <select value={pick} onChange={(e) => { const id = e.target.value; setPick(id); const sv = get(id); if (sv?.installed) api.selectModel(id).catch(() => {}); }}
             className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none">
             {variants.map((v) => <option key={v.id} value={v.id}>{quant(v)}{v.installed ? " ✓" : ""} · {fmtBytes(v.size)}{v.vram ? ` / ${fmtBytes(v.vram)} VRAM` : ""}</option>)}
           </select>

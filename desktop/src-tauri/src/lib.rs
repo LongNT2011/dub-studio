@@ -199,6 +199,9 @@ pub fn run() {
             .inner_size(1280.0, 860.0)
             .min_inner_size(1180.0, 720.0)
             .resizable(true)
+            // Tauri v2 по умолчанию перехватывает OS-drop файлов -> HTML5 onDrop в дропзоне НЕ срабатывает
+            // (юзеры жаловались «перетаскивание не работает»). Отключаем перехват -> webview сам ловит drop.
+            .disable_drag_drop_handler()
             .build()?;
             let _ = win;
             // авто-обновление: проверка на GitHub-релизе в фоне, установка по согласию (см. spawn_update_check)

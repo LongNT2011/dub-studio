@@ -79,6 +79,9 @@ export const api = {
   fonts: () => fetch(`${BASE}/fonts`).then(j<{ fonts: Record<string, string> }>),
   setOpts: (edit: Partial<ModelStack>) =>
     fetch(`${BASE}/engine/opts`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit) }).then(j<{ models: ModelStack }>),
+  // Сделать вариант модели (квант) активным: id компонента настроек -> пишет models/active.json на бэке.
+  selectModel: (id: string) =>
+    fetch(`${BASE}/engine/select`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(j<Record<string, string>>),
   voices: () => fetch(`${BASE}/voices`).then(j<{ voices: string[] }>),
   recordDevices: () => fetch(`${BASE}/record/devices`).then(j<{ devices: string[] }>),
   recordLevel: () => fetch(`${BASE}/record/level`).then(j<{ level: number }>),

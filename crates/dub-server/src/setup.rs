@@ -1031,6 +1031,13 @@ pub fn download_components(
     let mut results = Vec::new();
     for c in &selected {
         let st = component_status(repo_root, c);
+        // Скачанный вариант модели -> делаем активным (models/active.json). Резолв при следующей
+        // генерации подхватит без рестарта; иначе скан взял бы дефолт (q8_0 первым) и альт бы не применился.
+        if st.installed {
+            if let Some((engine, variant)) = crate::models::component_selection(c.id) {
+                let _ = crate::models::set_selection(&crate::models_root(repo_root), engine, &variant);
+            }
+        }
         results.push(json!({ "id": c.id, "installed": st.installed, "missing": st.missing }));
     }
     let overall = setup_status(repo_root);

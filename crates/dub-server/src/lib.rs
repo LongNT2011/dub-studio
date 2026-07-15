@@ -13,6 +13,7 @@ mod frame;
 mod hw;
 mod jobs;
 mod media;
+mod models;
 mod ocr;
 mod patch;
 mod record;
@@ -74,14 +75,16 @@ pub fn verify_captions_e2e(
         subs: proj.subs.mode.clone(),
         rewrite: String::new(),
     };
+    let sel = models::load_selection(&mroot);
+    let (mt_model, mmproj) = models::resolve_mt(&mroot, &sel);
     let paths = analyze::AnalyzePaths {
         input: input_video.to_path_buf(),
         work_dir: work_dir.to_path_buf(),
         tdt_dir: unused.clone(),
         sortformer_onnx: unused.clone(),
         llama_bin: dub_llm::resolve_llama_bin(&repo_root.join("tools").join("llama")),
-        mt_model: opts.mt_model_path.clone(),
-        mmproj: opts.mmproj_path.clone(),
+        mt_model,
+        mmproj,
         models_root: mroot,
         caption_fps: opts.caption_fps,
     };
@@ -135,7 +138,7 @@ pub struct AppState {
 }
 
 /// Корень моделей: env DUBENGINE_MODELS_ROOT, иначе <repo_root>/models.
-fn models_root(repo_root: &Path) -> PathBuf {
+pub(crate) fn models_root(repo_root: &Path) -> PathBuf {
     std::env::var("DUBENGINE_MODELS_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|_| repo_root.join("models"))
@@ -287,6 +290,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/engine/capabilities", get(capabilities))
         .route("/engine/opts", axum::routing::patch(endpoints::set_opts))
+        .route("/engine/select", post(endpoints::select_model))
         // «Первый запуск»: статус компонентов + автозакачка недостающего (SSE через ту же job-машину).
         .route("/setup/status", get(setup_status))
         .route("/setup/download", post(setup_download))
@@ -734,14 +738,20 @@ async fn analyze_project(
         subs: qget("subs", "auto"),
         rewrite: qget("rewrite", ""),
     };
+    // Активный вариант модели резолвится ПРИ КАЖДОЙ джобе (не морозится на старте): скачал/выбрал
+    // квант -> применяется без рестарта. См. models::resolve_*.
+    let sel = models::load_selection(&st.models_root);
+    let (mt_model, mmproj) = models::resolve_mt(&st.models_root, &sel);
+    let asr_dir = models::resolve_asr(&st.models_root, &sel);
+    eprintln!("[models] analyze: MT={} · ASR={}", mt_model.display(), asr_dir.display());
     let paths = analyze::AnalyzePaths {
         input,
         work_dir: dir.clone(),
-        tdt_dir: st.tdt_dir.clone(),
+        tdt_dir: asr_dir,
         sortformer_onnx: st.sortformer_onnx.clone(),
         llama_bin: st.llama_bin.clone(),
-        mt_model: st.opts.mt_model_path.clone(),
-        mmproj: st.opts.mmproj_path.clone(),
+        mt_model,
+        mmproj,
         models_root: st.models_root.clone(),
         caption_fps: st.opts.caption_fps,
     };
@@ -805,21 +815,28 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
     };
     let output = dir.join("output.mp4");
 
+    // Активный вариант модели резолвится ПРИ КАЖДОЙ джобе (см. models::resolve_*): скачал/выбрал
+    // квант в настройках -> применяется без рестарта сервера.
+    let sel = models::load_selection(&st.models_root);
+    let (higgs_model_root, higgs_quant) = models::resolve_tts(&st.models_root, &sel);
+    let sep_model = models::resolve_sep(&st.models_root, &sel);
+    eprintln!("[models] render: TTS={} (q={}) · SEP={}", higgs_model_root.display(), higgs_quant, sep_model.display());
     let paths = render::RenderPaths {
         input,
         work_dir: dir.clone(),
         output: output.clone(),
         bsroformer_cli: st.bsroformer_cli.clone(),
-        bsroformer_model: st.bsroformer_model.clone(),
+        bsroformer_model: sep_model,
         higgs_dll: st.higgs_dll.clone(),
-        higgs_model_root: st.higgs_model_root.clone(),
+        higgs_model_root,
+        higgs_quant,
         fonts_dir: st.fonts_dir.clone(),
         higgs_backend: st.opts.device.clone(),
         higgs_device: 0,
         higgs_threads: st.opts.num_threads,
         max_stretch: st.opts.max_stretch as f64,
         voices_dir: st.voices_dir.clone(),
-        tdt_dir: st.tdt_dir.clone(),
+        tdt_dir: models::resolve_asr(&st.models_root, &sel),
     };
 
     let dir_for_job = dir.clone();
@@ -869,21 +886,24 @@ async fn dub_audio_project(State(st): State<AppState>, AxPath(pid): AxPath<Strin
         Ok(s) => PathBuf::from(s.trim()),
         Err(_) => return (StatusCode::CONFLICT, "no source uploaded").into_response(),
     };
+    let sel = models::load_selection(&st.models_root);
+    let (higgs_model_root, higgs_quant) = models::resolve_tts(&st.models_root, &sel);
     let paths = render::RenderPaths {
         input,
         work_dir: dir.clone(),
         output: dir.join("output.mp4"),
         bsroformer_cli: st.bsroformer_cli.clone(),
-        bsroformer_model: st.bsroformer_model.clone(),
+        bsroformer_model: models::resolve_sep(&st.models_root, &sel),
         higgs_dll: st.higgs_dll.clone(),
-        higgs_model_root: st.higgs_model_root.clone(),
+        higgs_model_root,
+        higgs_quant,
         fonts_dir: st.fonts_dir.clone(),
         higgs_backend: st.opts.device.clone(),
         higgs_device: 0,
         higgs_threads: st.opts.num_threads,
         max_stretch: st.opts.max_stretch as f64,
         voices_dir: st.voices_dir.clone(),
-        tdt_dir: st.tdt_dir.clone(),
+        tdt_dir: models::resolve_asr(&st.models_root, &sel),
     };
     let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
         let cb = |ev: Value| progress(ev);

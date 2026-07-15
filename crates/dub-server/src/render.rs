@@ -29,6 +29,7 @@ pub struct RenderPaths {
     pub bsroformer_model: PathBuf,
     pub higgs_dll: PathBuf,
     pub higgs_model_root: PathBuf,
+    pub higgs_quant: String,   // квант выбранного варианта Higgs (q8_0/q6_k/q4_k_m) — для audiocpp load_model
     pub fonts_dir: PathBuf,
     pub higgs_backend: String, // "cuda" | "cpu"
     pub higgs_device: i32,
@@ -318,7 +319,7 @@ fn build_dub(
             &paths.higgs_backend,
             paths.higgs_device,
             paths.higgs_threads,
-            Some("q8_0"),
+            Some(paths.higgs_quant.as_str()),
         )
         .map_err(|e| format!("Higgs load_model: {e}"))?;
 

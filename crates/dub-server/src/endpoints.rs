@@ -59,6 +59,21 @@ pub async fn set_opts(State(st): State<AppState>, Json(edit): Json<Value>) -> Re
     .into_response()
 }
 
+// ─── POST /engine/select ────────────────────────────────────────────────────
+// Выбрать активный вариант модели (квант) для движка. Тело: {"id":"higgs-q6_k"} — id компонента из
+// манифеста настроек. Пишем models/active.json; резолв при следующей генерации подхватит выбор без
+// рестарта. Это ФАКТИЧЕСКИЙ свап-слот (в отличие от set_opts, который остался эхо-совместимостью).
+pub async fn select_model(State(st): State<AppState>, Json(body): Json<Value>) -> Response {
+    let id = body.get("id").and_then(Value::as_str).unwrap_or("");
+    let Some((engine, variant)) = crate::models::component_selection(id) else {
+        return (StatusCode::BAD_REQUEST, format!("unknown model component: {id:?}")).into_response();
+    };
+    if let Err(e) = crate::models::set_selection(&st.models_root, engine, &variant) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("write selection: {e}")).into_response();
+    }
+    Json(crate::models::load_selection(&st.models_root)).into_response()
+}
+
 // ─── PUT /projects/{pid} ────────────────────────────────────────────────────
 // Полная замена Project (undo/redo снапшот). Порт app.py.put_project: валидировать тело как Project,
 // сохранить атомарно, вернуть Project.
