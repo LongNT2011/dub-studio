@@ -12,6 +12,12 @@ const FFMPEG: &str = "ffmpeg.exe";
 #[cfg(not(windows))]
 const FFMPEG: &str = "ffmpeg";
 
+/// Последние ~1000 символов stderr ffmpeg (в исходном порядке) — для лаконичных сообщений об ошибке.
+fn stderr_tail(stderr: &[u8]) -> String {
+    let err = String::from_utf8_lossy(stderr);
+    err.chars().rev().take(1000).collect::<String>().chars().rev().collect()
+}
+
 /// Экранировать путь ASS для filtergraph: \ -> /, : -> \: .
 fn ass_escape(p: &Path) -> String {
     let abs = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
@@ -215,8 +221,7 @@ fn run_ffmpeg(
     cmd.arg(out);
     let o = cmd.output().map_err(|e| format!("ffmpeg запуск: {e}"))?;
     if !o.status.success() {
-        let err = String::from_utf8_lossy(&o.stderr);
-        let tail: String = err.chars().rev().take(1000).collect::<String>().chars().rev().collect();
+        let tail = stderr_tail(&o.stderr);
         return Err(format!("ffmpeg caption burn failed:\n{tail}"));
     }
     Ok(())
@@ -263,8 +268,7 @@ pub fn burn_frame(
     cmd.args(["-frames:v", "1", "-update", "1"]).arg(out_png);
     let o = cmd.output().map_err(|e| format!("ffmpeg запуск: {e}"))?;
     if !o.status.success() {
-        let err = String::from_utf8_lossy(&o.stderr);
-        let tail: String = err.chars().rev().take(1000).collect::<String>().chars().rev().collect();
+        let tail = stderr_tail(&o.stderr);
         return Err(format!("ffmpeg preview frame failed:\n{tail}"));
     }
     Ok(())

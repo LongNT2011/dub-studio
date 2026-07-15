@@ -252,7 +252,10 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
 
     let n = vis.len();
     for idx in 0..n {
-        let (st, mut en, tgt, sy) = vis[idx].clone();
+        let st = vis[idx].0;
+        let mut en = vis[idx].1;
+        let sy = vis[idx].3;
+        let tgt = &vis[idx].2; // ссылка вместо клона всего кортежа (String клонируем лишь когда нужно)
         if idx + 1 < n {
             en = en.min(vis[idx + 1].0); // не перекрывать следующий
         }
@@ -357,16 +360,16 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
 
 /// Наиболее частая строка (замена max(vals, key=vals.count)).
 fn mode_string(vals: &[String]) -> String {
-    let mut best = vals[0].clone();
+    let mut best = &vals[0];
     let mut best_c = 0usize;
     for v in vals {
         let c = vals.iter().filter(|x| *x == v).count();
         if c > best_c {
             best_c = c;
-            best = v.clone();
+            best = v;
         }
     }
-    best
+    best.clone()
 }
 
 /// Построить S-style строку (порт всех веток if sub_style / elif bg / elif light / else / no-style).

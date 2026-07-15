@@ -231,15 +231,19 @@ pub fn emit_styled(
     if reveal != "whole" && spans.is_empty() {
         reveal = "whole".to_string();
     }
+    // Вставка перевода строки при смене line_idx — общий шаг всех reveal-веток.
+    let nl = |parts: &mut String, li: usize, cur: &mut usize| {
+        if li != *cur {
+            parts.push_str("\\N");
+            *cur = li;
+        }
+    };
     match reveal.as_str() {
         "karaoke" => {
             let mut parts = String::new();
             let mut cur = 0usize;
             for (li, w, ws, we) in &spans {
-                if *li != cur {
-                    parts.push_str("\\N");
-                    cur = *li;
-                }
+                nl(&mut parts, *li, &mut cur);
                 let kf = (((we - ws) * 100.0).round() as i64).max(4);
                 parts.push_str(&format!("{{\\kf{kf}}}{w} "));
             }
@@ -254,10 +258,7 @@ pub fn emit_styled(
                 let mut parts = String::new();
                 let mut cur = 0usize;
                 for (j, (lj, wj, _, _)) in spans.iter().enumerate() {
-                    if *lj != cur {
-                        parts.push_str("\\N");
-                        cur = *lj;
-                    }
+                    nl(&mut parts, *lj, &mut cur);
                     if j == k {
                         parts.push_str(&format!("{{\\1c{accent6}}}{wj}{{\\1c{base6}}} "));
                     } else {
@@ -275,10 +276,7 @@ pub fn emit_styled(
             let mut parts = String::new();
             let mut cur = 0usize;
             for (li, w, ws, _we) in &spans {
-                if *li != cur {
-                    parts.push_str("\\N");
-                    cur = *li;
-                }
+                nl(&mut parts, *li, &mut cur);
                 let ms = (((ws - a) * 1000.0) as i64).max(0);
                 if reveal == "pop" {
                     parts.push_str(&format!(
@@ -312,8 +310,8 @@ pub fn emit_styled(
 /// Один титр как в оригинале (плотная скруглённая плашка, если реальный контрастный фон, иначе
 /// outline-only) — порт _emit_title. width/height — кадр.
 pub fn emit_title(out: &mut Vec<String>, b: &Title, width: i64, height: i64) {
+    // esc() заменяет только {}→() (не пробелы), а b.text уже trim'нут → повторный trim не нужен.
     let text0 = esc(b.text.trim());
-    let text0 = text0.trim().to_string();
     if text0.is_empty() {
         return;
     }
@@ -394,7 +392,7 @@ pub fn emit_title(out: &mut Vec<String>, b: &Title, width: i64, height: i64) {
     let bld = if b.bold { "\\b1" } else { "\\b0" };
     let itl = if b.italic { "\\i1" } else { "" };
     let body = wrapped.join("\\N");
-    let out_tags: String;
+    let mut out_tags: String;
     if has_plate {
         let padx = (fs as f32 * 0.34) as i64;
         let pady = (fs as f32 * 0.16) as i64;
@@ -431,7 +429,6 @@ pub fn emit_title(out: &mut Vec<String>, b: &Title, width: i64, height: i64) {
         let shad = ((fs as f32 * 0.05) as i64).max(2);
         out_tags = format!("\\bord{bord}\\shad{shad}\\3c{oc}\\4c{oc}");
     }
-    let mut out_tags = out_tags;
     let ow = b.outline_w;
     if b.outline.is_some() || ow.is_some() {
         let oc = look::c6(&look::hex_ass(

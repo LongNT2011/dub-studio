@@ -214,30 +214,25 @@ pub fn resolve_look(
         return None;
     }
     let base_name = caption_style.unwrap_or(DEFAULT_TEMPLATE);
-    let mut t = template(base_name).unwrap_or_else(|| template(DEFAULT_TEMPLATE).unwrap());
-    if let Some(r) = reveal {
-        t.reveal = Box::leak(r.to_string().into_boxed_str());
-    }
-    if let Some(p) = plate {
-        t.plate = Box::leak(p.to_string().into_boxed_str());
-    }
-    if let Some(f) = font {
-        t.font = Box::leak(f.to_string().into_boxed_str());
-    }
+    let t = template(base_name).unwrap_or_else(|| template(DEFAULT_TEMPLATE).unwrap());
+    // Эффективные значения = оверрайд-или-шаблон (без Box::leak/'static-принуждения — не течёт память).
+    let reveal_src = reveal.unwrap_or(t.reveal);
+    let plate_src = plate.unwrap_or(t.plate);
+    let font_src = font.unwrap_or(t.font);
     let det = sub_style_color;
     let accent_hex: String = t
         .accent
         .map(|s| s.to_string())
         .or_else(|| det.filter(|d| is_vivid(d)).map(|d| d.to_string()))
         .unwrap_or_else(|| "#FFD400".to_string());
-    let font_out = if is_known_font(t.font) {
-        t.font.to_string()
+    let font_out = if is_known_font(font_src) {
+        font_src.to_string()
     } else {
         FONT_NAME.to_string()
     };
     Some(ResolvedLook {
-        reveal: t.reveal.to_string(),
-        plate: t.plate.to_string(),
+        reveal: reveal_src.to_string(),
+        plate: plate_src.to_string(),
         font: font_out,
         base: c6(&hex_ass(t.base)),
         base_lum: lum(t.base),

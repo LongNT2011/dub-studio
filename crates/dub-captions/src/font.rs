@@ -57,6 +57,14 @@ fn advance_width<SF: ScaleFont<F>, F: Font>(sf: &SF, text: &str) -> f32 {
 /// Жадный перенос по ширине max_w (px) при размере fs — порт `_wrap`. Возвращает список строк.
 pub fn wrap(text: &str, fs: i64, max_w: f32, fontpath: &Path) -> Vec<String> {
     let words: Vec<&str> = text.split_whitespace().collect();
+    // Шрифт резолвим ОДИН раз на перенос (был Mutex::lock+HashMap::get на каждое слово через text_width).
+    let scaled = load_font(fontpath).map(|f| f.as_scaled(PxScale::from(fs as f32)));
+    let width = |s: &str| -> f32 {
+        match &scaled {
+            Some(sf) => advance_width(sf, s),
+            None => s.chars().count() as f32 * fs as f32 * 0.55, // тот же фолбэк, что в text_width
+        }
+    };
     let mut lines: Vec<String> = Vec::new();
     let mut cur = String::new();
     for word in words {
@@ -65,7 +73,7 @@ pub fn wrap(text: &str, fs: i64, max_w: f32, fontpath: &Path) -> Vec<String> {
         } else {
             format!("{cur} {word}")
         };
-        if text_width(&test, fs, fontpath) <= max_w || cur.is_empty() {
+        if width(&test) <= max_w || cur.is_empty() {
             cur = test;
         } else {
             lines.push(cur);
