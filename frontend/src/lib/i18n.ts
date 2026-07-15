@@ -71,11 +71,12 @@ export const DUB_LANGS: { code: string; name: string }[] = [
   { code: "yue", name: "粵語" },         { code: "br", name: "Brezhoneg" },
 ];
 
+const isLang = (v: string): v is Lang => (LANGS as readonly string[]).includes(v);
 const detect = (): Lang => {
   const stored = localStorage.getItem("lang");
-  if (stored && (LANGS as readonly string[]).includes(stored)) return stored as Lang;
+  if (stored && isLang(stored)) return stored;
   const nav = (navigator.language || "en").slice(0, 2).toLowerCase();
-  return (LANGS as readonly string[]).includes(nav) ? (nav as Lang) : "en";
+  return isLang(nav) ? nav : "en";
 };
 
 i18n.use(initReactI18next).init({

@@ -72,36 +72,42 @@ async function j<T>(r: Response): Promise<T> {
 // (last response wins) and could clobber an un-persisted edit. Chaining keeps them ordered; PATCH itself is a
 // cheap JSON write (the heavy re-render rides the preview <img>, which the GPU worker serializes separately).
 let _patchChain: Promise<unknown> = Promise.resolve();
+// Общий заголовок JSON-POST/PATCH + сериализация правок в одну очередь (putProject/patch не гонятся).
+const JSON_HEADERS = { "Content-Type": "application/json" };
+function _chain<T>(run: () => Promise<T>): Promise<T> {
+  _patchChain = _patchChain.then(run, run);
+  return _patchChain as Promise<T>;
+}
 
 export const api = {
   capabilities: () => fetch(`${BASE}/engine/capabilities`).then(j<Capabilities>),
   setupStatus: () => fetch(`${BASE}/setup/status`).then(j<SetupStatus>),
   setupDownload: (ids: string[]) =>
-    fetch(`${BASE}/setup/download`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids }) }).then(j<{ job_id: string }>),
+    fetch(`${BASE}/setup/download`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ ids }) }).then(j<{ job_id: string }>),
   setupCancel: () => fetch(`${BASE}/setup/cancel`, { method: "POST" }).then(j<{ cancelled: boolean }>),
   hwSnapshot: () => fetch(`${BASE}/hw/snapshot`).then(j<HwSnapshot>),
-  setupBrowse: (id?: string) => fetch(`${BASE}/setup/browse`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(id ? { id } : {}) }).then(j<{ picked: boolean; imported: string[]; status: SetupStatus }>),
+  setupBrowse: (id?: string) => fetch(`${BASE}/setup/browse`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(id ? { id } : {}) }).then(j<{ picked: boolean; imported: string[]; status: SetupStatus }>),
   fonts: () => fetch(`${BASE}/fonts`).then(j<{ fonts: Record<string, string> }>),
   setOpts: (edit: Partial<ModelStack>) =>
-    fetch(`${BASE}/engine/opts`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit) }).then(j<{ models: ModelStack }>),
+    fetch(`${BASE}/engine/opts`, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(edit) }).then(j<{ models: ModelStack }>),
   // Сделать вариант модели (квант) активным: id компонента настроек -> пишет models/active.json на бэке.
   selectModel: (id: string) =>
-    fetch(`${BASE}/engine/select`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(j<Record<string, string>>),
+    fetch(`${BASE}/engine/select`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ id }) }).then(j<Record<string, string>>),
   // Прямая установка слота выбора (движок/модель/квант ASR) без скачивания: {key,value} -> active.json.
   setSelection: (key: string, value: string) =>
-    fetch(`${BASE}/engine/select`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, value }) }).then(j<Record<string, string>>),
+    fetch(`${BASE}/engine/select`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ key, value }) }).then(j<Record<string, string>>),
   voices: () => fetch(`${BASE}/voices`).then(j<{ voices: string[] }>),
   recordDevices: () => fetch(`${BASE}/record/devices`).then(j<{ devices: string[] }>),
   recordLevel: () => fetch(`${BASE}/record/level`).then(j<{ level: number }>),
-  recordStart: (name: string, device?: string) => fetch(`${BASE}/record/start`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, device }) }).then(j<{ ok: boolean; name?: string; error?: string }>),
+  recordStart: (name: string, device?: string) => fetch(`${BASE}/record/start`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ name, device }) }).then(j<{ ok: boolean; name?: string; error?: string }>),
   recordStop: () => fetch(`${BASE}/record/stop`, { method: "POST" }).then(j<{ name: string | null; voices: string[] }>),
   voicesDownloadPack: () => fetch(`${BASE}/voices/download-pack`, { method: "POST" }).then(j<{ job_id: string }>),
   voicesCatalog: () => fetch(`${BASE}/voices/catalog`).then(j<{ voices: { name: string; gender: string; url: string }[] }>),
-  voicesGet: (name: string) => fetch(`${BASE}/voices/get`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then(j<{ ok: boolean; voices?: string[]; error?: string }>),
+  voicesGet: (name: string) => fetch(`${BASE}/voices/get`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ name }) }).then(j<{ ok: boolean; voices?: string[]; error?: string }>),
   voiceSampleUrl: (name: string) => `${BASE}/voices/sample?name=${encodeURIComponent(name)}`,   // прослушка выбранного голоса (<audio>)
-  voicesRename: (from: string, to: string) => fetch(`${BASE}/voices/rename`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from, to }) }).then(j<{ voices: string[] }>),
-  voicesDelete: (name: string) => fetch(`${BASE}/voices/delete`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then(j<{ voices: string[] }>),
-  speakerVoice: (pid: string, speaker: string, name: string) => fetch(`${BASE}/projects/${pid}/speaker-voice`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ speaker, name }) }).then(j<{ ok: boolean; name: string; voices: string[] }>),
+  voicesRename: (from: string, to: string) => fetch(`${BASE}/voices/rename`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ from, to }) }).then(j<{ voices: string[] }>),
+  voicesDelete: (name: string) => fetch(`${BASE}/voices/delete`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ name }) }).then(j<{ voices: string[] }>),
+  speakerVoice: (pid: string, speaker: string, name: string) => fetch(`${BASE}/projects/${pid}/speaker-voice`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ speaker, name }) }).then(j<{ ok: boolean; name: string; voices: string[] }>),
   presets: () => fetch(`${BASE}/presets`).then(j<{ presets: Record<string, Record<string, unknown>>; reveals: string[] }>),
   createProject: (file: File) => {
     const fd = new FormData(); fd.append("file", file);
@@ -110,16 +116,10 @@ export const api = {
   analyze: (pid: string, tgt_lang: string, mode = "auto", src_lang = "auto", subs = "auto", rewrite = "", burn = true, detect = true) =>
     fetch(`${BASE}/projects/${pid}/analyze?tgt_lang=${tgt_lang}&mode=${mode}&src_lang=${src_lang}&subs=${subs}&rewrite=${encodeURIComponent(rewrite)}&burn=${burn ? 1 : 0}&detect=${detect ? 1 : 0}`, { method: "POST" }).then(j<{ job_id: string }>),
   getProject: (pid: string) => fetch(`${BASE}/projects/${pid}`).then(j<Project>),
-  putProject: (pid: string, project: Project) => {   // undo/redo: serialize through the SAME chain as patch() (no race)
-    const run = () => fetch(`${BASE}/projects/${pid}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(project) }).then(j<Project>);
-    _patchChain = _patchChain.then(run, run);
-    return _patchChain as Promise<Project>;
-  },
-  patch: (pid: string, edit: Record<string, unknown>) => {
-    const run = () => fetch(`${BASE}/projects/${pid}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(edit) }).then(j<Project>);
-    _patchChain = _patchChain.then(run, run);   // run after the previous patch settles (ok or failed)
-    return _patchChain as Promise<Project>;
-  },
+  putProject: (pid: string, project: Project) =>   // undo/redo: serialize through the SAME chain as patch() (no race)
+    _chain(() => fetch(`${BASE}/projects/${pid}`, { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(project) }).then(j<Project>)),
+  patch: (pid: string, edit: Record<string, unknown>) =>   // run after the previous patch settles (ok or failed)
+    _chain(() => fetch(`${BASE}/projects/${pid}`, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(edit) }).then(j<Project>)),
   render: (pid: string) => fetch(`${BASE}/projects/${pid}/render`, { method: "POST" }).then(j<{ job_id: string }>),
   dubAudio: (pid: string) => fetch(`${BASE}/projects/${pid}/dub-audio`, { method: "POST" }).then(j<{ job_id: string }>),   // сгенерить только озвучку (без сборки видео) — слушать дуб в редакторе
   remix: (pid: string, instruction: string) =>
@@ -129,8 +129,8 @@ export const api = {
   waveform: (pid: string) => fetch(`${BASE}/projects/${pid}/waveform`).then(j<{ peaks: number[] }>),
   outputUrl: (pid: string) => `${BASE}/projects/${pid}/output`,
   openOutput: (pid: string) => fetch(`${BASE}/projects/${pid}/open`, { method: "POST" }).then(j<{ ok: boolean }>),   // открыть output.mp4 в системном плеере (нативный webview не открывает target=_blank)
-  reveal: (pid: string, name: string) => fetch(`${BASE}/projects/${pid}/reveal`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then(j<{ ok: boolean }>),   // показать файл в проводнике с выделением
-  saveText: (pid: string, name: string, text: string) => fetch(`${BASE}/projects/${pid}/save-text`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, text }) }).then(j<{ ok: boolean; path: string }>),   // записать SRT/TXT в каталог проекта + reveal (webview не качает blob)
+  reveal: (pid: string, name: string) => fetch(`${BASE}/projects/${pid}/reveal`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ name }) }).then(j<{ ok: boolean }>),   // показать файл в проводнике с выделением
+  saveText: (pid: string, name: string, text: string) => fetch(`${BASE}/projects/${pid}/save-text`, { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ name, text }) }).then(j<{ ok: boolean; path: string }>),   // записать SRT/TXT в каталог проекта + reveal (webview не качает blob)
   dubUrl: (pid: string, rev = 0) => `${BASE}/projects/${pid}/dub?rev=${rev}`,   // playable dubbed video (frames + dub audio)
   // SSE job progress -> onEvent per message; resolves on done, rejects on error
   watchJob: (jobId: string, onEvent: (e: JobEvent) => void) =>
