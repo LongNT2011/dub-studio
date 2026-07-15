@@ -25,7 +25,7 @@ fn find_gguf_in(dir: &std::path::Path, want_mmproj: bool) -> Option<PathBuf> {
         let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
         if name.contains("mmproj") == want_mmproj {
             // детерминизм: при нескольких берём лексикографически первый
-            if hit.as_ref().map(|h| p < *h).unwrap_or(true) {
+            if hit.as_ref().is_none_or(|h| p < *h) {
                 hit = Some(p);
             }
         }

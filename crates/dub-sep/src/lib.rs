@@ -92,7 +92,7 @@ pub fn separate(
     // (движок гарантирует ту же длину/частоту), пишем WAV float32.
     let mix = wav::read_f32(mix_wav).map_err(SepError::Wav)?;
     let voc = wav::read_f32(&vocals).map_err(SepError::Wav)?;
-    let inst = subtract(&mix, &voc);
+    let inst = subtract(mix, &voc);
     wav::write_f32(&instrumental, &inst).map_err(SepError::Wav)?;
 
     Ok(SepResult { vocals, instrumental })
@@ -100,17 +100,17 @@ pub fn separate(
 
 /// Разница двух дорожек: instrumental[n] = mix[n] − vocals[n]. Каналы/частота берутся из mix; если
 /// длины расходятся (крайний случай), выравниваем по минимуму (хвост-остаток mix оставляем как есть).
-fn subtract(mix: &wav::Audio, voc: &wav::Audio) -> wav::Audio {
+fn subtract(mut mix: wav::Audio, voc: &wav::Audio) -> wav::Audio {
     let ch = mix.channels.max(1);
     let n = mix.data.len().min(voc.data.len());
-    let mut out = mix.data.clone();
-    for (o, v) in out[..n].iter_mut().zip(&voc.data[..n]) {
+    // Переиспользуем буфер mix на месте (был лишний mix.data.clone() на весь трек).
+    for (o, v) in mix.data[..n].iter_mut().zip(&voc.data[..n]) {
         *o -= *v;
     }
     wav::Audio {
         sample_rate: mix.sample_rate,
         channels: ch,
-        data: out,
+        data: mix.data,
     }
 }
 

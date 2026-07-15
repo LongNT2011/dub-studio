@@ -87,7 +87,7 @@ impl Default for Audio {
             voice: Voice::default(),
             rewrite: None,
             gain_db: 0.0,
-            voiceover_gain_db: -6.0,
+            voiceover_gain_db: default_voiceover_gain(),
             extra: Extra::new(),
         }
     }
@@ -391,8 +391,8 @@ fn hevc() -> String {
 impl Default for Render {
     fn default() -> Self {
         Render {
-            burn_cq: 24,
-            blur_sigma: 60,
+            burn_cq: cq24(),
+            blur_sigma: sigma60(),
             blur: true,
             codec: hevc(),
             extra: Extra::new(),

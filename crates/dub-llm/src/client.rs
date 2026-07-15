@@ -49,19 +49,19 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn system(text: impl Into<String>) -> Self {
+    /// Текстовое сообщение с заданной ролью (общий конструктор system/user_text).
+    fn text_msg(role: &str, text: impl Into<String>) -> Self {
         Message {
-            role: "system".into(),
+            role: role.into(),
             parts_text: Some(text.into()),
             parts: None,
         }
     }
+    pub fn system(text: impl Into<String>) -> Self {
+        Self::text_msg("system", text)
+    }
     pub fn user_text(text: impl Into<String>) -> Self {
-        Message {
-            role: "user".into(),
-            parts_text: Some(text.into()),
-            parts: None,
-        }
+        Self::text_msg("user", text)
     }
     pub fn user_parts(parts: Vec<Part>) -> Self {
         Message {
