@@ -285,6 +285,28 @@ fn build_dub(
             }
         }
     }
+    // КЛОН: реф-клипы, обрезанные из-за уменьшенного ref_secs (в build_speaker_refs текст НЕ выставлен),
+    // ПЕРЕтранскрибируем — чтобы ref_text совпал с укороченным реф-аудио (иначе клон рассинхронится).
+    // Реф не обрезан (текст уже есть) -> не трогаем, поведение по умолчанию (12с) неизменно.
+    if !use_pack && paths.tdt_dir.is_dir() {
+        let mut asr = dub_asr::Asr::new(&paths.tdt_dir);
+        for (spk, refp) in &spk_refs {
+            if ref_texts.contains_key(spk) {
+                continue;
+            }
+            if let Ok(rsegs) = asr.transcribe(refp, "auto") {
+                let txt = rsegs
+                    .iter()
+                    .map(|s| s.text.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                if !txt.trim().is_empty() {
+                    ref_texts.insert(spk.clone(), txt);
+                }
+            }
+        }
+    }
     let first_ref = pack_refs
         .values()
         .next()
@@ -475,8 +497,11 @@ fn build_speaker_refs(
         let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
         media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + ref_secs), 16_000)?;
         refs.insert(spk.clone(), ref_wav);
+        // ref_text = src_text сегмента, НО только если реф НЕ обрезан (сегмент ≤ ref_secs). Если юзер
+        // уменьшил ref_secs и реф стал короче сегмента, полный src_text описывает БОЛЬШЕ, чем в обрезанном
+        // аудио -> рассинхрон клона. Такие оставляем БЕЗ текста -> ПЕРЕтранскрибируем обрезанный клип ниже.
         let t = cand.src_text.trim();
-        if !t.is_empty() {
+        if !t.is_empty() && (cand.end - cand.start) <= ref_secs + 0.05 {
             texts.insert(spk, t.to_string());
         }
     }
