@@ -766,7 +766,7 @@ fn index_dir(dir: &Path, map: &mut std::collections::HashMap<String, Vec<(PathBu
             index_dir(&p, map, depth + 1, budget);
         } else if let Some(name) = p.file_name().and_then(|s| s.to_str()) {
             let size = e.metadata().map(|m| m.len()).unwrap_or(0);
-            map.entry(name.to_lowercase()).or_default().push((p.clone(), size));
+            map.entry(name.to_lowercase()).or_default().push((p, size)); // p дальше не нужен -> move
             *budget -= 1;
         }
     }
@@ -1157,8 +1157,8 @@ pub fn download_components(
             return Err(format!("докачка {}: неполный размер {sz}/{total}", target.display()));
         }
         if target.extension().and_then(|s| s.to_str()) == Some("gguf") {
-            use std::io::Read;
-            let mut magic = [0u8; 4];
+            let mut magic = [0u8; 4]; // трейт Read импортирован на уровне модуля
+
             let ok = std::fs::File::open(part)
                 .and_then(|mut f| f.read_exact(&mut magic))
                 .is_ok();
@@ -1418,9 +1418,10 @@ fn extract_zip_pick(zip_path: &Path, dir: &Path) -> Result<(), String> {
             continue;
         }
         let name = entry.name().replace('\\', "/");
-        let leaf = name.rsplit('/').next().unwrap_or(&name).to_ascii_lowercase();
+        let leaf_raw = name.rsplit('/').next().unwrap_or(&name); // лист один раз (без повторного rsplit)
+        let leaf = leaf_raw.to_ascii_lowercase();
         if WANT.iter().any(|w| *w == leaf) {
-            let out_name = name.rsplit('/').next().unwrap_or(&name).to_string();
+            let out_name = leaf_raw.to_string(); // исходный регистр имени выходного файла сохраняем
             write_entry(&mut entry, &dir.join(&out_name))?;
             got += 1;
         }

@@ -145,15 +145,12 @@ pub async fn waveform(
         tokio::task::spawn_blocking(move || crate::wavio::waveform_peaks(&video, n))
             .await
             .unwrap_or_default();
+    let empty = peaks.is_empty();
     let out = json!({ "peaks": peaks });
-    if !peaks_empty(&out) {
+    if !empty {
         let _ = std::fs::write(&cache, out.to_string());
     }
     Json(out).into_response()
-}
-
-fn peaks_empty(v: &Value) -> bool {
-    v.get("peaks").and_then(|p| p.as_array()).map(|a| a.is_empty()).unwrap_or(true)
 }
 
 // ─── POST /projects/{pid}/remix?instruction= ────────────────────────────────
@@ -223,8 +220,7 @@ pub async fn remix_project(
         }
         p.audio.rewrite = Some(instr.clone());
         save_project_atomic(&dir_for_job, &p)?;
-        p.to_json().map(|s| serde_json::from_str(&s).unwrap_or(Value::Null))
-            .map_err(|e| e.to_string())
+        serde_json::to_value(&p).map_err(|e| e.to_string())
     });
     let job_id = st.jobs.enqueue(job).await;
     Json(json!({ "job_id": job_id })).into_response()

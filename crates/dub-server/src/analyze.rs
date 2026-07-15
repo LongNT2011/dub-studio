@@ -260,7 +260,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     //    (vision layout/scene + перевод всего транскрипта), заполняем tgt_text/titles/sub_style.
     //    Пайплайн последовательный: TTS в этот момент не загружен (как tts.release() в питоне) —
     //    Gemma получает всю VRAM. Fail-safe: сбой стадии оставляет tgt пустым (перевод — не блокер analyze).
-    let vocals16 = paths.work_dir.join("vocals16.wav");
+    // vocals16 уже объявлен выше (стадия ASR) и не перемещался — переиспользуем.
     crate::translate::stage(args, paths, &mut proj, &vocals16, meta.height, meta.duration, progress);
 
     // 7) OCR-стадия (раунд 4): детекция вшитого текста -> блюр-боксы субтитр-полосы + уточнение sub_y.

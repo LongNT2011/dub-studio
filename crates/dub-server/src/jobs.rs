@@ -13,6 +13,13 @@ use tokio::sync::{broadcast, oneshot, Mutex};
 /// Функция джобы: получает колбэк прогресса (msg + произвольные поля), возвращает JSON-результат.
 pub type JobFn = Box<dyn FnOnce(ProgressFn) -> Result<Value, String> + Send + 'static>;
 
+/// Короткий (12 симв.) идентификатор джобы из UUIDv4.
+fn new_job_id() -> String {
+    let mut id = uuid::Uuid::new_v4().simple().to_string();
+    id.truncate(12);
+    id
+}
+
 /// Колбэк прогресса, передаваемый в тело джобы. Кладёт {"type":"progress", ...} в SSE-канал.
 pub type ProgressFn = Arc<dyn Fn(Value) + Send + Sync + 'static>;
 
@@ -104,7 +111,7 @@ impl JobQueue {
                     }
                     // Разбудить ожидающего preview/original.
                     if let Some(sender) = j.result_sender.take() {
-                        let _ = sender.send(res.clone());
+                        let _ = sender.send(res); // последнее использование res -> move, без clone
                     }
                 }
 
@@ -123,7 +130,7 @@ impl JobQueue {
 
     /// Поставить джобу в очередь; вернуть job_id.
     pub async fn enqueue(&self, fn_: JobFn) -> String {
-        let job_id = uuid::Uuid::new_v4().simple().to_string()[..12].to_string();
+        let job_id = new_job_id();
         let (tx, _rx) = broadcast::channel(256);
         let job = Job {
             tx,
@@ -143,7 +150,7 @@ impl JobQueue {
         &self,
         fn_: JobFn,
     ) -> (String, oneshot::Receiver<Result<Value, String>>) {
-        let job_id = uuid::Uuid::new_v4().simple().to_string()[..12].to_string();
+        let job_id = new_job_id();
         let (tx, _rx) = broadcast::channel(256);
         let (res_tx, res_rx) = oneshot::channel();
         let job = Job {

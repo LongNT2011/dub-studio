@@ -20,6 +20,32 @@ use std::path::{Path, PathBuf};
 use crate::media;
 use crate::wavio;
 
+/// Транскрибировать реф-клипы спикеров выбранным ASR-движком, заполнив ref_texts (уже заданные — пропуск).
+/// Пустой транскрипт не пишем. Общий шаг pack-рефов и обрезанных клон-рефов.
+fn fill_ref_texts(
+    asr: &mut dyn dub_asr::AsrEngine,
+    refs: &std::collections::BTreeMap<String, PathBuf>,
+    ref_texts: &mut std::collections::BTreeMap<String, String>,
+) {
+    for (spk, refp) in refs {
+        if ref_texts.contains_key(spk) {
+            continue;
+        }
+        if let Ok(rsegs) = asr.transcribe(refp, "auto") {
+            let txt = rsegs
+                .iter()
+                .map(|s| s.text.trim())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            // токены уже trim'нуты и непусты, join(" ") не даёт краевых пробелов -> повторный trim не нужен.
+            if !txt.is_empty() {
+                ref_texts.insert(spk.clone(), txt);
+            }
+        }
+    }
+}
+
 /// Пути к моделям/движкам для рендера (резолвятся из AppState).
 pub struct RenderPaths {
     pub input: PathBuf,        // исходное видео
@@ -282,41 +308,14 @@ fn build_dub(
         // Реф-транскрипция выбранным движком (Parakeet/Whisper), а НЕ захардкоженным Parakeet — иначе у
         // Whisper-only юзера (без Parakeet-модели) ref_text молча не считался бы. build_engine сам решает.
         let mut asr = crate::models::build_engine(&paths.asr);
-        for (spk, refp) in &pack_refs {
-            if let Ok(rsegs) = asr.transcribe(refp, "auto") {
-                let txt = rsegs
-                    .iter()
-                    .map(|s| s.text.trim())
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if !txt.trim().is_empty() {
-                    ref_texts.insert(spk.clone(), txt);
-                }
-            }
-        }
+        fill_ref_texts(asr.as_mut(), &pack_refs, &mut ref_texts);
     }
     // КЛОН: реф-клипы, обрезанные из-за уменьшенного ref_secs (в build_speaker_refs текст НЕ выставлен),
     // ПЕРЕтранскрибируем — чтобы ref_text совпал с укороченным реф-аудио (иначе клон рассинхронится).
     // Реф не обрезан (текст уже есть) -> не трогаем, поведение по умолчанию (12с) неизменно.
     if !use_pack {
         let mut asr = crate::models::build_engine(&paths.asr);
-        for (spk, refp) in &spk_refs {
-            if ref_texts.contains_key(spk) {
-                continue;
-            }
-            if let Ok(rsegs) = asr.transcribe(refp, "auto") {
-                let txt = rsegs
-                    .iter()
-                    .map(|s| s.text.trim())
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if !txt.trim().is_empty() {
-                    ref_texts.insert(spk.clone(), txt);
-                }
-            }
-        }
+        fill_ref_texts(asr.as_mut(), &spk_refs, &mut ref_texts);
     }
     let first_ref = pack_refs
         .values()

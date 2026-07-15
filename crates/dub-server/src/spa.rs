@@ -21,7 +21,7 @@ pub async fn serve_spa(web_root: Option<&Path>, spa_path: &str) -> Response {
         let candidate = web_root.join(spa_path);
         // Канонизируем: раскрывает `..` и симлинки. Файл обязан существовать И быть внутри root.
         if let Ok(canon) = candidate.canonicalize() {
-            let contained = canon == root_canon || canon.starts_with(&root_canon);
+            let contained = canon.starts_with(&root_canon); // starts_with(self)==true, равенство покрыто
             if contained && canon.is_file() {
                 return file_response(&canon).await;
             }
@@ -36,7 +36,7 @@ async fn file_response(path: &Path) -> Response {
         Ok(bytes) => {
             let mime = mime_guess::from_path(path).first_or_octet_stream();
             (
-                [(header::CONTENT_TYPE, mime.as_ref().to_string())],
+                [(header::CONTENT_TYPE, mime.as_ref())],
                 Body::from(bytes),
             )
                 .into_response()

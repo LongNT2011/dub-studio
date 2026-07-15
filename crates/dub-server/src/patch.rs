@@ -50,14 +50,39 @@ fn mark_all_dirty(p: &mut Project) {
     }
 }
 
-/// edit_segment — правка одной строки транскрипта. Порт api.edit_segment.
-fn op_segment(p: &mut Project, edit: &Value) -> PatchResult {
+/// Найти сегмент по edit["id"]: 400 если id нет, 404 если не найден. Общий шаг op_segment/op_regen/
+/// op_hide_segment/op_keep_segment.
+fn seg_by_id<'a>(p: &'a mut Project, edit: &Value) -> Result<&'a mut dub_core::Segment, (u16, String)> {
     let sid = s(edit, "id").ok_or((400, "missing segment id".into()))?;
-    let seg = p
-        .segments
+    p.segments
         .iter_mut()
         .find(|x| x.id == sid)
-        .ok_or((404, format!("segment {sid:?} not found")))?;
+        .ok_or((404, format!("segment {sid:?} not found")))
+}
+
+/// Удалить элементы вектора по индексам edit["idxs"] (high->low, вне диапазона пропускаются).
+fn del_by_idxs<T>(v: &mut Vec<T>, edit: &Value) {
+    for idx in idxs_desc(edit) {
+        if idx < v.len() {
+            v.remove(idx);
+        }
+    }
+}
+
+/// Удалить ОДИН элемент по edit["idx"]: 400 если ключа нет, 404 если не число/вне диапазона.
+fn del_one<T>(v: &mut Vec<T>, edit: &Value, what: &str) -> PatchResult {
+    let idx = i(edit, "idx").ok_or((400, format!("missing {what} idx")))?;
+    let idx = usize::try_from(idx).map_err(|_| (404, format!("bad {what} idx")))?;
+    if idx >= v.len() {
+        return Err((404, format!("{what} idx {idx} out of range")));
+    }
+    v.remove(idx);
+    Ok(())
+}
+
+/// edit_segment — правка одной строки транскрипта. Порт api.edit_segment.
+fn op_segment(p: &mut Project, edit: &Value) -> PatchResult {
+    let seg = seg_by_id(p, edit)?;
     if let Some(t) = edit.get("tgt_text").and_then(|x| x.as_str()) {
         seg.tgt_text = t.to_string();
     }
@@ -95,7 +120,7 @@ fn op_subpos(p: &mut Project, edit: &Value) -> PatchResult {
 ///   subtitles -> nodub + subs.translate; dub -> dub + subs.translate; funny -> dub + subs.translate + rewrite.
 /// Помечает все сегменты dirty. ValueError (неизвестное значение) -> 400.
 fn op_mode(p: &mut Project, edit: &Value) -> PatchResult {
-    let value = s(edit, "value").unwrap_or_default();
+    let value = edit.get("value").and_then(|x| x.as_str()).unwrap_or_default();
     // Композируемость: пресет режима НЕ трогает ЯВНЫЙ выбор «без субтитров». Иначе клик по чипу режима
     // (op_mode) воскрешал бы субтитры, которые юзер выключил через subs_content=none (баг-репорт code-review:
     // «subs=none всё равно прожигает субтитры» — через редактор). subs.mode остаётся под управлением
@@ -106,7 +131,7 @@ fn op_mode(p: &mut Project, edit: &Value) -> PatchResult {
             p.subs.mode = m.into();
         }
     };
-    match value.as_str() {
+    match value {
         "subtitles" => {
             p.mode = "nodub".into();
             set_subs(p, "transcribe"); // субтитры = язык оригинала, без перевода
@@ -146,8 +171,8 @@ fn op_mode(p: &mut Project, edit: &Value) -> PatchResult {
 /// субтитров и шуточного ремикса (audio.rewrite сохраняется) — можно комбинировать: шуточный дубляж +
 /// свои голоса, дубляж без субтитров, перевод субтитров без дубляжа и т.д.
 fn op_dub(p: &mut Project, edit: &Value) -> PatchResult {
-    let v = s(edit, "value").unwrap_or_default();
-    match v.as_str() {
+    let v = edit.get("value").and_then(|x| x.as_str()).unwrap_or_default();
+    match v {
         "none" => p.mode = "nodub".into(),
         "dub" => p.mode = "dub".into(),
         "voiceover" => p.mode = "voiceover".into(),
@@ -220,13 +245,7 @@ fn op_recast(p: &mut Project, edit: &Value) -> PatchResult {
 
 /// regen — пометить ОДИН сегмент dirty (ре-TTS только его на /render). Порт app.py op=="regen".
 fn op_regen(p: &mut Project, edit: &Value) -> PatchResult {
-    let sid = s(edit, "id").ok_or((400, "missing segment id".into()))?;
-    let seg = p
-        .segments
-        .iter_mut()
-        .find(|x| x.id == sid)
-        .ok_or((404, format!("segment {sid:?} not found")))?;
-    seg.dirty = true;
+    seg_by_id(p, edit)?.dirty = true;
     Ok(())
 }
 
@@ -406,12 +425,7 @@ fn del_segment(p: &mut Project, sid: &str) -> PatchResult {
 
 /// hide_segment — тоггл/установка hidden (в extra). Порт app.py op=="hide_segment".
 fn op_hide_segment(p: &mut Project, edit: &Value) -> PatchResult {
-    let sid = s(edit, "id").ok_or((400, "missing segment id".into()))?;
-    let seg = p
-        .segments
-        .iter_mut()
-        .find(|x| x.id == sid)
-        .ok_or((404, format!("segment {sid:?} not found")))?;
+    let seg = seg_by_id(p, edit)?;
     let cur = seg.extra.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false);
     let new = b(edit, "hidden").unwrap_or(!cur);
     seg.extra.insert("hidden".into(), Value::Bool(new));
@@ -441,12 +455,7 @@ fn op_hide_segments(p: &mut Project, edit: &Value) -> PatchResult {
 
 /// keep_segment — тоггл keep_original (в extra). Порт app.py op=="keep_segment".
 fn op_keep_segment(p: &mut Project, edit: &Value) -> PatchResult {
-    let sid = s(edit, "id").ok_or((400, "missing segment id".into()))?;
-    let seg = p
-        .segments
-        .iter_mut()
-        .find(|x| x.id == sid)
-        .ok_or((404, format!("segment {sid:?} not found")))?;
+    let seg = seg_by_id(p, edit)?;
     let cur = seg.extra.get("keep_original").and_then(|v| v.as_bool()).unwrap_or(false);
     let new = b(edit, "keep").unwrap_or(!cur);
     seg.extra.insert("keep_original".into(), Value::Bool(new));
@@ -468,21 +477,13 @@ fn op_keep_segments(p: &mut Project, edit: &Value) -> PatchResult {
 
 /// del_titles — массовое удаление титров (high->low). Порт app.py op=="del_titles".
 fn op_del_titles(p: &mut Project, edit: &Value) -> PatchResult {
-    for idx in idxs_desc(edit) {
-        if idx < p.captions.titles.len() {
-            p.captions.titles.remove(idx);
-        }
-    }
+    del_by_idxs(&mut p.captions.titles, edit);
     Ok(())
 }
 
 /// del_blurs — массовое удаление blur-боксов (high->low). Порт app.py op=="del_blurs".
 fn op_del_blurs(p: &mut Project, edit: &Value) -> PatchResult {
-    for idx in idxs_desc(edit) {
-        if idx < p.captions.blur_boxes.len() {
-            p.captions.blur_boxes.remove(idx);
-        }
-    }
+    del_by_idxs(&mut p.captions.blur_boxes, edit);
     Ok(())
 }
 
@@ -525,13 +526,7 @@ fn op_blur_add(p: &mut Project, edit: &Value) -> PatchResult {
 
 /// blur_del — удалить blur-бокс по индексу. Порт api.del_blur (IndexError -> 404).
 fn op_blur_del(p: &mut Project, edit: &Value) -> PatchResult {
-    let idx = i(edit, "idx").ok_or((400, "missing blur idx".into()))?;
-    let idx = usize::try_from(idx).map_err(|_| (404, "bad blur idx".to_string()))?;
-    if idx >= p.captions.blur_boxes.len() {
-        return Err((404, format!("blur idx {idx} out of range")));
-    }
-    p.captions.blur_boxes.remove(idx);
-    Ok(())
+    del_one(&mut p.captions.blur_boxes, edit, "blur")
 }
 
 /// blur_enable — глобальный тоггл блюра (render.blur). Порт app.py op=="blur_enable".
@@ -562,19 +557,19 @@ fn op_title(p: &mut Project, edit: &Value) -> PatchResult {
     if let Some(x) = b(edit, "bold") { t.bold = x; }
     if let Some(x) = b(edit, "uppercase") { t.uppercase = x; }
     if let Some(x) = b(edit, "solid") { t.solid = x; }
-    if edit.get("font").is_some() { t.font = edit.get("font").and_then(|v| v.as_str()).map(|x| x.to_string()); }
-    if edit.get("color").is_some() { t.color = edit.get("color").and_then(|v| v.as_str()).map(|x| x.to_string()); }
-    if edit.get("bg").is_some() { t.bg = edit.get("bg").and_then(|v| v.as_str()).map(|x| x.to_string()); }
-    if edit.get("outline").is_some() { t.outline = edit.get("outline").and_then(|v| v.as_str()).map(|x| x.to_string()); }
-    if edit.get("shadow_dir").is_some() { t.shadow_dir = edit.get("shadow_dir").and_then(|v| v.as_i64()); } // null->None
+    if let Some(v) = edit.get("font") { t.font = v.as_str().map(|x| x.to_string()); }
+    if let Some(v) = edit.get("color") { t.color = v.as_str().map(|x| x.to_string()); }
+    if let Some(v) = edit.get("bg") { t.bg = v.as_str().map(|x| x.to_string()); }
+    if let Some(v) = edit.get("outline") { t.outline = v.as_str().map(|x| x.to_string()); }
+    if let Some(v) = edit.get("shadow_dir") { t.shadow_dir = v.as_i64(); } // null->None
     if let Some(a) = edit.get("align").and_then(|v| v.as_str()) { t.align = a.to_string(); }
     if let Some(st) = f(edit, "start") { t.start = st; }
     if let Some(en) = f(edit, "end") { t.end = en; }
     // nullable как shadow_dir: явный null снимает значение (возврат к авто-межстрочному/авто-фиту/авто-контуру),
     // число выставляет, отсутствие ключа не трогает. i()/as_i64() на null давал None -> сброс молча игнорировался.
-    if edit.get("lh").is_some() { t.lh = edit.get("lh").and_then(|v| v.as_i64()); }
-    if edit.get("size_px").is_some() { t.size_px = edit.get("size_px").and_then(|v| v.as_i64()); }
-    if edit.get("outline_w").is_some() { t.outline_w = edit.get("outline_w").and_then(|v| v.as_i64()); }
+    if let Some(v) = edit.get("lh") { t.lh = v.as_i64(); }
+    if let Some(v) = edit.get("size_px") { t.size_px = v.as_i64(); }
+    if let Some(v) = edit.get("outline_w") { t.outline_w = v.as_i64(); }
     if let Some(bbox) = edit.get("bbox").and_then(|v| v.as_array()) {
         t.bbox = Some(bbox.iter().filter_map(|x| x.as_i64()).collect());
     }
@@ -583,13 +578,7 @@ fn op_title(p: &mut Project, edit: &Value) -> PatchResult {
 
 /// title_del — удалить титр по индексу. Порт api.del_title (IndexError -> 404).
 fn op_title_del(p: &mut Project, edit: &Value) -> PatchResult {
-    let idx = i(edit, "idx").ok_or((400, "missing title idx".into()))?;
-    let idx = usize::try_from(idx).map_err(|_| (404, "bad title idx".to_string()))?;
-    if idx >= p.captions.titles.len() {
-        return Err((404, format!("title idx {idx} out of range")));
-    }
-    p.captions.titles.remove(idx);
-    Ok(())
+    del_one(&mut p.captions.titles, edit, "title")
 }
 
 /// title_add — новый кастомный титр в боксе на [t0,t1]. Порт api.add_title. Нет x/y/w/h -> 400.

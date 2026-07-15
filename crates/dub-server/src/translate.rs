@@ -16,6 +16,13 @@ fn emit(progress: &Progress, stage: &str, msg: &str) {
     progress(serde_json::json!({ "stage": stage, "msg": msg }));
 }
 
+/// tgt = исходный текст (без MT) — для transcribe- и same-lang-веток.
+fn copy_src_to_tgt(proj: &mut Project) {
+    for s in &mut proj.segments {
+        s.tgt_text = s.src_text.clone();
+    }
+}
+
 /// Нужно ли переводить: dub/voiceover-режим ИЛИ subs=translate (как do_translate в pipeline).
 fn wants_translate(proj: &Project) -> bool {
     proj.mode == "dub" || proj.mode == "voiceover" || proj.subs.mode == "translate"
@@ -39,9 +46,7 @@ pub fn stage(
     let do_translate = wants_translate(proj) || rewrite.is_some();
     if !do_translate {
         // transcribe-режим: tgt = исходный текст, БЕЗ MT (parity с pipeline «transcribe» веткой).
-        for s in &mut proj.segments {
-            s.tgt_text = s.src_text.clone();
-        }
+        copy_src_to_tgt(proj);
         emit(progress, "translate", "transcribe: tgt=исходный текст, без перевода");
         return;
     }
@@ -53,9 +58,7 @@ pub fn stage(
     let src_lc = src.to_lowercase();
     let same_lang = !src.is_empty() && src_lc != "auto" && src_lc == proj.tgt_lang.to_lowercase();
     if same_lang && rewrite.is_none() {
-        for s in &mut proj.segments {
-            s.tgt_text = s.src_text.clone();
-        }
+        copy_src_to_tgt(proj);
         emit(progress, "translate", "same-lang -> без MT (tgt=исходник)");
         return;
     }
@@ -132,11 +135,10 @@ pub fn stage(
         }
     };
 
-    // Перенести tgt в сегменты Project.
-    for (i, s) in proj.segments.iter_mut().enumerate() {
-        if let Some(sg) = segs.get(i) {
-            s.tgt_text = sg.tgt.clone();
-        }
+    // Перенести tgt в сегменты Project. segs строился 1:1 из proj.segments и дальше не используется —
+    // переносим строки перемещением (zip по равной длине, без клонов).
+    for (s, sg) in proj.segments.iter_mut().zip(segs) {
+        s.tgt_text = sg.tgt;
     }
 
     // Замапить extra -> типизированные поля Project + сохранить сырой ctx (byte-identical passthrough,

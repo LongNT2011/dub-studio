@@ -20,6 +20,22 @@ use dub_core::{BlurBox, Project, SubStyle, Title};
 use dub_ocr::{blur, group_captions, CaptionBox, CaptionGroup, Region};
 use serde_json::Value;
 
+/// Нормализация строки для сравнения тайтлов: lowercase + только буквенно-цифровые символы.
+fn norm_alnum(s: &str) -> String {
+    s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+/// Округление f32 до 2 знаков, результат в f64 (тайминги блюр-боксов).
+#[inline]
+fn round2_f64(v: f32) -> f64 {
+    ((v * 100.0).round() / 100.0) as f64
+}
+
+/// Сравнение f32 по возрастанию (NaN -> Equal) для sort_by над Vec<f32>.
+fn f32_asc(a: &f32, b: &f32) -> std::cmp::Ordering {
+    a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)
+}
+
 use crate::analyze::{AnalyzePaths, Progress};
 
 fn emit(progress: &Progress, stage: &str, msg: &str) {
@@ -153,15 +169,17 @@ pub fn run(
     // отсечь кандидатов, идущих КОНКУРЕНТНО с субтитр-полосой (_runs_with_subs).
     let band_t: Vec<f32> = {
         let mut v: Vec<f32> = caption_boxes.iter().map(|b| b.4).collect();
-        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        v.sort_by(f32_asc);
         v
     };
     let runs_with_subs = |gs: f32, ge: f32| -> bool {
         let inside: Vec<f32> = band_t.iter().copied().filter(|&t| gs <= t && t <= ge).collect();
-        inside.len() >= 3
-            && (inside.iter().cloned().fold(f32::MIN, f32::max)
-                - inside.iter().cloned().fold(f32::MAX, f32::min))
-                >= 0.4 * (ge - gs).max(0.1)
+        if inside.len() < 3 {
+            return false;
+        }
+        // band_t отсортирован, filter сохраняет порядок -> min/max = первый/последний (без двух fold).
+        let span = inside[inside.len() - 1] - inside[0];
+        span >= 0.4 * (ge - gs).max(0.1)
     };
     groups.retain(|g| !runs_with_subs(g.start, g.end));
 
@@ -431,7 +449,7 @@ pub fn run(
     } else {
         Vec::new()
     };
-    sh.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    sh.sort_by(f32_asc);
     let mut bh: Vec<i64> = caption_boxes.iter().map(|b| b.3).collect();
     bh.sort_unstable();
     let sub_px: Option<i64> = if !sh.is_empty() {
@@ -613,9 +631,8 @@ fn merge_titles_by_y(sorted: Vec<Value>) -> Vec<Value> {
                 let prev = last.get("tgt").and_then(|x| x.as_str()).unwrap_or("").to_string();
                 let cur = t.get("tgt").and_then(|x| x.as_str()).unwrap_or("");
                 // склеиваем строки, но одинаковые (vision дублирует персистентный тайтл) не повторяем
-                let key = |s: &str| s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>();
                 let mut lines: Vec<String> = prev.split('\n').map(|s| s.to_string()).collect();
-                if !cur.trim().is_empty() && !lines.iter().any(|l| key(l) == key(cur)) {
+                if !cur.trim().is_empty() && !lines.iter().any(|l| norm_alnum(l) == norm_alnum(cur)) {
                     lines.push(cur.to_string());
                 }
                 let joined = lines.join("\n").trim().to_string();
@@ -633,10 +650,7 @@ fn merge_titles_by_y(sorted: Vec<Value>) -> Vec<Value> {
 /// Дубли от vision: один титр — подстрока другого на соседней строке (Δy<=0.13, чуть за порогом
 /// мёржа), напр. «СДВГ» и «СДВГ и перфекционизм.» — рисовались оба стопкой. Оставляем более полный.
 fn dedup_substring_titles(titles: Vec<Value>) -> Vec<Value> {
-    let norm = |v: &Value, k: &str| {
-        v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_lowercase()
-            .chars().filter(|c| c.is_alphanumeric()).collect::<String>()
-    };
+    let norm = |v: &Value, k: &str| norm_alnum(v.get(k).and_then(|x| x.as_str()).unwrap_or(""));
     let mut keep = vec![true; titles.len()];
     for i in 0..titles.len() {
         for j in 0..titles.len() {
@@ -669,8 +683,8 @@ fn bbox_box(bbox: (f32, f32, f32, f32), t0: f32, t1: f32) -> BlurBox {
         y: bbox.1 as i64,
         w: bbox.2 as i64,
         h: bbox.3 as i64,
-        t0: ((t0 * 100.0).round() / 100.0) as f64,
-        t1: ((t1 * 100.0).round() / 100.0) as f64,
+        t0: round2_f64(t0),
+        t1: round2_f64(t1),
         hidden: false,
         fill: None,
         extra: Default::default(),
@@ -683,8 +697,8 @@ fn locblock_box(b: &LocBlock) -> BlurBox {
         y: b.bbox.1 as i64,
         w: b.bbox.2 as i64,
         h: b.bbox.3 as i64,
-        t0: ((b.start * 100.0).round() / 100.0) as f64,
-        t1: ((b.end * 100.0).round() / 100.0) as f64,
+        t0: round2_f64(b.start),
+        t1: round2_f64(b.end),
         hidden: false,
         fill: None,
         extra: Default::default(),
@@ -751,7 +765,7 @@ fn ensure_sub_style_mirror(
         .filter(|r| centered(r.x, r.w) && r.cy() > vh * 0.40)
         .map(|r| r.h)
         .collect();
-    caph.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    caph.sort_by(f32_asc);
     if !caph.is_empty() {
         *cap_px = Some(caph[caph.len() / 2] as i64);
     }

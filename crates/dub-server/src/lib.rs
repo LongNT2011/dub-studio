@@ -545,7 +545,7 @@ async fn speaker_voice(
     let cand = proj
         .segments
         .iter()
-        .filter(|s| s.speaker.clone().unwrap_or_else(|| "0".into()) == want)
+        .filter(|s| s.speaker.as_deref().unwrap_or("0") == want)
         .max_by(|a, b| (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap_or(std::cmp::Ordering::Equal));
     let Some(cand) = cand else {
         return (StatusCode::BAD_REQUEST, "у спикера нет реплик").into_response();
@@ -679,8 +679,8 @@ async fn create_project(
     State(st): State<AppState>,
     mut multipart: Multipart,
 ) -> Response {
-    let pid = uuid::Uuid::new_v4().simple().to_string();
-    let pid = pid[..12].to_string();
+    let mut pid = uuid::Uuid::new_v4().simple().to_string();
+    pid.truncate(12);
     let d = st.workspace.join(&pid);
     if let Err(e) = tokio::fs::create_dir_all(&d).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
@@ -819,6 +819,24 @@ async fn patch_project(
 
 // ─── POST /projects/{pid}/render ────────────────────────────────────────────
 
+/// Сбросить dirty у сегментов, чьи правки уже запечены в дубляж/рендер. Перечитываем project.json с
+/// диска (а не пишем захваченный proj), чтобы не затереть правки, пришедшие во время job. Общий хвост
+/// render_project и dub_audio_project (был байт-в-байт продублирован).
+fn reset_baked_dirty(proj: &Project, proj_path: &Path, dir_for_job: &Path) {
+    let baked: std::collections::HashMap<&str, &str> =
+        proj.segments.iter().map(|s| (s.id.as_str(), s.tgt_text.as_str())).collect();
+    if let Ok(t2) = std::fs::read_to_string(proj_path) {
+        if let Ok(mut cur) = Project::from_json(&t2) {
+            for s in &mut cur.segments {
+                if baked.get(s.id.as_str()).copied() == Some(s.tgt_text.as_str()) {
+                    s.dirty = false;
+                }
+            }
+            let _ = save_project_atomic(dir_for_job, &cur);
+        }
+    }
+}
+
 async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>) -> Response {
     let dir = match st.proj_dir(&pid) {
         Ok(d) => d,
@@ -872,18 +890,7 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
         render::run(&proj, &paths, regen, &cb)?;
         // Правки запечены в дубляж -> сбросить dirty (перечитать, чтобы не затереть правки во время рендера).
         if regen {
-            let baked: std::collections::HashMap<String, String> =
-                proj.segments.iter().map(|s| (s.id.clone(), s.tgt_text.clone())).collect();
-            if let Ok(t2) = std::fs::read_to_string(&proj_path) {
-                if let Ok(mut cur) = Project::from_json(&t2) {
-                    for s in &mut cur.segments {
-                        if baked.get(&s.id) == Some(&s.tgt_text) {
-                            s.dirty = false;
-                        }
-                    }
-                    let _ = save_project_atomic(&dir_for_job, &cur);
-                }
-            }
+            reset_baked_dirty(&proj, &proj_path, &dir_for_job);
         }
         Ok(json!({ "output": out_for_result.to_string_lossy() }))
     });
@@ -936,20 +943,8 @@ async fn dub_audio_project(State(st): State<AppState>, AxPath(pid): AxPath<Strin
         let out = render::dub_audio(&proj, &paths, regen, &cb)?;
         // Правки запечены в озвучку (seg_XXX.wav) -> сбросить dirty, как делает render_project. Иначе
         // последующий Экспорт (render видит dirty) РЕ-РОЛЛИТ уже одобренный дубляж — регресс «скидывается».
-        // Перечитываем project.json, чтобы не затереть правки, пришедшие во время job.
         if regen {
-            let baked: std::collections::HashMap<String, String> =
-                proj.segments.iter().map(|s| (s.id.clone(), s.tgt_text.clone())).collect();
-            if let Ok(t2) = std::fs::read_to_string(&proj_path) {
-                if let Ok(mut cur) = Project::from_json(&t2) {
-                    for s in &mut cur.segments {
-                        if baked.get(&s.id) == Some(&s.tgt_text) {
-                            s.dirty = false;
-                        }
-                    }
-                    let _ = save_project_atomic(&dir_for_job, &cur);
-                }
-            }
+            reset_baked_dirty(&proj, &proj_path, &dir_for_job);
         }
         Ok(json!({ "audio": out.to_string_lossy() }))
     });
