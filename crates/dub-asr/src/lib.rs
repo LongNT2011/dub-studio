@@ -314,11 +314,11 @@ pub fn turns(
     for m in &merged {
         *dur.entry(m[2] as i32).or_insert(0.0) += m[1] - m[0];
     }
-    let real: Vec<i32> = dur.iter().filter(|(_, &d)| d >= min_speaker_dur).map(|(&s, _)| s).collect();
-    if real.len() < 2 {
+    let realset: std::collections::HashSet<i32> =
+        dur.iter().filter(|(_, &d)| d >= min_speaker_dur).map(|(&s, _)| s).collect();
+    if realset.len() < 2 {
         return Ok(single(())); // реально один голос -> single-speaker путь
     }
-    let realset: std::collections::HashSet<i32> = real.iter().copied().collect();
 
     // Крошечную реплику не-настоящего спикера переназначить ближайшей настоящей (по середине).
     let real_turns: Vec<[f64; 3]> = merged.iter().filter(|m| realset.contains(&(m[2] as i32))).copied().collect();

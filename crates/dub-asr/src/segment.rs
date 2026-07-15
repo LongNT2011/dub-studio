@@ -24,6 +24,18 @@ fn ends_sentence(word: &str) -> bool {
     matches!(word.chars().last(), Some('.') | Some('!') | Some('?') | Some('…'))
 }
 
+/// Склейка слов сегмента через пробел (эквивалент `join(" ").trim()`, без промежуточного Vec).
+fn join_words(ws: &[Word]) -> String {
+    let mut s = String::new();
+    for x in ws {
+        if !s.is_empty() {
+            s.push(' ');
+        }
+        s.push_str(&x.word);
+    }
+    s.trim().to_string()
+}
+
 /// Разбить поток слов на сегменты. max_gap=0.6с, max_dur=8.0с (как в _segment).
 pub fn segment_words(words: &[Word], max_gap: f64, max_dur: f64) -> Vec<Segment> {
     let mut segs: Vec<Vec<Word>> = Vec::new();
@@ -47,17 +59,10 @@ pub fn segment_words(words: &[Word], max_gap: f64, max_dur: f64) -> Vec<Segment>
     }
 
     segs.into_iter()
-        .filter(|ws| !ws.is_empty())
         .map(|ws| Segment {
             start: ws.first().unwrap().start,
             end: ws.last().unwrap().end,
-            text: ws
-                .iter()
-                .map(|x| x.word.as_str())
-                .collect::<Vec<_>>()
-                .join(" ")
-                .trim()
-                .to_string(),
+            text: join_words(&ws),
             words: ws,
         })
         .collect()
