@@ -156,6 +156,14 @@
   <p class="lead" data-i18n="sc_lead">Every clip below was processed end-to-end on a local GPU. Different videos, different modes, different languages — nothing left the machine.</p>
   <div class="showcase">
     <figure class="pair">
+      <span class="tag" data-i18n="sc_t7">🎬 Clean dub · EN → JA · no subtitles</span>
+      <div class="ba">
+        <div class="v"><span data-i18n="l_orig">Original</span><video src="showcase/lucid_EN-JA_dubclean__BEFORE.mp4" autoplay muted loop playsinline controls preload="metadata"></video></div>
+        <div class="v"><span data-i18n="l_dub">Dubbed</span><video src="showcase/lucid_EN-JA_dubclean__AFTER.mp4" autoplay muted loop playsinline controls preload="metadata"></video></div>
+      </div>
+      <figcaption data-i18n="sc_c7">Cloned into Japanese with no burned subtitles — the picture is left pristine. One of 30+ target languages, in the new composable “dub without subtitles” mode.</figcaption>
+    </figure>
+    <figure class="pair">
       <span class="tag" data-i18n="sc_t1">🎙️ Full dub · EN → RU</span>
       <div class="ba">
         <div class="v"><span data-i18n="l_orig">Original</span><video src="showcase/ducks_EN-RU_dub__BEFORE.mp4" autoplay muted loop playsinline controls preload="metadata"></video></div>
@@ -301,7 +309,7 @@ const T={
    sc_c1:"Голос клонирован на русский · переведённые сабы · локализованный титр в кадре",
    sc_c2:"Испанский закадр поверх приглушённого оригинала · 2 спикера, разные голоса",
    sc_c3:"Модель переписала весь сценарий под новую тему и переозвучила",
-   sc_t4:"🎙️ Полный дубляж · EN → ZH",sc_t5:"🎙️ Полный дубляж · EN → PT",sc_t6:"🗣️ Закадровый · EN → FR",sc_c4:"Клонирование на китайский · реальный человек в кадре; вшитый англ. титр заблюрен и локализован",sc_c5:"Клонирование на португальский · вшитые оригинальные сабы вычищены и переозвучены",sc_c6:"Французский закадр поверх приглушённого оригинала · один спикер",modes_h2:"Пять режимов, переключаются на лету",modes_lead:"Загрузи клип один раз и отправляй его в любой режим — прямо в редакторе.",
+   sc_t4:"🎙️ Полный дубляж · EN → ZH",sc_t5:"🎙️ Полный дубляж · EN → PT",sc_t6:"🗣️ Закадровый · EN → FR",sc_c4:"Клонирование на китайский · реальный человек в кадре; вшитый англ. титр заблюрен и локализован",sc_c5:"Клонирование на португальский · вшитые оригинальные сабы вычищены и переозвучены",sc_c6:"Французский закадр поверх приглушённого оригинала · один спикер",sc_t7:"🎬 Дубляж без субтитров · EN → JA",sc_c7:"Клонирование на японский без вшитых субтитров — картинка нетронута. Один из 30+ языков дубляжа, в новом композируемом режиме «дубляж без субтитров».",modes_h2:"Пять режимов, переключаются на лету",modes_lead:"Загрузи клип один раз и отправляй его в любой режим — прямо в редакторе.",
    m1n:"Дубляж",m1d:"Полная переозвучка на целевой язык с клонированным тембром оригинала — авто-кастинг по спикерам или свой голос.",
    m2n:"Закадровый",m2d:"Перевод поверх приглушённого оригинала — исходник слышно снизу, баланс настраивается.",
    m3n:"Субтитры",m3d:"Вшить субтитры на языке оригинала, оставить оригинальный звук — без дубляжа и перевода.",
@@ -344,7 +352,7 @@ const T={
    sc_c1:"音色克隆为俄语 · 翻译字幕 · 画面内本地化标题",
    sc_c2:"西语旁白盖在压低的原声上 · 两位说话人，不同声音",
    sc_c3:"模型将整段脚本改写为新主题后重新配音",
-   sc_t4:"🎙️ 完整配音 · EN → ZH",sc_t5:"🎙️ 完整配音 · EN → PT",sc_t6:"🗣️ 旁白配音 · EN → FR",sc_c4:"克隆为中文 · 真实出镜；烧录的英文标题被模糊并本地化",sc_c5:"克隆为葡萄牙语 · 烧录的原字幕被清除并重新配字幕",sc_c6:"法语旁白盖在压低的原声上 · 单个说话人",modes_h2:"五种模式，随时切换",modes_lead:"载入一次片段，即可在编辑器内送入任意模式。",
+   sc_t4:"🎙️ 完整配音 · EN → ZH",sc_t5:"🎙️ 完整配音 · EN → PT",sc_t6:"🗣️ 旁白配音 · EN → FR",sc_c4:"克隆为中文 · 真实出镜；烧录的英文标题被模糊并本地化",sc_c5:"克隆为葡萄牙语 · 烧录的原字幕被清除并重新配字幕",sc_c6:"法语旁白盖在压低的原声上 · 单个说话人",sc_t7:"🎬 无字幕配音 · EN → JA",sc_c7:"克隆为日语且不烧录字幕——画面保持原样。30+ 目标语言之一，采用新的可组合「无字幕配音」模式。",modes_h2:"五种模式，随时切换",modes_lead:"载入一次片段，即可在编辑器内送入任意模式。",
    m1n:"完整配音",m1d:"完整重新配音为目标语言，克隆原始音色 —— 按说话人自动分配或自选声音。",
    m2n:"旁白配音",m2d:"译文盖在压低的原声之上 —— 底下仍能听到原声，音量可调。",
    m3n:"字幕",m3d:"烧录原语言字幕并保留原声 —— 不配音、不翻译。",
@@ -387,7 +395,7 @@ const T={
    sc_c1:"Voz clonada al ruso · subtítulos traducidos · título localizado en el fotograma",
    sc_c2:"Voz superpuesta en español sobre el original atenuado · 2 hablantes, voces distintas",
    sc_c3:"El modelo reescribió todo el guion con un nuevo tema y lo volvió a doblar",
-   sc_t4:"🎙️ Doblaje completo · EN → ZH",sc_t5:"🎙️ Doblaje completo · EN → PT",sc_t6:"🗣️ Voz superpuesta · EN → FR",sc_c4:"Clonado al chino · persona real; el título incrustado en inglés se difumina y se localiza",sc_c5:"Clonado al portugués · los subtítulos incrustados se limpian y se re-subtitulan",sc_c6:"Voz superpuesta en francés sobre el original atenuado · un hablante",modes_h2:"Cinco modos, conmutables al vuelo",modes_lead:"Carga un clip una vez y envíalo a cualquier modo — dentro del editor.",
+   sc_t4:"🎙️ Doblaje completo · EN → ZH",sc_t5:"🎙️ Doblaje completo · EN → PT",sc_t6:"🗣️ Voz superpuesta · EN → FR",sc_c4:"Clonado al chino · persona real; el título incrustado en inglés se difumina y se localiza",sc_c5:"Clonado al portugués · los subtítulos incrustados se limpian y se re-subtitulan",sc_c6:"Voz superpuesta en francés sobre el original atenuado · un hablante",sc_t7:"🎬 Doblaje sin subtítulos · EN → JA",sc_c7:"Clonado al japonés sin subtítulos incrustados — la imagen queda intacta. Uno de más de 30 idiomas, en el nuevo modo componible «doblaje sin subtítulos».",modes_h2:"Cinco modos, conmutables al vuelo",modes_lead:"Carga un clip una vez y envíalo a cualquier modo — dentro del editor.",
    m1n:"Doblaje",m1d:"Redoblaje completo al idioma destino con el timbre original clonado — reparto automático por hablante o elige una voz.",
    m2n:"Voz superpuesta",m2d:"Voz traducida sobre el original atenuado — la fuente aún se oye debajo, con balance ajustable.",
    m3n:"Subtítulos",m3d:"Quema subtítulos en el idioma original y conserva el audio original — sin doblaje ni traducción.",
@@ -430,7 +438,7 @@ const T={
    sc_c1:"Voz clonada para russo · legendas traduzidas · título localizado no quadro",
    sc_c2:"Locução em espanhol sobre o original atenuado · 2 locutores, vozes distintas",
    sc_c3:"O modelo reescreveu todo o roteiro com um novo tema e redublou",
-   sc_t4:"🎙️ Dublagem completa · EN → ZH",sc_t5:"🎙️ Dublagem completa · EN → PT",sc_t6:"🗣️ Locução · EN → FR",sc_c4:"Clonado para chinês · pessoa real; o título embutido em inglês é desfocado e localizado",sc_c5:"Clonado para português · as legendas embutidas são limpas e re-legendadas",sc_c6:"Locução em francês sobre o original atenuado · um locutor",modes_h2:"Cinco modos, alternáveis na hora",modes_lead:"Carregue um clipe uma vez e envie-o para qualquer modo — dentro do editor.",
+   sc_t4:"🎙️ Dublagem completa · EN → ZH",sc_t5:"🎙️ Dublagem completa · EN → PT",sc_t6:"🗣️ Locução · EN → FR",sc_c4:"Clonado para chinês · pessoa real; o título embutido em inglês é desfocado e localizado",sc_c5:"Clonado para português · as legendas embutidas são limpas e re-legendadas",sc_c6:"Locução em francês sobre o original atenuado · um locutor",sc_t7:"🎬 Dublagem sem legendas · EN → JA",sc_c7:"Clonado para japonês sem legendas embutidas — a imagem fica intacta. Um de mais de 30 idiomas, no novo modo combinável «dublagem sem legendas».",modes_h2:"Cinco modos, alternáveis na hora",modes_lead:"Carregue um clipe uma vez e envie-o para qualquer modo — dentro do editor.",
    m1n:"Dublagem",m1d:"Redublagem completa para o idioma-alvo com o timbre original clonado — elenco automático por locutor ou escolha uma voz.",
    m2n:"Locução",m2d:"Voz traduzida sobre o original atenuado — a fonte ainda é ouvida por baixo, com balanço ajustável.",
    m3n:"Legendas",m3d:"Grave legendas no idioma original e mantenha o áudio original — sem dublagem, sem tradução.",
@@ -473,7 +481,7 @@ const T={
    sc_c1:"Voix clonée en russe · sous-titres traduits · titre localisé à l'écran",
    sc_c2:"Voix off espagnole par-dessus l'original atténué · 2 locuteurs, voix distinctes",
    sc_c3:"Le modèle a réécrit tout le script sur un nouveau thème puis l'a redoublé",
-   sc_t4:"🎙️ Doublage complet · EN → ZH",sc_t5:"🎙️ Doublage complet · EN → PT",sc_t6:"🗣️ Voix off · EN → FR",sc_c4:"Cloné en chinois · vraie personne ; le titre incrusté en anglais est flouté et localisé",sc_c5:"Cloné en portugais · les sous-titres incrustés sont nettoyés et re-sous-titrés",sc_c6:"Voix off française par-dessus l'original atténué · un seul locuteur",modes_h2:"Cinq modes, commutables à la volée",modes_lead:"Chargez un clip une fois et envoyez-le dans n'importe quel mode — directement dans l'éditeur.",
+   sc_t4:"🎙️ Doublage complet · EN → ZH",sc_t5:"🎙️ Doublage complet · EN → PT",sc_t6:"🗣️ Voix off · EN → FR",sc_c4:"Cloné en chinois · vraie personne ; le titre incrusté en anglais est flouté et localisé",sc_c5:"Cloné en portugais · les sous-titres incrustés sont nettoyés et re-sous-titrés",sc_c6:"Voix off française par-dessus l'original atténué · un seul locuteur",sc_t7:"🎬 Doublage sans sous-titres · EN → JA",sc_c7:"Cloné en japonais sans sous-titres incrustés — l'image reste intacte. Une des 30+ langues cibles, dans le nouveau mode composable « doublage sans sous-titres ».",modes_h2:"Cinq modes, commutables à la volée",modes_lead:"Chargez un clip une fois et envoyez-le dans n'importe quel mode — directement dans l'éditeur.",
    m1n:"Doublage",m1d:"Redoublage complet dans la langue cible avec le timbre original cloné — distribution auto par locuteur ou choisissez une voix.",
    m2n:"Voix off",m2d:"Voix traduite par-dessus l'original atténué — la source reste audible en dessous, équilibre réglable.",
    m3n:"Sous-titres",m3d:"Incrustez des sous-titres en langue originale et gardez l'audio original — sans doublage ni traduction.",
