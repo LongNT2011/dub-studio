@@ -20,8 +20,11 @@ fn lang_name(code: &str, default: &str) -> String {
     if c.is_empty() || c == "auto" {
         return default.to_string();
     }
-    let m: HashMap<&str, &str> = crate::WHISPER_LANGS.iter().copied().collect();
-    m.get(c.as_str()).map(|s| s.to_string()).unwrap_or_else(|| code.to_string())
+    crate::WHISPER_LANGS
+        .iter()
+        .find(|(k, _)| *k == c.as_str())
+        .map(|(_, v)| v.to_string())
+        .unwrap_or_else(|| code.to_string())
 }
 
 /// _name(code, default="the source language").

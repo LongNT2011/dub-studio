@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use regex::Regex;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use dub_llm::{strip_think, ChatClient, Message, Part, Sampling};
 
@@ -227,7 +227,3 @@ fn encode_wav_b64(samples: &[f32], sr: u32) -> Result<String, TranslateError> {
     }
     Ok(base64::engine::general_purpose::STANDARD.encode(&buf))
 }
-
-/// Убрать неиспользуемый импорт-предупреждение (Map используется через json! в некоторых ветках).
-#[allow(unused)]
-fn _map_marker(_: Map<String, Value>) {}
