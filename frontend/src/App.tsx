@@ -19,6 +19,15 @@ function fmtT(s: number) {
   return `${m}:${String(sec).padStart(2, "0")}.${d}`;
 }
 
+// Имя файла из пути (Windows/POSIX-разделители); fallback — сам путь.
+const baseName = (path: string) => path.split(/[\\/]/).pop() || path;
+
+// Направления тени титра/субтитра (значение, стрелка) — единый список для двух селектов.
+const SHADOW_DIRS: [string, string][] = [
+  ["", "—"], ["270", "↑"], ["315", "↗"], ["0", "→"], ["45", "↘"],
+  ["90", "↓"], ["135", "↙"], ["180", "←"], ["225", "↖"],
+];
+
 function LanguageSwitcher() {
   const { i18n } = useTranslation();
   return (
@@ -1008,39 +1017,21 @@ function Editor() {
     } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
-  async function doHideSeg(segId: string) {                          // toggle a line off/on — drops its subtitle AND its dub audio
+  // hide/del/keep одной строки: патч + ре-озвучка (без сборки видео). Тела были идентичны с точностью до op.
+  async function segOp(segId: string, op: string) {
     if (regenId) return;
     pushHistory(p); setRegenId(segId); setRendered(false);
     try {
-      await api.patch(pid, { op: "hide_segment", id: segId });
-      const { job_id } = await api.dubAudio(pid);   // только озвучка; кадр (субтитр) перерисует preview из актуального project
+      await api.patch(pid, { op, id: segId });
+      const { job_id } = await api.dubAudio(pid);   // только озвучка; кадр (субтитр) перерисует preview из project
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); bump(); setDubRev(Date.now());
     } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
-  async function doDelSeg(segId: string) {                           // delete a line entirely — subtitle + dub audio gone (undoable)
-    if (regenId) return;
-    pushHistory(p); setRegenId(segId); setRendered(false);
-    try {
-      await api.patch(pid, { op: "del_segment", id: segId });
-      const { job_id } = await api.dubAudio(pid);   // только озвучка остальных из кэша; видео не пересобираем
-      await api.watchJob(job_id, () => {});
-      setProject(await api.getProject(pid)); bump(); setDubRev(Date.now());
-    } catch (e) { await surfaceErr(e); }
-    finally { setRegenId(null); }
-  }
-  async function doKeepSeg(segId: string) {                          // toggle 'keep original audio' — source plays, no dub, no sub
-    if (regenId) return;
-    pushHistory(p); setRegenId(segId); setRendered(false);
-    try {
-      await api.patch(pid, { op: "keep_segment", id: segId });
-      const { job_id } = await api.dubAudio(pid);   // только озвучка
-      await api.watchJob(job_id, () => {});
-      setProject(await api.getProject(pid)); bump(); setDubRev(Date.now());
-    } catch (e) { await surfaceErr(e); }
-    finally { setRegenId(null); }
-  }
+  async function doHideSeg(segId: string) { return segOp(segId, "hide_segment"); }   // toggle a line off/on
+  async function doDelSeg(segId: string) { return segOp(segId, "del_segment"); }     // delete a line entirely (undoable)
+  async function doKeepSeg(segId: string) { return segOp(segId, "keep_segment"); }   // toggle 'keep original audio'
   async function bulkDelIdx(op: "del_titles" | "del_blurs", idxs: Set<number>, clear: () => void) {
     if (!idxs.size) return;                                           // bulk-delete several titles / mask boxes by index
     pushHistory(p); setRendered(false);
@@ -1061,28 +1052,20 @@ function Editor() {
     } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
-  async function doGain(gainDb: number) {                            // монтажный гейн всей дорожки: патч + лёгкий ре-рендер (ре-TTS не нужен, сегменты из кэша)
+  // гейн дорожки/оригинала: патч + пересведение озвучки (ре-TTS не нужен, сегменты из кэша). Тела идентичны до op/метки.
+  async function applyGain(op: string, gainDb: number, label: string) {
     if (regenId) return;
-    setRegenId("__all__"); pushActivity(t("voice.gain"));
+    setRegenId("__all__"); pushActivity(label);
     try {
-      await api.patch(pid, { op: "gain", gain_db: gainDb });
-      const { job_id } = await api.dubAudio(pid);   // гейн: пересведение озвучки, ре-TTS не нужен
+      await api.patch(pid, { op, gain_db: gainDb });
+      const { job_id } = await api.dubAudio(pid);   // пересведение озвучки, ре-TTS не нужен
       await api.watchJob(job_id, () => {});
-      setProject(await api.getProject(pid)); setRendered(false); setDubRev(Date.now());   // покадровое превью; /dub обновлён -> плей играет новый дуб
+      setProject(await api.getProject(pid)); setRendered(false); setDubRev(Date.now());   // покадровое превью; /dub обновлён
     } catch (e) { await surfaceErr(e); }
     finally { setRegenId(null); }
   }
-  async function doVoiceoverGain(gainDb: number) {                   // громкость оригинала под переводом (voiceover): патч + пересведение (ре-TTS не нужен)
-    if (regenId) return;
-    setRegenId("__all__"); pushActivity(t("voice.origGain"));
-    try {
-      await api.patch(pid, { op: "voiceover_gain", gain_db: gainDb });
-      const { job_id } = await api.dubAudio(pid);   // баланс закадра: пересведение, ре-TTS не нужен
-      await api.watchJob(job_id, () => {});
-      setProject(await api.getProject(pid)); setRendered(false); setDubRev(Date.now());   // покадровое превью; /dub обновлён -> плей играет закадр с новым балансом
-    } catch (e) { await surfaceErr(e); }
-    finally { setRegenId(null); }
-  }
+  async function doGain(gainDb: number) { return applyGain("gain", gainDb, t("voice.gain")); }                 // монтажный гейн всей дорожки
+  async function doVoiceoverGain(gainDb: number) { return applyGain("voiceover_gain", gainDb, t("voice.origGain")); }  // громкость оригинала под переводом
   async function doRegenAll() {                                      // re-synthesize the WHOLE dub (after switching the pack voice/speaker, or to re-roll)
     if (regenId) return;
     setRegenId("__all__"); pushActivity(t("voice.regenAll"));       // sentinel: disables per-seg regen buttons, no per-seg spinner
@@ -1124,7 +1107,7 @@ function Editor() {
   }, [pid]);   // eslint-disable-line react-hooks/exhaustive-deps
   async function doExport() {
     const exId = `export-${pid}`;   // одна запись на проект (повторный экспорт заменяет её, а не плодит дубли)
-    const name = (p.meta.video || pid).split(/[\\/]/).pop() || pid;
+    const name = baseName(p.meta.video || pid);
     addExport({ id: exId, name, status: "rendering", msg: t("common.rendering"), pid });   // queue entry -> Files panel (no screen block)
     setRendering(true); pushActivity(`${t("export.proceed")}: ${name}`);
     try {
@@ -1376,7 +1359,7 @@ function Editor() {
                   <select value={ti.shadow_dir ?? ""} title={t("style.shadow")}
                     onChange={(e) => branch("title", { idx: i, shadow_dir: e.target.value === "" ? null : parseInt(e.target.value) })}
                     className="bg-[var(--color-surface-2)] border border-dashed border-[var(--color-border)] rounded px-1 py-0.5 text-[11px] focus:border-[var(--color-accent)] focus:outline-none">
-                    <option value="">—</option><option value="270">↑</option><option value="315">↗</option><option value="0">→</option><option value="45">↘</option><option value="90">↓</option><option value="135">↙</option><option value="180">←</option><option value="225">↖</option>
+                    {SHADOW_DIRS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                   </select>
                   <input key={`sz${i}-${ti.size_px ?? "a"}`} type="number" min={12} max={300} defaultValue={ti.size_px ?? undefined} placeholder="px" title={t("style.size")}
                     onBlur={(e) => branch("title", { idx: i, size_px: e.target.value ? parseInt(e.target.value) : null })}
@@ -1521,7 +1504,7 @@ function Editor() {
                 <select value={ss.shadow_dir ?? ""} title={t("style.shadow")}
                   onChange={(e) => branch("caption", { shadow_dir: e.target.value === "" ? null : parseInt(e.target.value) })}
                   className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 text-[11px] focus:border-[var(--color-accent)] focus:outline-none">
-                  <option value="">—</option><option value="270">↑</option><option value="315">↗</option><option value="0">→</option><option value="45">↘</option><option value="90">↓</option><option value="135">↙</option><option value="180">←</option><option value="225">↖</option>
+                  {SHADOW_DIRS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </div>
             </Row>
@@ -2265,7 +2248,7 @@ function TranscriptView() {
     <main className="flex-1 min-h-0 overflow-hidden grid grid-cols-[1.4fr_1fr] gap-3 p-3">
       <div className="min-h-0 flex flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="px-3 py-2 flex items-center justify-between border-b border-[var(--color-border)]">
-          <span className="text-[13px] font-medium flex items-center gap-2 min-w-0"><FileText size={15} className="text-[var(--color-accent)] shrink-0" /><span className="truncate">{p.meta.video?.split(/[\\/]/).pop() || t("transcribe.title")}</span></span>
+          <span className="text-[13px] font-medium flex items-center gap-2 min-w-0"><FileText size={15} className="text-[var(--color-accent)] shrink-0" /><span className="truncate">{p.meta.video ? baseName(p.meta.video) : t("transcribe.title")}</span></span>
           <span className="text-[11px] text-[var(--color-muted)] shrink-0">{speakers.length} {t("transcribe.speakersN")}</span>
         </div>
         <div className="px-3 pt-2 space-y-2">

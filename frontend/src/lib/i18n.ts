@@ -79,8 +79,12 @@ const detect = (): Lang => {
   return isLang(nav) ? nav : "en";
 };
 
+// Обёртку namespace { t: ... } применяем один раз ко всем бандлам (а не 6 раз вручную).
+const BUNDLES = { en, ru, zh, es, pt, fr };
+const resources = Object.fromEntries(Object.entries(BUNDLES).map(([k, v]) => [k, { t: v }]));
+
 i18n.use(initReactI18next).init({
-  resources: { en: { t: en }, ru: { t: ru }, zh: { t: zh }, es: { t: es }, pt: { t: pt }, fr: { t: fr } },
+  resources,
   lng: detect(),
   fallbackLng: "en",
   defaultNS: "t",

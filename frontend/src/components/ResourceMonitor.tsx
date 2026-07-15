@@ -13,8 +13,15 @@ function heat(pct: number): string {
   return "var(--color-accent, #22d3ee)";
 }
 
+/// Светящаяся точка-индикатор (цвет по нагрузке). Общий элемент чипа и шапки float-панели.
+function Dot({ pct }: { pct: number }) {
+  const c = heat(pct);
+  return <span className="w-1.5 h-1.5 rounded-full" style={{ background: c, boxShadow: `0 0 8px ${c}` }} />;
+}
+
 function Bar({ label, pct, right }: { label: string; pct: number; right: string }) {
   const p = Math.max(0, Math.min(100, pct));
+  const c = heat(p);
   return (
     <div>
       <div className="flex items-baseline justify-between text-[11px] mb-1">
@@ -23,7 +30,7 @@ function Bar({ label, pct, right }: { label: string; pct: number; right: string 
       </div>
       <div className="h-1.5 rounded-full bg-white/8 overflow-hidden">
         <div className="h-full rounded-full transition-[width] duration-500 ease-out"
-          style={{ width: `${p}%`, background: heat(p), boxShadow: `0 0 8px ${heat(p)}` }} />
+          style={{ width: `${p}%`, background: c, boxShadow: `0 0 8px ${c}` }} />
       </div>
     </div>
   );
@@ -63,7 +70,7 @@ export default function ResourceMonitor() {
     return createPortal(
       <button onClick={fl.pop} title="Оторвать монитор ресурсов"
         className="inline-flex items-center gap-2 px-2.5 h-8 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)] transition-colors">
-        <span className="w-1.5 h-1.5 rounded-full" style={{ background: heat(lead), boxShadow: `0 0 8px ${heat(lead)}` }} />
+        <Dot pct={lead} />
         {hasGpu && <span className="mono text-[11px] tabular-nums">{Math.round(hw.gpuUtilization)}%</span>}
         <span className="mono text-[10px] text-[var(--color-muted)] tabular-nums hidden md:inline">{hasGpu ? `${fmtGb(hw.usedVram)}/${fmtGb(hw.totalVram)}` : `RAM ${Math.round(ramPct)}%`}</span>
         <PictureInPicture2 size={13} className="text-[var(--color-muted)]" />
@@ -79,7 +86,7 @@ export default function ResourceMonitor() {
         <div onPointerDown={fl.onDragStart}
           className={`flex items-center gap-2 px-3 py-2 ${fl.dragging ? "cursor-grabbing" : "cursor-grab"} border-b border-white/5`}>
           <Move size={12} className="text-[var(--color-muted)]" />
-          <span className="w-1.5 h-1.5 rounded-full" style={{ background: heat(lead), boxShadow: `0 0 8px ${heat(lead)}` }} />
+          <Dot pct={lead} />
           <span className="text-[12px] font-semibold truncate flex-1">{hasGpu ? hw.gpuName.replace(/NVIDIA GeForce /i, "") : "Ресурсы"}</span>
           {hasGpu && <span className="mono text-[11px] text-[var(--color-muted)]">{Math.round(hw.temperature)}°</span>}
           <button onClick={fl.dock} title="Вернуть в шапку" className="text-[var(--color-muted)] hover:text-[var(--color-text)]"><Minimize2 size={13} /></button>

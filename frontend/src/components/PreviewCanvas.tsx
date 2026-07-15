@@ -73,6 +73,18 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, lane, onC
   const titles = project.captions.titles || [];
   const subY = project.captions.sub_y ?? Math.round(vh * 0.82);
 
+  // Центральная направляющая: подсветить, если центр объекта в пределах 8px от центра кадра.
+  const centerGuide = (nx: number, wPx: number) =>
+    setGuide(Math.abs(nx + wPx / 2 - disp.w / 2) < 8 ? disp.w / 2 : null);
+  // Нормализованный прямоугольник в видео-пикселях после transform (сбрасывает scale); null при нулевом масштабе.
+  const readRect = (n: Konva.Node): { x: number; y: number; w: number; h: number } | null => {
+    if (!sx || !sy) { n.scaleX(1); n.scaleY(1); return null; }
+    const w = Math.round((n.width() * n.scaleX()) / sx);
+    const h = Math.round((n.height() * n.scaleY()) / sy);
+    n.scaleX(1); n.scaleY(1);
+    return { x: Math.round(n.x() / sx), y: Math.round(n.y() / sy), w, h };
+  };
+
   return (
     <div ref={wrap} className="relative w-full h-full min-h-0 overflow-hidden grid place-items-center bg-black/40 rounded-xl">
       <div className="relative" style={{ width: disp.w, height: disp.h }}>
@@ -92,9 +104,8 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, lane, onC
               )}
               {/* cover zones — ONLY on the mask lane. Selected zone outlined (cyan); rest invisible but clickable
                   (select via canvas-click or the left list). Active on THIS frame; draggable unless hidden. */}
-              {lane === "blur" && blurs.map((b, i) => ({ b, i }))
-                .filter(({ b }) => scrub >= b.t0 - 0.6 && scrub <= b.t1 + 0.4)
-                .map(({ b, i }) => {
+              {lane === "blur" && blurs.map((b, i) => {
+                  if (!(scrub >= b.t0 - 0.6 && scrub <= b.t1 + 0.4)) return null; // не на этом кадре
                   const on = sel === i, hid = !!b.hidden;
                   return (
                     <Rect key={`b${i}`} ref={(n) => { if (n) boxRefs.current[i] = n; else delete boxRefs.current[i]; }}
@@ -103,24 +114,19 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, lane, onC
                           stroke={on ? "#5be0c8" : undefined} strokeWidth={on ? 2.5 : 0}
                           dash={on && hid ? [6, 4] : undefined} draggable={!hid}
                           onClick={() => setSel(i)} onTap={() => setSel(i)}
-                          onDragMove={(e) => setGuide(Math.abs(e.target.x() + (b.w * sx) / 2 - disp.w / 2) < 8 ? disp.w / 2 : null)}
+                          onDragMove={(e) => centerGuide(e.target.x(), b.w * sx)}
                           onDragEnd={(e) => { setGuide(null); if (!sx || !sy) return; patch({ op: "blur", idx: i, x: Math.round(e.target.x() / sx), y: Math.round(e.target.y() / sy) }); }}
                           onTransformEnd={(e) => {
-                            const n = e.target;
-                            if (!sx || !sy) { n.scaleX(1); n.scaleY(1); return; }   // zero-scale -> skip, still reset
-                            const w = Math.round((n.width() * n.scaleX()) / sx);
-                            const h = Math.round((n.height() * n.scaleY()) / sy);
-                            n.scaleX(1); n.scaleY(1);
-                            patch({ op: "blur", idx: i, x: Math.round(n.x() / sx), y: Math.round(n.y() / sy), w, h });
+                            const r = readRect(e.target);
+                            if (r) patch({ op: "blur", idx: i, x: r.x, y: r.y, w: r.w, h: r.h });
                           }} />
                   );
                 })}
               {/* titles — ONLY on the titles lane. bbox=[x,y,w,h] в видео-пикселях (совпадает с ass::emit_title).
                   Все титры на этом кадре обведены пунктиром (видно, что кликабельны); выбранный — сплошной.
                   Drag/resize -> PATCH op:"title" bbox. */}
-              {lane === "titles" && titles.map((ti, i) => ({ ti, i }))
-                .filter(({ ti }) => (ti.bbox?.length ?? 0) >= 4 && scrub >= ti.start - 0.1 && scrub <= ti.end + 0.1)
-                .map(({ ti, i }) => {
+              {lane === "titles" && titles.map((ti, i) => {
+                  if ((ti.bbox?.length ?? 0) < 4 || !(scrub >= ti.start - 0.1 && scrub <= ti.end + 0.1)) return null;
                   const [bx, by, bw, bh] = ti.bbox as number[];
                   const on = selT === i;
                   return (
@@ -130,15 +136,11 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, lane, onC
                           stroke={on ? "#c6f24e" : "rgba(198,242,78,0.55)"} strokeWidth={on ? 2.5 : 1}
                           dash={on ? undefined : [5, 4]} draggable
                           onClick={() => setSelT(i)} onTap={() => setSelT(i)}
-                          onDragMove={(e) => setGuide(Math.abs(e.target.x() + (bw * sx) / 2 - disp.w / 2) < 8 ? disp.w / 2 : null)}
+                          onDragMove={(e) => centerGuide(e.target.x(), bw * sx)}
                           onDragEnd={(e) => { setGuide(null); if (!sx || !sy) return; patch({ op: "title", idx: i, bbox: [Math.round(e.target.x() / sx), Math.round(e.target.y() / sy), bw, bh] }); }}
                           onTransformEnd={(e) => {
-                            const n = e.target;
-                            if (!sx || !sy) { n.scaleX(1); n.scaleY(1); return; }
-                            const w = Math.round((n.width() * n.scaleX()) / sx);
-                            const h = Math.round((n.height() * n.scaleY()) / sy);
-                            n.scaleX(1); n.scaleY(1);
-                            patch({ op: "title", idx: i, bbox: [Math.round(n.x() / sx), Math.round(n.y() / sy), w, h] });
+                            const r = readRect(e.target);
+                            if (r) patch({ op: "title", idx: i, bbox: [r.x, r.y, r.w, r.h] });
                           }} />
                   );
                 })}
