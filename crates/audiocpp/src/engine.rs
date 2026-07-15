@@ -23,6 +23,13 @@ unsafe fn cstr_to_string(ptr: *const c_char) -> String {
     }
 }
 
+/// Сериализовать options -> NUL-терминированную C-строку для передачи в движок. Общий шаг всех
+/// generate_*: JSON -> CString (пустой JSON при ошибке сериализации, как unwrap_or_default).
+fn opts_cstring(options: &serde_json::Value) -> Result<CString, EngineError> {
+    CString::new(serde_json::to_string(options).unwrap_or_default())
+        .map_err(|e| EngineError::InvalidParam(e.to_string()))
+}
+
 pub type ProgressCallback = Arc<dyn Fn(i32, i32, &str) + Send + Sync + 'static>;
 pub type AudioChunkCallback = Arc<dyn Fn(i32, i32, i64, &[f32], bool) + Send + Sync + 'static>;
 
@@ -595,8 +602,7 @@ impl Engine {
         progress: ProgressCallback,
     ) -> Result<AudioResult, EngineError> {
         let text_c = CString::new(text).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
-        let opts_c = CString::new(serde_json::to_string(options).unwrap_or_default())
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let opts_c = opts_cstring(options)?;
         let cb_ptr = Self::make_progress_box(progress);
         let mut raw = AudioResultRaw::empty();
         let status = unsafe {
@@ -626,8 +632,7 @@ impl Engine {
             ));
         };
         let text_c = CString::new(text).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
-        let opts_c = CString::new(serde_json::to_string(options).unwrap_or_default())
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let opts_c = opts_cstring(options)?;
         let cb_ptr = Self::make_stream_box(progress, audio);
         let mut raw = AudioResultRaw::empty();
         let status = unsafe {
@@ -660,8 +665,7 @@ impl Engine {
             CString::new(ref_audio_path).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
         let ref_text_c = CString::new(ref_text.unwrap_or(""))
             .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
-        let opts_c = CString::new(serde_json::to_string(options).unwrap_or_default())
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let opts_c = opts_cstring(options)?;
         let cb_ptr = Self::make_progress_box(progress);
         let mut raw = AudioResultRaw::empty();
         let status = unsafe {
@@ -699,8 +703,7 @@ impl Engine {
             CString::new(ref_audio_path).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
         let ref_text_c = CString::new(ref_text.unwrap_or(""))
             .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
-        let opts_c = CString::new(serde_json::to_string(options).unwrap_or_default())
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let opts_c = opts_cstring(options)?;
         let cb_ptr = Self::make_stream_box(progress, audio);
         let mut raw = AudioResultRaw::empty();
         let status = unsafe {
@@ -733,8 +736,7 @@ impl Engine {
             CString::new(audio_path).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
         let text_c = CString::new(continuation_text.unwrap_or(""))
             .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
-        let opts_c = CString::new(serde_json::to_string(options).unwrap_or_default())
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let opts_c = opts_cstring(options)?;
         let cb_ptr = Self::make_progress_box(progress);
         let mut raw = AudioResultRaw::empty();
         let status = unsafe {
@@ -769,8 +771,7 @@ impl Engine {
             CString::new(audio_path).map_err(|e| EngineError::InvalidParam(e.to_string()))?;
         let text_c = CString::new(continuation_text.unwrap_or(""))
             .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
-        let opts_c = CString::new(serde_json::to_string(options).unwrap_or_default())
-            .map_err(|e| EngineError::InvalidParam(e.to_string()))?;
+        let opts_c = opts_cstring(options)?;
         let cb_ptr = Self::make_stream_box(progress, audio);
         let mut raw = AudioResultRaw::empty();
         let status = unsafe {
