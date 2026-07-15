@@ -104,8 +104,8 @@ fn subtract(mix: &wav::Audio, voc: &wav::Audio) -> wav::Audio {
     let ch = mix.channels.max(1);
     let n = mix.data.len().min(voc.data.len());
     let mut out = mix.data.clone();
-    for i in 0..n {
-        out[i] = mix.data[i] - voc.data[i];
+    for (o, v) in out[..n].iter_mut().zip(&voc.data[..n]) {
+        *o -= *v;
     }
     wav::Audio {
         sample_rate: mix.sample_rate,
@@ -142,15 +142,8 @@ fn run_cli(cli: &Path, model: &Path, input: &Path, output: &Path) -> Result<(), 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         let stdout = String::from_utf8_lossy(&out.stdout);
-        let tail: Vec<&str> = stderr
-            .lines()
-            .chain(stdout.lines())
-            .rev()
-            .take(8)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
+        let mut tail: Vec<&str> = stderr.lines().chain(stdout.lines()).rev().take(8).collect();
+        tail.reverse();
         return Err(SepError::EngineFailed(format!(
             "код {:?}: {}",
             out.status.code(),
