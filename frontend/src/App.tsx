@@ -531,7 +531,9 @@ function DropZone() {
       const eMode = audio;                                          // nodub | dub | voiceover | transcribe
       const eSubs = audio === "transcribe" ? "transcribe" : subs;   // none | transcribe(оригинал) | translate
       const eRewrite = funnyOn && (audio === "dub" || audio === "voiceover") ? funny.trim() : "";
-      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, burn);
+      // Транскрипт всегда вжигает субтитры (иначе транскрипт-режим дал бы видео без текста): чекбокс
+      // «Вжигать» для transcribe скрыт, поэтому форсируем burn=true, не полагаясь на его прежнее значение.
+      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, audio === "transcribe" ? true : burn);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       s.setProject(await api.getProject(project_id));
       // Озвучку готовим ЗДЕСЬ, на экране загрузки (не собирая видео — кадры даёт per-frame preview),
@@ -2086,7 +2088,9 @@ function BatchView() {
         upd({ status: "analyzing", pct: 0 });
         const { project_id } = await api.createProject(filesRef.current[i]);
         upd({ pid: project_id });
-        const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, burn);
+        // Транскрипт всегда вжигает субтитры (иначе транскрипт-режим дал бы видео без текста): чекбокс
+      // «Вжигать» для transcribe скрыт, поэтому форсируем burn=true, не полагаясь на его прежнее значение.
+      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, audio === "transcribe" ? true : burn);
         await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0 }); });
         if (doRender) {
           upd({ status: "rendering", pct: 0 });

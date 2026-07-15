@@ -25,26 +25,33 @@ pub fn preview_frame(
     let vh = proj.meta.height;
     let total = proj.meta.duration;
     let ass_p = work_dir.join("_preview.ass");
-    let sub_covers = build_ass(proj, &ass_p, vw, vh, total)?;
-
-    // blur-боксы = project.captions.blur_boxes (hidden исключаются) + подложки под нашими субтитрами
-    // (WYSIWYG: превью показывает ту же блюр-подложку, что и финальный рендер).
-    let mut blur_boxes: Vec<dub_captions::BlurBox> = proj
-        .captions
-        .blur_boxes
-        .iter()
-        .filter(|b| !b.hidden)
-        .map(|b| dub_captions::BlurBox {
-            x: b.x,
-            y: b.y,
-            w: b.w,
-            h: b.h,
-            t0: b.t0,
-            t1: b.t1,
-            fill: b.fill.clone(),
-        })
-        .collect();
-    blur_boxes.extend(sub_covers.iter().map(crate::render::cover_to_blur));
+    // WYSIWYG-паритет с render::run: subs.burn=false -> финальный рендер НЕ накладывает ничего (чистое
+    // видео), поэтому и превью должно быть чистым. Иначе редактор показывал бы субтитры/блюр, которых в
+    // экспорте не будет (баг-репорт code-review). При burn=false пишем пустой ASS + без блюра.
+    let mut blur_boxes: Vec<dub_captions::BlurBox> = Vec::new();
+    if proj.subs.burn {
+        let sub_covers = build_ass(proj, &ass_p, vw, vh, total)?;
+        // blur-боксы = project.captions.blur_boxes (hidden исключаются) + подложки под нашими субтитрами.
+        blur_boxes = proj
+            .captions
+            .blur_boxes
+            .iter()
+            .filter(|b| !b.hidden)
+            .map(|b| dub_captions::BlurBox {
+                x: b.x,
+                y: b.y,
+                w: b.w,
+                h: b.h,
+                t0: b.t0,
+                t1: b.t1,
+                fill: b.fill.clone(),
+            })
+            .collect();
+        blur_boxes.extend(sub_covers.iter().map(crate::render::cover_to_blur));
+    } else {
+        std::fs::write(&ass_p, "[Script Info]\nScriptType: v4.00+\n\n[V4+ Styles]\n\n[Events]\n")
+            .map_err(|e| format!("пустой ASS: {e}"))?;
+    }
 
     let png = work_dir.join("_preview.png");
     dub_captions::burn_frame(
