@@ -22,8 +22,9 @@ const FFMPEG: &str = "ffmpeg";
 
 /// _hex — вытащить #RRGGBB (upper). None если нет.
 pub fn hex(s: &str) -> Option<String> {
-    let re = Regex::new(r"#([0-9a-fA-F]{6})").unwrap();
-    re.captures(s).map(|c| format!("#{}", c[1].to_uppercase()))
+    static RE: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"#([0-9a-fA-F]{6})").unwrap());
+    RE.captures(s).map(|c| format!("#{}", c[1].to_uppercase()))
 }
 
 fn hex_opt(v: Option<&Value>) -> Option<String> {
@@ -32,17 +33,32 @@ fn hex_opt(v: Option<&Value>) -> Option<String> {
 
 /// _COUNTER_RE — слайд/страничные счётчики ("2/7", "3 of 7", "стр. 4") — это навигация, НЕ тайтл.
 pub fn is_counter(txt: &str) -> bool {
-    let re = Regex::new(
-        r"(?i)^\s*(?:(?:page\s*|стр\.?\s*)?\d{1,3}\s*(?:/|of|из)\s*\d{1,3}|(?:page|стр\.?|слайд)\s*\d{1,3})\s*$",
-    )
-    .unwrap();
-    re.is_match(txt)
+    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(
+            r"(?i)^\s*(?:(?:page\s*|стр\.?\s*)?\d{1,3}\s*(?:/|of|из)\s*\d{1,3}|(?:page|стр\.?|слайд)\s*\d{1,3})\s*$",
+        )
+        .unwrap()
+    });
+    RE.is_match(txt)
+}
+
+/// Добавить style_block(src, txt) в аккумулятор, если такого текста (без учёта регистра) там ещё нет.
+/// Общий дедуп для titles и вторичных captions.
+fn push_unique(acc: &mut Vec<Value>, src: &Value, txt: &str) {
+    let lower = txt.to_lowercase();
+    let dup = acc
+        .iter()
+        .any(|e| e.get("text").and_then(|x| x.as_str()).map(str::to_lowercase) == Some(lower.clone()));
+    if !dup {
+        acc.push(style_block(src, txt));
+    }
 }
 
 /// _vis_json — вытащить первый {...} JSON-объект из ответа модели; {} при ошибке.
 fn vis_json(s: &str) -> Value {
-    let re = Regex::new(r"(?s)\{.*\}").unwrap();
-    if let Some(m) = re.find(s) {
+    static RE: std::sync::LazyLock<Regex> =
+        std::sync::LazyLock::new(|| Regex::new(r"(?s)\{.*\}").unwrap());
+    if let Some(m) = RE.find(s) {
         serde_json::from_str(m.as_str()).unwrap_or(Value::Object(Map::new()))
     } else {
         Value::Object(Map::new())
@@ -347,13 +363,7 @@ If there are no subtitle words at all, return {{}}."
                 if ti.get("kind").and_then(|x| x.as_str()) == Some("brand") {
                     brands.push(serde_json::json!({"text": txt, "y_frac": num_f64(ti.get("y_frac"))}));
                 } else {
-                    let lower = txt.to_lowercase();
-                    let dup = titles.iter().any(|t| {
-                        t.get("text").and_then(|x| x.as_str()).map(|s| s.to_lowercase()) == Some(lower.clone())
-                    });
-                    if !dup {
-                        titles.push(style_block(ti, &txt));
-                    }
+                    push_unique(&mut titles, ti, &txt);
                 }
             }
         }
@@ -367,25 +377,19 @@ If there are no subtitle words at all, return {{}}."
                 if ctext.is_empty() {
                     continue;
                 }
-                let lower = ctext.to_lowercase();
-                let dup = caps_acc.iter().any(|c| {
-                    c.get("text").and_then(|x| x.as_str()).map(|s| s.to_lowercase()) == Some(lower.clone())
-                });
-                if !dup {
-                    caps_acc.push(style_block(ci, &ctext));
-                }
+                push_unique(&mut caps_acc, ci, &ctext);
             }
         }
     }
 
     let mut out = Layout::default();
     if !subs_y.is_empty() {
-        let mut sorted = subs_y.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        out.sub_y = Some(sorted[sorted.len() / 2] as i64);
+        subs_y.sort_by(|a, b| a.partial_cmp(b).unwrap()); // subs_y дальше не нужен — сортируем на месте
+        out.sub_y = Some(subs_y[subs_y.len() / 2] as i64);
     }
     if !colors.is_empty() || !fonts.is_empty() {
         let bg = if bgs.is_empty() { "none".to_string() } else { most_common(&bgs).unwrap() };
+        let solid = bg != "none";
         let font = if !cond.is_empty() && cond.iter().filter(|&&b| b).count() > cond.len() / 2 {
             Some("Oswald".to_string())
         } else if !fonts.is_empty() {
@@ -396,14 +400,13 @@ If there are no subtitle words at all, return {{}}."
         let size_frac = if szs.is_empty() {
             Value::Null
         } else {
-            let mut s = szs.clone();
-            s.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            serde_json::json!(s[s.len() / 2])
+            szs.sort_by(|a, b| a.partial_cmp(b).unwrap()); // szs дальше не нужен
+            serde_json::json!(szs[szs.len() / 2])
         };
         out.sub_style = Some(serde_json::json!({
             "color": if colors.is_empty() { "#FFFFFF".to_string() } else { most_common(&colors).unwrap() },
-            "background": bg.clone(),
-            "solid": bg != "none",
+            "background": bg,
+            "solid": solid,
             "outline": if outs.is_empty() { "none".to_string() } else { most_common(&outs).unwrap() },
             "align": if aligns_sub.is_empty() { "center".to_string() } else { most_common(&aligns_sub).unwrap() },
             "bold": if bolds.is_empty() { true } else { bolds.iter().filter(|&&b| b).count() as f64 >= bolds.len() as f64 / 2.0 },

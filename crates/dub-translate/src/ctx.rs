@@ -15,10 +15,15 @@ use crate::seg::Seg;
 use crate::vision;
 use crate::TranslateError;
 
-/// _LANG из ctx_translate — код -> имя (для vision/перевода).
+/// _LANG из ctx_translate — код -> имя (для vision/перевода). Линейный поиск по срезу (как lang_name
+/// в translate.rs) — без построения HashMap на каждый вызов.
 fn lang_name(code: &str) -> String {
-    let m: std::collections::HashMap<&str, &str> = crate::WHISPER_LANGS.iter().copied().collect();
-    m.get(code.to_lowercase().as_str()).map(|s| s.to_string()).unwrap_or_else(|| code.to_string())
+    let lc = code.to_lowercase();
+    crate::WHISPER_LANGS
+        .iter()
+        .find(|(k, _)| *k == lc.as_str())
+        .map(|(_, v)| v.to_string())
+        .unwrap_or_else(|| code.to_string())
 }
 
 /// Результат ctx-перевода: заполненные segs + extra (vision/audio/scene) как в питоне.
@@ -57,10 +62,10 @@ pub fn run(
     // ── фаза 1: VISION layout ──────────────────────────────────────────────
     match vision::analyze_layout(llm, &cfg.input, &tmp, cfg.total, cfg.vh) {
         Ok(layout) => {
-            extra["sub_style"] = layout.sub_style.clone().unwrap_or(Value::Null);
+            extra["sub_style"] = layout.sub_style.unwrap_or(Value::Null);
             extra["sub_y"] = layout.sub_y.map(|y| Value::from(y)).unwrap_or(Value::Null);
             extra["titles"] = Value::Array(layout.titles.clone());
-            extra["captions"] = Value::Array(layout.captions.clone());
+            extra["captions"] = Value::Array(layout.captions);
             extra["brands"] = Value::Array(layout.brands.clone());
             let tnames: Vec<String> = layout.titles.iter().filter_map(|t| t.get("text").and_then(|x| x.as_str()).map(String::from)).collect();
             let bnames: Vec<String> = layout.brands.iter().filter_map(|b| b.get("text").and_then(|x| x.as_str()).map(String::from)).collect();

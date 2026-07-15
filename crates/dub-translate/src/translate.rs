@@ -78,9 +78,9 @@ fn translate_one(
 }
 
 /// _glossary — запиннить повторяющиеся собственные ИМЕНА (заглавные + повторяющиеся) для консистентности.
-fn glossary(
+fn glossary<'a>(
     llm: &ChatClient,
-    texts: &[String],
+    texts: impl Iterator<Item = &'a str>,
     src: &str,
     tgt: &str,
 ) -> Result<String, TranslateError> {
@@ -124,6 +124,28 @@ fn glossary(
     }
 }
 
+/// Индексы непустых сегментов + число уникальных спикеров среди них (общий шаг run/rewrite).
+fn nonempty_idxs_and_nspk(segs: &[Seg]) -> (Vec<usize>, usize) {
+    let idxs: Vec<usize> =
+        segs.iter().enumerate().filter(|(_, s)| !s.text.trim().is_empty()).map(|(i, _)| i).collect();
+    let nspk = idxs
+        .iter()
+        .map(|&i| segs[i].speaker)
+        .collect::<std::collections::HashSet<i64>>()
+        .len();
+    (idxs, nspk)
+}
+
+/// Нумерованный блок "1. текст\n2. текст…" для чанка индексов (общий для run/rewrite).
+fn numbered_block(segs: &[Seg], chunk: &[usize]) -> String {
+    chunk
+        .iter()
+        .enumerate()
+        .map(|(j, &gi)| format!("{}. {}", j + 1, segs[gi].text.trim()))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// run — перевод каждого seg.text -> seg.tgt через Gemma (плоский MT, порт _run_hunyuan).
 pub fn run(
     llm: &ChatClient,
@@ -133,7 +155,7 @@ pub fn run(
     spoken: bool,
 ) -> Result<(), TranslateError> {
     let tgt_name = lang_name(tgt, tgt);
-    let gloss_str = glossary(llm, &segs.iter().map(|s| s.text.clone()).collect::<Vec<_>>(), &name_src(src), &tgt_name)?;
+    let gloss_str = glossary(llm, segs.iter().map(|s| s.text.as_str()), &name_src(src), &tgt_name)?;
     let extra = if spoken {
         " Spell out all numbers, dates, times and symbols as full words."
     } else {
@@ -142,22 +164,12 @@ pub fn run(
     for s in segs.iter_mut() {
         s.tgt = String::new();
     }
-    let idxs: Vec<usize> = segs.iter().enumerate().filter(|(_, s)| !s.text.trim().is_empty()).map(|(i, _)| i).collect();
-    // nspk = число уникальных speaker среди idxs.
-    let nspk = {
-        let set: std::collections::HashSet<i64> = idxs.iter().map(|&i| segs[i].speaker).collect();
-        set.len()
-    };
+    let (idxs, nspk) = nonempty_idxs_and_nspk(segs);
 
     let mut c0 = 0;
     while c0 < idxs.len() {
-        let chunk: Vec<usize> = idxs[c0..(c0 + CHUNK).min(idxs.len())].to_vec();
-        let numbered = chunk
-            .iter()
-            .enumerate()
-            .map(|(j, &gi)| format!("{}. {}", j + 1, segs[gi].text.trim()))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let chunk = &idxs[c0..(c0 + CHUNK).min(idxs.len())];
+        let numbered = numbered_block(segs, chunk);
         let dlg = if nspk > 1 {
             format!(
                 " This is a DIALOGUE between {nspk} speakers taking turns — render it as one coherent \
@@ -179,12 +191,12 @@ pub fn run(
         let out = strip_think(&llm.chat(&[Message::system(sysmsg), Message::user_text(numbered)], &s)?);
         let parsed = parse_numbered(&out, chunk.len());
         if parsed.iter().all(|p| p.is_some()) {
-            for (j, &gi) in chunk.iter().enumerate() {
-                segs[gi].tgt = parsed[j].clone().unwrap();
+            for (&gi, p) in chunk.iter().zip(parsed) {
+                segs[gi].tgt = p.unwrap();
             }
         } else {
             // нумерация уплыла -> надёжный per-line режим для этого чанка.
-            for &gi in &chunk {
+            for &gi in chunk {
                 let txt = segs[gi].text.trim().to_string();
                 segs[gi].tgt = translate_one(llm, &txt, &tgt_name, extra, &gloss_str)?;
             }
@@ -215,11 +227,7 @@ pub fn rewrite(
     for s in segs.iter_mut() {
         s.tgt = String::new();
     }
-    let idxs: Vec<usize> = segs.iter().enumerate().filter(|(_, s)| !s.text.trim().is_empty()).map(|(i, _)| i).collect();
-    let nspk = {
-        let set: std::collections::HashSet<i64> = idxs.iter().map(|&i| segs[i].speaker).collect();
-        set.len()
-    };
+    let (idxs, nspk) = nonempty_idxs_and_nspk(segs);
     let extra = if spoken {
         " Spell out all numbers, dates, times and symbols as full words."
     } else {
@@ -227,13 +235,8 @@ pub fn rewrite(
     };
     let mut c0 = 0;
     while c0 < idxs.len() {
-        let chunk: Vec<usize> = idxs[c0..(c0 + CHUNK).min(idxs.len())].to_vec();
-        let numbered = chunk
-            .iter()
-            .enumerate()
-            .map(|(j, &gi)| format!("{}. {}", j + 1, segs[gi].text.trim()))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let chunk = &idxs[c0..(c0 + CHUNK).min(idxs.len())];
+        let numbered = numbered_block(segs, chunk);
         let dlg = if nspk > 1 {
             format!(" It is a dialogue between {nspk} speakers taking turns — keep the back-and-forth.")
         } else {
