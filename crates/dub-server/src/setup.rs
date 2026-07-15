@@ -989,7 +989,13 @@ pub fn download_components(
             let completed: std::collections::HashSet<u64> = if resuming {
                 std::fs::read(&done_path)
                     .ok()
-                    .map(|b| b.chunks_exact(8).filter_map(|c| <[u8; 8]>::try_from(c).ok().map(u64::from_le_bytes)).collect())
+                    .map(|b| {
+                        b.chunks_exact(8) // рваный хвост (<8 байт при килле) chunks_exact игнорирует
+                            .filter_map(|c| <[u8; 8]>::try_from(c).ok().map(u64::from_le_bytes))
+                            // только валидные границы чанков в пределах файла (защита от мусора в манифесте)
+                            .filter(|off| *off < total && off % CHUNK == 0)
+                            .collect()
+                    })
                     .unwrap_or_default()
             } else {
                 let _ = std::fs::remove_file(&done_path); // свежая закачка -> старый манифест долой
@@ -1281,11 +1287,16 @@ fn download_range(
         let res = download_range_once(url, file, start, end, downloaded, abort, &mut got);
         match res {
             Ok(()) if got == want => {
-                // чанк целиком -> пометить в манифесте (offset LE) для докачки при следующем запуске
+                // WRITE-AHEAD DURABILITY: сначала fsync ДАННЫХ чанка в .part, ТОЛЬКО потом отметка в манифесте.
+                // Иначе при жёстком килле/потере питания манифест мог бы опередить данные -> резюм пропустил бы
+                // чанк, у которого на диске ДЫРА (нули) -> битый файл, не пойманный (size сходится по set_len,
+                // GGUF-magic — только первый чанк). Порядок «данные на диск -> потом готово» гарантирует: если
+                // в манифесте есть offset, его данные durable. sync_data (fdatasync) дешевле sync_all.
+                let _ = file.sync_data();
                 if let Ok(mut m) = done.lock() {
                     use std::io::Write;
                     let _ = m.write_all(&start.to_le_bytes());
-                    let _ = m.flush();
+                    let _ = m.sync_data(); // и сам манифест durable (8 байт — запись атомарна)
                 }
                 return Ok(());
             }
