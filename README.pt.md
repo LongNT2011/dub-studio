@@ -60,6 +60,7 @@ Carregue um clipe uma vez e envie-o para qualquer modo dentro do editor.
 - **Transcrição karaokê** —— reproduza o vídeo e acompanhe a linha e a **palavra** atuais acendendo na transcrição.
 - **Editor ao vivo** —— edite transcrição, vozes, estilo de legenda, caixas de desfoque, títulos; **prévia ~0,17 s/quadro**, cada mudança visível na hora.
 - **Regeneração inteligente** —— ao exportar, só os segmentos alterados são ressintetizados, não o clipe inteiro.
+- **Suas próprias falas** —— insira frases personalizadas na transcrição; cada uma é dublada com a voz clonada do falante e aparece nas legendas.
 - **Processamento em lote** —— fila de arquivos, todos com uma configuração, progresso por arquivo.
 - **Comparar antes/depois** —— original e dublagem lado a lado.
 - **100+ idiomas** —— dublagem para qualquer idioma principal (espanhol, chinês, japonês, árabe, hindi e mais), com detecção automática do idioma de origem.
@@ -115,6 +116,12 @@ cd desktop && npm install && npx tauri build            # 3) shell de desktop (T
 ```
 
 Requer Node 20+, Rust (toolchain MSVC) e WebView2. Os motores nativos não precisam ser recompilados —— o app baixa binários pré-compilados.
+
+## Contribuições e forks
+
+**Colaboradores são muito bem-vindos.** Eu ficaria genuinamente feliz em ver o Dub Studio portado para outras plataformas e GPUs — a arquitetura permite, eu simplesmente não tenho fôlego para fazer os ports sozinho. Se você quer rodá-lo em **GPUs AMD / Intel, macOS ou Linux**, faça um fork e vá em frente — PRs são bem-vindos.
+
+**Localizações adicionais** também são bem-vindas: hoje o app e a landing estão em 6 idiomas — traduza os arquivos de idioma (`frontend/src/locales/` e o dicionário em `docs/index.html`) e abra um PR com o seu.
 
 ## Autores
 

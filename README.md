@@ -63,6 +63,7 @@ Load a clip once and send it into any mode — right inside the editor.
 - **Karaoke transcript** — play the video and follow along as the current line and the current **word** light up in the transcript.
 - **Live editor** — edit transcript, voices, caption style, blur boxes, titles; **~0.17 s/frame preview**, every change visible instantly.
 - **Smart re-gen** — export re-synthesizes and recomputes **only the segments you changed**, not the whole clip.
+- **Add your own lines** — insert custom phrases into the transcript; each is voiced in the speaker's cloned voice and shown in the subtitles.
 - **Batch processing** — a queue of files, all run with one setup, per-file progress.
 - **Before/after compare** — original and dub side by side.
 - **100+ languages** — dub into any major language (Spanish, Chinese, Japanese, Arabic, Hindi and more), with source-language auto-detect.
@@ -128,6 +129,12 @@ Needs Node 20+, Rust (MSVC toolchain) and WebView2. Native engines (`audiocpp_en
 | [Qwen3-TTS](https://github.com/timoncool/Qwen3-TTS_portable_rus) | Portable TTS with voice cloning |
 | [VibeVoice ASR](https://github.com/timoncool/VibeVoice_ASR_portable_ru) | Portable speech recognition |
 | [SuperCaption Qwen3-VL](https://github.com/timoncool/SuperCaption_Qwen3-VL) | Portable image captioning |
+
+## Contributing & forks
+
+**Collaborators are very welcome.** I'd be genuinely happy to see Dub Studio forked to other platforms and GPUs — the architecture is capable of it, I simply don't have the bandwidth to do the ports myself. If you want it on **AMD / Intel GPUs, macOS or Linux**, fork it and go — PRs welcome.
+
+**Extra localizations** are just as welcome: the app and landing ship in 6 languages today — translate the locale files (`frontend/src/locales/` and the dict in `docs/index.html`) and open a PR to add yours.
 
 ## Authors
 
