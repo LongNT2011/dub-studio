@@ -107,8 +107,8 @@ export const api = {
     const fd = new FormData(); fd.append("file", file);
     return fetch(`${BASE}/projects`, { method: "POST", body: fd }).then(j<{ project_id: string }>);
   },
-  analyze: (pid: string, tgt_lang: string, mode = "auto", src_lang = "auto", subs = "auto", rewrite = "", burn = true) =>
-    fetch(`${BASE}/projects/${pid}/analyze?tgt_lang=${tgt_lang}&mode=${mode}&src_lang=${src_lang}&subs=${subs}&rewrite=${encodeURIComponent(rewrite)}&burn=${burn ? 1 : 0}`, { method: "POST" }).then(j<{ job_id: string }>),
+  analyze: (pid: string, tgt_lang: string, mode = "auto", src_lang = "auto", subs = "auto", rewrite = "", burn = true, detect = true) =>
+    fetch(`${BASE}/projects/${pid}/analyze?tgt_lang=${tgt_lang}&mode=${mode}&src_lang=${src_lang}&subs=${subs}&rewrite=${encodeURIComponent(rewrite)}&burn=${burn ? 1 : 0}&detect=${detect ? 1 : 0}`, { method: "POST" }).then(j<{ job_id: string }>),
   getProject: (pid: string) => fetch(`${BASE}/projects/${pid}`).then(j<Project>),
   putProject: (pid: string, project: Project) => {   // undo/redo: serialize through the SAME chain as patch() (no race)
     const run = () => fetch(`${BASE}/projects/${pid}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(project) }).then(j<Project>);
@@ -129,6 +129,8 @@ export const api = {
   waveform: (pid: string) => fetch(`${BASE}/projects/${pid}/waveform`).then(j<{ peaks: number[] }>),
   outputUrl: (pid: string) => `${BASE}/projects/${pid}/output`,
   openOutput: (pid: string) => fetch(`${BASE}/projects/${pid}/open`, { method: "POST" }).then(j<{ ok: boolean }>),   // открыть output.mp4 в системном плеере (нативный webview не открывает target=_blank)
+  reveal: (pid: string, name: string) => fetch(`${BASE}/projects/${pid}/reveal`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).then(j<{ ok: boolean }>),   // показать файл в проводнике с выделением
+  saveText: (pid: string, name: string, text: string) => fetch(`${BASE}/projects/${pid}/save-text`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, text }) }).then(j<{ ok: boolean; path: string }>),   // записать SRT/TXT в каталог проекта + reveal (webview не качает blob)
   dubUrl: (pid: string, rev = 0) => `${BASE}/projects/${pid}/dub?rev=${rev}`,   // playable dubbed video (frames + dub audio)
   // SSE job progress -> onEvent per message; resolves on done, rejects on error
   watchJob: (jobId: string, onEvent: (e: JobEvent) => void) =>

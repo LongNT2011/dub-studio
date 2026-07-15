@@ -211,15 +211,19 @@ fn build_dub(
     // 2) сепарация (vocals/instrumental) через dub-sep, если keep_music.
     //    voiceover не сепарирует: нужен ВЕСЬ оригинал (голос+музыка) приглушённым под переводом.
     let (vocals, instrumental): (PathBuf, Option<PathBuf>) = if keep_music && !voiceover {
-        emit(progress, "separate", "сепарация (Mel-Band Roformer voc_fv6-Q8_0)");
-        if paths.bsroformer_cli.is_file() && paths.bsroformer_model.is_file() {
-            let sep = dub_sep::separate(
-                &audio_hq,
-                &wd.join("stems"),
-                &paths.bsroformer_cli,
-                &paths.bsroformer_model,
-            )
-            .map_err(|e| format!("сепарация: {e}"))?;
+        // Кэш сепарации: stems зависят ТОЛЬКО от исходного аудио, не от правок сегментов. Повторный
+        // рендер / дуб-аудио (regen или удаление фразы) переиспользует посчитанные stems — сепарация
+        // самый долгий аудио-шаг, гонять её на каждую мелкую правку незачем.
+        let stems = wd.join("stems");
+        let cached_voc = stems.join("vocals.wav");
+        let cached_inst = stems.join("instrumental.wav");
+        if cached_voc.is_file() && cached_inst.is_file() {
+            emit(progress, "separate", "сепарация из кэша (stems уже посчитаны)");
+            (cached_voc, Some(cached_inst))
+        } else if paths.bsroformer_cli.is_file() && paths.bsroformer_model.is_file() {
+            emit(progress, "separate", "сепарация (Mel-Band Roformer voc_fv6-Q8_0)");
+            let sep = dub_sep::separate(&audio_hq, &stems, &paths.bsroformer_cli, &paths.bsroformer_model)
+                .map_err(|e| format!("сепарация: {e}"))?;
             (sep.vocals, Some(sep.instrumental))
         } else {
             emit(progress, "separate", "движок сепарации не найден -> без фона (keep_music off)");

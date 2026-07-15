@@ -23,6 +23,8 @@ pub struct AnalyzeArgs {
     pub subs: String,   // auto | none | translate | transcribe
     pub rewrite: String,
     pub burn: bool,     // вжигать ли субтитры/титры на видео (композируемость; дефолт true)
+    pub detect_text: bool, // OCR-детекция вшитого текста (блюр + локализация титров). Дорогая (минуты на 4K);
+                           // в режиме без субтитров/блюра не нужна — галочка в UI, дефолт true.
 }
 
 /// Пути к моделям/входу для одной джобы analyze.
@@ -265,8 +267,13 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
 
     // 7) OCR-стадия (раунд 4): детекция вшитого текста -> блюр-боксы субтитр-полосы + уточнение sub_y.
     //    Порт pipeline.run ocr_detect + compose.analyze_layout. Fail-safe: сбой OCR не валит analyze
-    //    (боксы блюра — не блокер; их можно добавить руками в редакторе).
-    crate::ocr::stage(args, paths, &mut proj, meta.width, meta.height, meta.duration, progress);
+    //    (боксы блюра — не блокер; их можно добавить руками в редакторе). Дорогая стадия (минуты на 4K):
+    //    пропускаем по галочке detect_text (в режиме без субтитров вшитый текст не трогаем — экономит время).
+    if args.detect_text {
+        crate::ocr::stage(args, paths, &mut proj, meta.width, meta.height, meta.duration, progress);
+    } else {
+        emit(progress, "ocr_detect", "детекция вшитого текста отключена (галочка)");
+    }
 
     Ok(proj)
 }

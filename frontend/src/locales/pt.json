@@ -222,7 +222,7 @@
     "howTitle": "Como funciona",
     "how": [
       "Solte um MP4/MOV — separa o áudio, reconhece a fala, distingue os falantes, traduz e lê o texto na tela.",
-      "Escolha um modo: legendas, dublagem completa ou um remix engraçado.",
+      "Escolha um modo — legendas, dublagem completa, locução, remix engraçado ou transcrição; combine áudio, legendas e desfoque livremente.",
       "Edite o que quiser — transcrição, vozes, estilo das legendas, máscaras — com pré-visualização instantânea.",
       "Exporte o vídeo pronto. Tudo roda localmente na sua GPU."
     ],
@@ -233,6 +233,8 @@
       "Reescreva o roteiro e reduble (modo engraçado)",
       "Estilo das legendas: fonte, cor, contorno, sombra, placa",
       "Máscaras: desfoque ou um retângulo sólido sobre o original",
+      "Modos combináveis — dublagem sem legendas, legendas sem dublagem, qualquer mistura",
+      "Adicione suas próprias falas à transcrição — com a voz do falante",
       "100+ idiomas, totalmente offline, até 4K"
     ],
     "sectionsTitle": "Seções",
@@ -243,7 +245,7 @@
       "Configurações (⚙) — o conjunto de modelos (ASR / LLM / Vision / TTS)"
     ],
     "donateTitle": "Apoie o autor",
-    "donateIntro": "Crio ferramentas de IA locais de graça — sem nuvem nem assinaturas. Doações me ajudam a melhorá-las e criar novas. Obrigado! 🙏",
+    "donateIntro": "Faço software de código aberto e pesquisa em IA. Quase tudo o que crio é gratuito e disponível para todos. Suas doações me ajudam a continuar criando e pesquisando sem me preocupar de onde virá a próxima refeição =) Obrigado 🙏",
     "card": "Cartão / PayPal",
     "boostySub": "Assinatura Boosty",
     "copy": "Copiar endereço",
@@ -334,6 +336,8 @@
   "comp": {
     "langHint": "100+ idiomas. Para origem não europeia, mude o ASR para Whisper nas configurações.",
     "asrSwitched": "Parakeet não conhece {{lang}} — ASR mudado para Whisper (99 idiomas).",
+    "detect": "Detectar texto na tela",
+    "detectHint": "O OCR encontra legendas embutidas para desfocar e localizar. Lento em 4K — desative se não precisar (ex.: dublagem sem legendas).",
     "hint": "Combine livremente — áudio e legendas são independentes, em qualquer modo",
     "audioLabel": "Áudio",
     "audioNone": "Original (sem dublagem)",

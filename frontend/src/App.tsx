@@ -528,6 +528,7 @@ function DropZone() {
   const [audio, setAudio] = useState<"nodub" | "dub" | "voiceover" | "transcribe">("dub");
   const [subs, setSubs] = useState<"none" | "transcribe" | "translate">("translate");
   const [burn, setBurn] = useState(true);
+  const [detectText, setDetectText] = useState(true);                           // OCR-детекция вшитого текста (блюр/локализация титров). Дорогая на 4K — можно выключить.
   const [funnyOn, setFunnyOn] = useState(false);
   const [funny, setFunny] = useState("");                                       // Gemma rewrite instruction (тема ремикса)
   const [preview, setPreview] = useState<string | null>(null);                  // objectURL превью выбранного видео (первый кадр)
@@ -553,7 +554,7 @@ function DropZone() {
       const eRewrite = funnyOn && (audio === "dub" || audio === "voiceover") ? funny.trim() : "";
       // Транскрипт всегда вжигает субтитры (иначе транскрипт-режим дал бы видео без текста): чекбокс
       // «Вжигать» для transcribe скрыт, поэтому форсируем burn=true, не полагаясь на его прежнее значение.
-      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, audio === "transcribe" ? true : burn);
+      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, audio === "transcribe" ? true : burn, detectText);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       s.setProject(await api.getProject(project_id));
       // Озвучку готовим ЗДЕСЬ, на экране загрузки (не собирая видео — кадры даёт per-frame preview),
@@ -694,6 +695,10 @@ function DropZone() {
                   {t("comp.burn")}
                 </label>
               )}
+              <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none" title={t("comp.detectHint")}>
+                <input type="checkbox" checked={detectText} onChange={(e) => setDetectText(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
+                {t("comp.detect")}
+              </label>
             </>
           )}
           <button onClick={run} disabled={!file || (funnyOn && (audio === "dub" || audio === "voiceover") && !funny.trim())}
@@ -710,7 +715,7 @@ function DropZone() {
       <input ref={inputRef} type="file" accept={VIDEO_ACCEPT} className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f); }} />
       <input ref={batchRef} type="file" multiple accept={VIDEO_ACCEPT} className="hidden"
-        onChange={(e) => { const fs = [...(e.target.files || [])]; if (fs.length) { batchState.files = fs; batchState.tgt = tgt; batchState.src = src; batchState.audio = audio; batchState.subs = subs; batchState.burn = burn; batchState.funnyOn = funnyOn; batchState.funny = funny; s.setStage("batch"); } }} />
+        onChange={(e) => { const fs = [...(e.target.files || [])]; if (fs.length) { batchState.files = fs; batchState.tgt = tgt; batchState.src = src; batchState.audio = audio; batchState.subs = subs; batchState.burn = burn; batchState.detectText = detectText; batchState.funnyOn = funnyOn; batchState.funny = funny; s.setStage("batch"); } }} />
     </div>
   );
 }
@@ -997,7 +1002,7 @@ function Editor() {
     setRegenId(segId); pushActivity(t("seg.regen"));
     try {
       await api.patch(pid, { op: "regen", id: segId });
-      const { job_id } = await api.render(pid);                       // re-TTS only the dirty seg + re-mux -> fresh dub
+      const { job_id } = await api.dubAudio(pid);                     // ре-TTS ТОЛЬКО dirty-сегмент -> свежая озвучка (без сборки видео; финал — на Экспорте)
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); setRendered(false); bump(); setDubRev(Date.now()); playSfx("notify");   // refresh preview + reload the re-rendered dub audio
     } catch (e) { await surfaceErr(e); }
@@ -1008,7 +1013,7 @@ function Editor() {
     pushHistory(p); setRegenId(segId); setRendered(false);
     try {
       await api.patch(pid, { op: "hide_segment", id: segId });
-      const { job_id } = await api.render(pid);
+      const { job_id } = await api.dubAudio(pid);   // только озвучка; кадр (субтитр) перерисует preview из актуального project
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); bump(); setDubRev(Date.now());
     } catch (e) { await surfaceErr(e); }
@@ -1019,7 +1024,7 @@ function Editor() {
     pushHistory(p); setRegenId(segId); setRendered(false);
     try {
       await api.patch(pid, { op: "del_segment", id: segId });
-      const { job_id } = await api.render(pid);
+      const { job_id } = await api.dubAudio(pid);   // только озвучка остальных из кэша; видео не пересобираем
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); bump(); setDubRev(Date.now());
     } catch (e) { await surfaceErr(e); }
@@ -1030,7 +1035,7 @@ function Editor() {
     pushHistory(p); setRegenId(segId); setRendered(false);
     try {
       await api.patch(pid, { op: "keep_segment", id: segId });
-      const { job_id } = await api.render(pid);
+      const { job_id } = await api.dubAudio(pid);   // только озвучка
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); bump(); setDubRev(Date.now());
     } catch (e) { await surfaceErr(e); }
@@ -1050,7 +1055,7 @@ function Editor() {
     pushHistory(p); setRegenId("__bulk__"); setRendered(false);
     try {
       await api.patch(pid, { op, ids: [...selSegs], ...extra });
-      const { job_id } = await api.render(pid);
+      const { job_id } = await api.dubAudio(pid);   // массовая правка -> одна пересборка озвучки (без видео)
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); bump(); setDubRev(Date.now()); setSelSegs(new Set());
     } catch (e) { await surfaceErr(e); }
@@ -1061,7 +1066,7 @@ function Editor() {
     setRegenId("__all__"); pushActivity(t("voice.gain"));
     try {
       await api.patch(pid, { op: "gain", gain_db: gainDb });
-      const { job_id } = await api.render(pid);
+      const { job_id } = await api.dubAudio(pid);   // гейн: пересведение озвучки, ре-TTS не нужен
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); setRendered(false); setDubRev(Date.now());   // покадровое превью; /dub обновлён -> плей играет новый дуб
     } catch (e) { await surfaceErr(e); }
@@ -1072,7 +1077,7 @@ function Editor() {
     setRegenId("__all__"); pushActivity(t("voice.origGain"));
     try {
       await api.patch(pid, { op: "voiceover_gain", gain_db: gainDb });
-      const { job_id } = await api.render(pid);
+      const { job_id } = await api.dubAudio(pid);   // баланс закадра: пересведение, ре-TTS не нужен
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); setRendered(false); setDubRev(Date.now());   // покадровое превью; /dub обновлён -> плей играет закадр с новым балансом
     } catch (e) { await surfaceErr(e); }
@@ -1083,7 +1088,7 @@ function Editor() {
     setRegenId("__all__"); pushActivity(t("voice.regenAll"));       // sentinel: disables per-seg regen buttons, no per-seg spinner
     try {
       await api.patch(pid, { op: "regen_all" });                    // mark every segment dirty
-      const { job_id } = await api.render(pid);                     // re-TTS all dirty segs + re-mux -> fresh dub
+      const { job_id } = await api.dubAudio(pid);                   // ре-TTS всех сегментов -> свежая озвучка (видео на Экспорте)
       await api.watchJob(job_id, () => {});
       setProject(await api.getProject(pid)); setRendered(false); bump(); setDubRev(Date.now()); playSfx("notify");   // покадровое превью; /dub обновлён -> плей играет новый дуб
     } catch (e) { await surfaceErr(e); }
@@ -1126,6 +1131,7 @@ function Editor() {
       const { job_id } = await api.render(pid);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") { updateExport(exId, { msg: e.msg || "" }); pushActivity(e.msg || "", "work"); } });
       updateExport(exId, { status: "done", msg: "", url: `${api.outputUrl(pid)}?rev=${Date.now()}` });   // bust cache on re-export
+      api.reveal(pid, "output.mp4").catch(() => {});   // открыть проводник с выделенным готовым файлом — юзер видит, куда сохранилось
       pushActivity(`${t("compare.result")}: ${name}`, "done"); playSfx("success");
       setRendered(true); setDubRev(Date.now());   // /dub now serves the freshly rendered output.mp4 -> reload <audio>
     } catch (err) {
@@ -2095,8 +2101,8 @@ function FirstRun() {
 }
 
 // Пакетная обработка: DropZone кладёт выбранные файлы + настройки сюда, BatchView читает (без раздувания стора).
-const batchState: { files: File[]; tgt: string; src: string; audio: string; subs: string; burn: boolean; funnyOn: boolean; funny: string } =
-  { files: [], tgt: "ru", src: "auto", audio: "dub", subs: "translate", burn: true, funnyOn: false, funny: "" };
+const batchState: { files: File[]; tgt: string; src: string; audio: string; subs: string; burn: boolean; detectText: boolean; funnyOn: boolean; funny: string } =
+  { files: [], tgt: "ru", src: "auto", audio: "dub", subs: "translate", burn: true, detectText: true, funnyOn: false, funny: "" };
 
 type BatchItem = { name: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string };
 
@@ -2106,7 +2112,7 @@ function BatchView() {
   const { t } = useTranslation();
   const setStage = useStore((s) => s.setStage);
   const filesRef = useRef<File[]>(batchState.files);
-  const { tgt, src, audio, subs, burn, funnyOn, funny } = batchState;
+  const { tgt, src, audio, subs, burn, detectText, funnyOn, funny } = batchState;
   const [items, setItems] = useState<BatchItem[]>(() => filesRef.current.map((f) => ({ name: f.name, status: "queued", pid: null, pct: 0 })));
   const [running, setRunning] = useState(false);
   const [doneN, setDoneN] = useState(0);
@@ -2126,7 +2132,7 @@ function BatchView() {
         upd({ pid: project_id });
         // Транскрипт всегда вжигает субтитры (иначе транскрипт-режим дал бы видео без текста): чекбокс
       // «Вжигать» для transcribe скрыт, поэтому форсируем burn=true, не полагаясь на его прежнее значение.
-      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, audio === "transcribe" ? true : burn);
+      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, audio === "transcribe" ? true : burn, detectText);
         await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0 }); });
         if (doRender) {
           upd({ status: "rendering", pct: 0 });
@@ -2237,10 +2243,16 @@ function TranscriptView() {
     catch { /* ignore */ } finally { setBusy(null); }
   }
 
-  function dl(name: string, text: string) {
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  async function dl(name: string, text: string) {
+    // В нативном Tauri-webview браузерный blob-download молча не срабатывает (баг «Экспорт SRT не работает»).
+    // Пишем файл на бэке в каталог проекта и открываем проводник с выделением. Фолбэк — blob (dev-браузер).
+    try {
+      await api.saveText(pid, name, text);
+    } catch {
+      const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    }
   }
   const srtTime = (s: number) => {
     const ms = Math.max(0, Math.round(s * 1000)), z = (n: number, w = 2) => String(n).padStart(w, "0");

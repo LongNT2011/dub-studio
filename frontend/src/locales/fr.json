@@ -222,7 +222,7 @@
     "howTitle": "Comment ça marche",
     "how": [
       "Déposez un MP4/MOV — il sépare l'audio, reconnaît la parole, distingue les locuteurs, traduit et lit le texte à l'écran.",
-      "Choisissez un mode : sous-titres, doublage complet ou remix amusant.",
+      "Choisissez un mode — sous-titres, doublage complet, voix off, remix amusant ou transcription ; combinez librement audio, sous-titres et flou.",
       "Modifiez tout — transcription, voix, style des sous-titres, masques — avec aperçu instantané.",
       "Exportez la vidéo finie. Tout tourne localement sur votre GPU."
     ],
@@ -233,6 +233,8 @@
       "Réécrivez le script et redoublez (mode amusant)",
       "Style des sous-titres : police, couleur, contour, ombre, plaque",
       "Masques : flou ou un rectangle uni sur l'original",
+      "Modes composables — doublage sans sous-titres, sous-titres sans doublage, tout mélange",
+      "Ajoutez vos propres répliques à la transcription — avec la voix du locuteur",
       "100+ langues, entièrement hors ligne, jusqu'à 4K"
     ],
     "sectionsTitle": "Sections",
@@ -243,7 +245,7 @@
       "Paramètres (⚙) — la pile de modèles (ASR / LLM / Vision / TTS)"
     ],
     "donateTitle": "Soutenir l'auteur",
-    "donateIntro": "Je crée des outils d'IA locaux gratuitement — sans cloud ni abonnement. Les dons m'aident à les améliorer et à en créer de nouveaux. Merci ! 🙏",
+    "donateIntro": "Je fais des logiciels open-source et de la recherche en IA. Presque tout ce que je crée est gratuit et accessible à tous. Vos dons m'aident à continuer de créer et de chercher sans me soucier d'où viendra le prochain repas =) Merci 🙏",
     "card": "Carte / PayPal",
     "boostySub": "Abonnement Boosty",
     "copy": "Copier l'adresse",
@@ -334,6 +336,8 @@
   "comp": {
     "langHint": "100+ langues. Pour une source non européenne, passez l'ASR sur Whisper dans les réglages.",
     "asrSwitched": "Parakeet ne connaît pas {{lang}} — ASR basculé sur Whisper (99 langues).",
+    "detect": "Détecter le texte à l'écran",
+    "detectHint": "L'OCR trouve les textes incrustés à flouter et localiser. Lent en 4K — désactivez si inutile (p. ex. doublage sans sous-titres).",
     "hint": "Composez librement — audio et sous-titres sont indépendants, dans tout mode",
     "audioLabel": "Audio",
     "audioNone": "Original (sans doublage)",

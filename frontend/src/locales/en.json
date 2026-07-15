@@ -251,8 +251,8 @@
     "howTitle": "How it works",
     "how": [
       "Drop an MP4/MOV — it splits the audio, recognizes speech, tells speakers apart, translates, and reads on-screen text.",
-      "Pick a mode: subtitles, a full dub, or a funny remix.",
-      "Edit anything — transcript, voices, subtitle style, masks — with instant preview.",
+      "Pick a mode — subtitles, full dub, voice-over, funny remix or transcript; mix audio, subtitles and blur freely.",
+      "Edit anything — transcript, voices, subtitle style, masks, add your own lines — with instant preview.",
       "Export the finished video. Everything runs locally on your GPU."
     ],
     "featuresTitle": "Features",
@@ -262,6 +262,8 @@
       "Rewrite the script and re-dub (funny mode)",
       "Subtitle styling: font, color, outline, shadow, plate",
       "Mask covers: blur or a solid rectangle over the original",
+      "Composable modes — dub without subtitles, subtitles without dubbing, any mix",
+      "Add your own lines to the transcript — voiced in the speaker's cloned voice",
       "100+ languages, fully offline, up to 4K"
     ],
     "sectionsTitle": "Sections",
@@ -272,7 +274,7 @@
       "Settings (⚙) — the model stack (ASR / LLM / Vision / TTS)"
     ],
     "donateTitle": "Support the author",
-    "donateIntro": "I build local AI tools for free — no cloud, no subscriptions. Donations help me keep improving them and shipping new ones. Thank you! 🙏",
+    "donateIntro": "I build open-source software and do AI research. Most of what I create is free and available to everyone. Your donations help me keep creating and researching without worrying about where the next meal comes from =) Thank you 🙏",
     "card": "Card / PayPal",
     "boostySub": "Boosty subscription",
     "copy": "Copy address",
@@ -334,6 +336,8 @@
   "comp": {
     "langHint": "100+ languages. For a non-European source, switch ASR to Whisper in settings.",
     "asrSwitched": "Parakeet doesn't know {{lang}} — ASR switched to Whisper (99 languages).",
+    "detect": "Detect on-screen text",
+    "detectHint": "OCR finds baked-in captions to blur & localize. Slow on 4K — turn off if you don't need it (e.g. dubbing without subtitles).",
     "hint": "Compose freely — audio and subtitles are independent, in any mode",
     "audioLabel": "Audio",
     "audioNone": "Original (no dub)",

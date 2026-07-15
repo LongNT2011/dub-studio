@@ -75,6 +75,7 @@ pub fn verify_captions_e2e(
         subs: proj.subs.mode.clone(),
         rewrite: String::new(),
         burn: proj.subs.burn,
+        detect_text: true,
     };
     let sel = models::load_selection(&mroot);
     let (mt_model, mmproj) = models::resolve_mt(&mroot, &sel);
@@ -325,6 +326,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects/{pid}/preview", get(endpoints::preview))
         .route("/projects/{pid}/output", get(output))
         .route("/projects/{pid}/open", post(open_output))
+        .route("/projects/{pid}/reveal", post(reveal_file))
+        .route("/projects/{pid}/save-text", post(save_text))
         .route("/projects/{pid}/dub-audio", post(dub_audio_project))
         // /original?t= отдаёт ОДИН PNG-кадр оригинала (порт app.py.original -> source_frame),
         // фронт (ComparePane) вставляет его как <img src>. Range-раздача сырого видео — /dub.
@@ -753,6 +756,7 @@ async fn analyze_project(
         subs: qget("subs", "auto"),
         rewrite: qget("rewrite", ""),
         burn: qget("burn", "1") != "0",
+        detect_text: qget("detect", "1") != "0",
     };
     // Активный вариант модели резолвится ПРИ КАЖДОЙ джобе (не морозится на старте): скачал/выбрал
     // квант -> применяется без рестарта. См. models::resolve_*.
@@ -980,6 +984,60 @@ async fn open_output(State(st): State<AppState>, AxPath(pid): AxPath<String>) ->
     })
     .await;
     Json(json!({ "ok": true })).into_response()
+}
+
+/// Открыть проводник/файловый менеджер с ВЫДЕЛЕННЫМ файлом (не плеер). Windows: explorer /select.
+fn reveal_in_explorer(path: String) {
+    tokio::task::spawn_blocking(move || {
+        #[cfg(windows)]
+        {
+            // explorer /select,"<path>" — выделяет файл в открытом каталоге. Один аргумент.
+            let _ = std::process::Command::new("explorer").arg(format!("/select,{path}")).spawn();
+        }
+        #[cfg(not(windows))]
+        {
+            // прочие ОС: открыть родительский каталог (выделение файла непортабельно).
+            let parent = std::path::Path::new(&path).parent().map(|p| p.to_path_buf()).unwrap_or_else(|| std::path::PathBuf::from("."));
+            let _ = std::process::Command::new("xdg-open").arg(parent).spawn();
+        }
+    });
+}
+
+/// POST /projects/{pid}/reveal — показать файл (по имени в каталоге проекта) в проводнике с выделением.
+/// Body {name}. Для кнопок сохранения/экспорта: пользователь видит, КУДА сохранилось.
+async fn reveal_file(State(st): State<AppState>, AxPath(pid): AxPath<String>, Json(body): Json<Value>) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("output.mp4");
+    let safe: String = name.chars().filter(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-')).collect();
+    let f = dir.join(&safe);
+    if !f.is_file() {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
+    reveal_in_explorer(f.to_string_lossy().to_string());
+    Json(json!({ "ok": true })).into_response()
+}
+
+/// POST /projects/{pid}/save-text — записать текстовый файл (SRT/TXT) в каталог проекта и показать его в
+/// проводнике. В нативном Tauri-webview браузерный blob-download (<a download>) не работает — сохраняем
+/// через бэкенд. Body {name, text}.
+async fn save_text(State(st): State<AppState>, AxPath(pid): AxPath<String>, Json(body): Json<Value>) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("transcript.txt");
+    let safe: String = name.chars().filter(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-')).collect();
+    let safe = if safe.is_empty() { "transcript.txt".to_string() } else { safe };
+    let text = body.get("text").and_then(|v| v.as_str()).unwrap_or("");
+    let f = dir.join(&safe);
+    if let Err(e) = std::fs::write(&f, text) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("write failed: {e}")).into_response();
+    }
+    reveal_in_explorer(f.to_string_lossy().to_string());
+    Json(json!({ "ok": true, "path": f.to_string_lossy() })).into_response()
 }
 
 async fn dub_video(
