@@ -33,10 +33,8 @@ impl RecDict {
     /// Прочитать словарь из текста метаданных (по одному токену на строку). Токены берутся КАК ЕСТЬ,
     /// blank префиксуется в позицию 0. Хвостовой пустой токен НЕ отбрасывается — он значим (класс C-1).
     pub fn from_dict_str(raw: &str) -> Self {
-        let list: Vec<String> = raw.split('\n').map(|s| s.to_string()).collect();
-        let mut chars = Vec::with_capacity(list.len() + 1);
-        chars.push(String::new()); // blank index 0
-        chars.extend(list);
+        let mut chars: Vec<String> = vec![String::new()]; // blank index 0
+        chars.extend(raw.split('\n').map(str::to_string));
         Self { chars }
     }
 
@@ -54,7 +52,7 @@ impl RecDict {
 
     /// class index -> символ. 0=blank(""), далее токены словаря.
     fn ch(&self, idx: usize) -> &str {
-        self.chars.get(idx).map(|s| s.as_str()).unwrap_or("")
+        self.chars.get(idx).map_or("", |s| s.as_str())
     }
 }
 

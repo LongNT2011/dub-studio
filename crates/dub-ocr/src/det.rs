@@ -119,12 +119,7 @@ pub fn detect(model: &mut OnnxModel, img: &RgbImage, p: &DetParams) -> Result<Ve
     let (ph, pw) = (shape[shape.len() - 2], shape[shape.len() - 1]);
 
     // порог -> бинарная карта
-    let mut bitmap = vec![0u8; pw * ph];
-    for i in 0..pw * ph {
-        if flat[i] > p.thresh {
-            bitmap[i] = 1;
-        }
-    }
+    let bitmap: Vec<u8> = flat[..pw * ph].iter().map(|&v| (v > p.thresh) as u8).collect();
     let bitmap = if p.use_dilation {
         dilate3(&bitmap, pw, ph)
     } else {

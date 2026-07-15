@@ -18,11 +18,7 @@ pub fn should_rotate180(model: &mut OnnxModel, crop: &RgbImage) -> Result<bool, 
     }
     // ресайз до высоты 48 с сохранением аспекта, паддинг до ширины 192 (как PP-OCR ClsPostProcess).
     let ratio = cw as f32 / ch as f32;
-    let mut rw = (CLS_H as f32 * ratio).ceil() as usize;
-    if rw > CLS_W {
-        rw = CLS_W;
-    }
-    rw = rw.max(1);
+    let rw = ((CLS_H as f32 * ratio).ceil() as usize).min(CLS_W).max(1);
     let mut input = Array4::<f32>::zeros((1, 3, CLS_H, CLS_W));
     let sx = cw as f32 / rw as f32;
     let sy = ch as f32 / CLS_H as f32;

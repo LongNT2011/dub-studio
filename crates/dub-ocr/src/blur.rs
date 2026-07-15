@@ -65,11 +65,17 @@ pub fn band_blur(mut dets: Vec<Det>, fps: u32) -> Vec<BlurBox> {
                 (y0 - 4.0).max(0.0) as i32,
                 (x1 - x0 + 12.0) as i32,
                 (y1 - y0 + 8.0) as i32,
-                (t0 * 100.0).round() / 100.0,
-                ((t1 + dt) * 100.0).round() / 100.0,
+                round2(t0),
+                round2(t1 + dt),
             )
         })
         .collect()
+}
+
+/// Округление секунд до 2 знаков (стабильные тайминги в project.json).
+#[inline]
+fn round2(v: f32) -> f32 {
+    (v * 100.0).round() / 100.0
 }
 
 /// Прямой блюр-бокс из региона/детекции с паддингом (порт таглайн/leftover-веток: (x,y,w,h,t0,t1)).
@@ -80,7 +86,7 @@ pub fn region_blur_box(x: f32, y: f32, w: f32, h: f32, t0: f32, t1: f32) -> Blur
         y.max(0.0) as i32,
         w as i32,
         h as i32,
-        (t0 * 100.0).round() / 100.0,
-        (t1 * 100.0).round() / 100.0,
+        round2(t0),
+        round2(t1),
     )
 }

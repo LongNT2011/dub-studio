@@ -178,18 +178,14 @@ pub fn box_score_fast(prob: &[f32], w: usize, h: usize, quad: &Quad) -> f32 {
         return 0.0;
     }
     let mut sum = 0.0f32;
-    let mut cnt = 0usize;
     for y in ymin..=ymax {
         for x in xmin..=xmax {
             sum += prob[y * w + x];
-            cnt += 1;
         }
     }
-    if cnt == 0 {
-        0.0
-    } else {
-        sum / cnt as f32
-    }
+    // после guard (xmax>=xmin, ymax>=ymin) диапазон непуст -> cnt >= 1, деление безопасно.
+    let cnt = (ymax - ymin + 1) * (xmax - xmin + 1);
+    sum / cnt as f32
 }
 
 /// Unclip: расширить прямоугольник наружу на distance = area * ratio / perimeter (Vatti/pyclipper
