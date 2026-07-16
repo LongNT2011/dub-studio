@@ -1710,13 +1710,13 @@ function Editor() {
               const nums = p.segments.map((x) => parseInt(x.speaker ?? "", 10)).filter((n) => !isNaN(n));
               const nid = String(nums.length ? Math.max(...nums) + 1 : 1);
               const targets = selSegs.size ? [...selSegs] : (() => { const act = p.segments.find((s) => scrub >= s.start && scrub <= s.end); return act ? [act.id] : []; })();
-              if (!targets.length) { pushActivity(t("voice.addSpeakerPick"), "info"); return; }
+              if (!targets.length) { pushActivity(t("voice.addSpeakerPick"), "work"); return; }
               setRendered(false);
               try {
                 let fresh = p;
                 for (const id of targets) fresh = await api.patch(pid, { op: "segment", id, speaker: nid });
                 setProject(fresh); bump(); setSelSegs(new Set());
-                pushActivity(t("voice.addSpeakerDone", { spk: nid, n: targets.length }), "info");
+                pushActivity(t("voice.addSpeakerDone", { spk: nid, n: targets.length }), "work");
               } catch (err) { await surfaceErr(err); }
             }}
               title={t("voice.addSpeakerHint")}
@@ -2244,7 +2244,7 @@ function FirstRun() {
 const batchState: { files: File[]; tgt: string; src: string; audio: string; subs: string; burn: boolean; detectText: boolean; funnyOn: boolean; funny: string } =
   { files: [], tgt: "ru", src: "auto", audio: "dub", subs: "translate", burn: true, detectText: false, funnyOn: false, funny: "" };
 
-type BatchItem = { name: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string };
+type BatchItem = { name: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string; detail?: string };
 
 // Пакетный режим: пачка файлов -> для каждого createProject -> analyze -> (dub/funny) render, последовательно
 // (движок одно-воркерный, GPU сериализует). Переиспользует существующие эндпоинты, отдельного backend не нужно.
@@ -2346,7 +2346,7 @@ function BatchView() {
 const multiLangState: { file: File | null; sourcePid: string | null; sourceName: string; langs: string[]; src: string; audio: string; subs: string; burn: boolean; detectText: boolean; funnyOn: boolean; funny: string } =
   { file: null, sourcePid: null, sourceName: "", langs: [], src: "auto", audio: "dub", subs: "translate", burn: true, detectText: false, funnyOn: false, funny: "" };
 
-type MLItem = { lang: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string };
+type MLItem = { lang: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string; detail?: string };
 
 // Мультиязычный перевод: ОДИН ролик -> сразу на N языков. Для каждого языка createProject(тот же файл) ->
 // analyze(tgt=язык) -> render -> output. Последовательно (движок одно-воркерный, GPU сериализует).
@@ -2455,7 +2455,7 @@ function MultiLangView() {
               {it.status === "done" && it.pid && (
                 <>
                   <button onClick={() => it.pid && openInEditor(it.pid)} className="text-[11px] text-[var(--color-muted)] inline-flex items-center gap-1 shrink-0 hover:text-[var(--color-text)]"><Eye size={12} />{t("multilang.openEditor")}</button>
-                  <button onClick={() => { if (it.pid) api.openOutput(it.pid).catch(() => it.pid && openInEditor(it.pid)); }} className="text-[11px] text-[var(--color-accent)] inline-flex items-center gap-1 shrink-0 hover:underline"><ExternalLink size={12} />{t("batch.open_out")}</button>
+                  <button onClick={() => { if (it.pid) api.openOutput(it.pid).catch(() => { if (it.pid) openInEditor(it.pid); }); }} className="text-[11px] text-[var(--color-accent)] inline-flex items-center gap-1 shrink-0 hover:underline"><ExternalLink size={12} />{t("batch.open_out")}</button>
                 </>
               )}
             </div>
