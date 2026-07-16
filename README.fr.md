@@ -23,9 +23,11 @@
 
 **[▶ Voir le showcase avant/après sur le site →](https://timoncool.github.io/dub-studio/#showcase)** — de vrais clips doublés de bout en bout sur un GPU local : vidéos, modes et langues différents.
 
-| ![dub](docs/shots/mode-dub-ru.png) | ![voiceover](docs/shots/mode-voiceover-es.png) | ![transcript](docs/shots/mode-transcribe-fr.png) |
+| ![dub](docs/shots/mode-dub-ru.png) | ![voiceover](docs/shots/mode-voiceover-es.png) | ![dub CJK](docs/shots/mode-dub-zh.png) |
 |:--:|:--:|:--:|
-| 🎙️ **Doublage** · EN→RU | 🗣️ **Voix off** · EN→ES | 🎬 **Transcription** · diarisation |
+| 🎙️ **Doublage** · EN→RU | 🗣️ **Voix off** · EN→ES | 🈶 **Doublage** · 中文 à l'image |
+| ![subtitles](docs/shots/mode-subtitles-ru.png) | ![widescreen](docs/shots/mode-dub-cinema-fr.png) | ![transcript](docs/shots/mode-transcribe-pt.png) |
+| 📝 **Sous-titres** · langue d'origine | 🎬 **Doublage** · large 16:9 | 🔤 **Transcription** · diarisation |
 
 ## Qu'est-ce que c'est
 

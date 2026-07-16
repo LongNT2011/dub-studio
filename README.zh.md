@@ -23,9 +23,11 @@
 
 **[▶ 在网站上观看前后对比视频展示 →](https://timoncool.github.io/dub-studio/#showcase)** — 真实片段，全部在本地 GPU 上端到端完成：不同的视频、模式和语言。
 
-| ![dub](docs/shots/mode-dub-ru.png) | ![voiceover](docs/shots/mode-voiceover-es.png) | ![transcript](docs/shots/mode-transcribe-fr.png) |
+| ![dub](docs/shots/mode-dub-ru.png) | ![voiceover](docs/shots/mode-voiceover-es.png) | ![dub CJK](docs/shots/mode-dub-zh.png) |
 |:--:|:--:|:--:|
-| 🎙️ **配音** · EN→RU | 🗣️ **旁白配音** · EN→ES | 🎬 **转录** · 说话人分离 |
+| 🎙️ **配音** · EN→RU | 🗣️ **旁白配音** · EN→ES | 🈶 **配音** · 画面上的中文 |
+| ![subtitles](docs/shots/mode-subtitles-ru.png) | ![widescreen](docs/shots/mode-dub-cinema-fr.png) | ![transcript](docs/shots/mode-transcribe-pt.png) |
+| 📝 **字幕** · 原语言 | 🎬 **配音** · 宽屏 16:9 | 🔤 **转录** · 说话人分离 |
 
 ## 这是什么
 

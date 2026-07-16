@@ -22,6 +22,16 @@ function fmtT(s: number) {
 // Имя файла из пути (Windows/POSIX-разделители); fallback — сам путь.
 const baseName = (path: string) => path.split(/[\\/]/).pop() || path;
 
+// Начальный playhead: ?t=SEC из URL (deep-link на кадр — для скринов/шаринга), иначе 1.0с.
+const initialScrub = (): number => {
+  try {
+    const q = new URLSearchParams(location.search).get("t");
+    const n = q ? parseFloat(q) : NaN;
+    if (Number.isFinite(n) && n >= 0) return n;
+  } catch { /* нет URL/DOM */ }
+  return 1.0;
+};
+
 // Направления тени титра/субтитра (значение, стрелка) — единый список для двух селектов.
 const SHADOW_DIRS: [string, string][] = [
   ["", "—"], ["270", "↑"], ["315", "↗"], ["0", "→"], ["45", "↘"],
@@ -990,7 +1000,7 @@ function Editor() {
   const redo = useStore((s) => s.redo);
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
-  const [scrub, setScrub] = useState(1.0);
+  const [scrub, setScrub] = useState(initialScrub);                   // ?t=SEC — deep-link на кадр (для скринов/шаринга), иначе 1.0с
   const [selSegs, setSelSegs] = useState<Set<string>>(new Set());     // multi-select for bulk hide/delete
   const [selBlurs, setSelBlurs] = useState<Set<number>>(new Set());   // multi-select: mask boxes
   const [selTitles, setSelTitles] = useState<Set<number>>(new Set()); // multi-select: titles
@@ -2566,7 +2576,7 @@ function TranscriptView() {
   const pid = useStore((s) => s.pid) as string;
   const [busy, setBusy] = useState<string | null>(null);            // спикер в работе, либо "__all__"
   const [made, setMade] = useState<Record<string, string>>({});     // спикер -> имя созданного голоса
-  const [scrub, setScrub] = useState(0);
+  const [scrub, setScrub] = useState(() => initialScrub() || 0);      // ?t=SEC — deep-link на кадр транскрипта
   const [play, setPlay] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   // Плей: <video> тянет /dub — для транскрипта (nodub) это ОРИГИНАЛ (видео+аудио). Скраб следует за

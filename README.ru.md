@@ -23,9 +23,11 @@
 
 **[▶ Смотреть showcase «до/после» на сайте →](https://timoncool.github.io/dub-studio/#showcase)** — реальные ролики, продублированные локально на GPU: разные видео, режимы и языки.
 
-| ![dub](docs/shots/mode-dub-ru.png) | ![voiceover](docs/shots/mode-voiceover-es.png) | ![transcript](docs/shots/mode-transcribe-fr.png) |
+| ![dub](docs/shots/mode-dub-ru.png) | ![voiceover](docs/shots/mode-voiceover-es.png) | ![dub CJK](docs/shots/mode-dub-zh.png) |
 |:--:|:--:|:--:|
-| 🎙️ **Дубляж** · EN→RU | 🗣️ **Закадровый** · EN→ES | 🎬 **Транскрипт** · диаризация |
+| 🎙️ **Дубляж** · EN→RU | 🗣️ **Закадровый** · EN→ES | 🈶 **Дубляж** · →中文 на кадре |
+| ![subtitles](docs/shots/mode-subtitles-ru.png) | ![widescreen](docs/shots/mode-dub-cinema-fr.png) | ![transcript](docs/shots/mode-transcribe-pt.png) |
+| 📝 **Субтитры** · язык оригинала | 🎬 **Дубляж** · широкий 16:9 | 🔤 **Транскрипт** · диаризация |
 
 ## Что это
 

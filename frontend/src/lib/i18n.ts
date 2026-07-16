@@ -73,6 +73,10 @@ export const DUB_LANGS: { code: string; name: string }[] = [
 
 const isLang = (v: string): v is Lang => (LANGS as readonly string[]).includes(v);
 const detect = (): Lang => {
+  try {                                                     // ?lang=xx — глубокая ссылка на язык (и для скринов)
+    const q = new URLSearchParams(location.search).get("lang");
+    if (q && isLang(q)) return q;
+  } catch { /* нет URL/DOM */ }
   const stored = localStorage.getItem("lang");
   if (stored && isLang(stored)) return stored;
   const nav = (navigator.language || "en").slice(0, 2).toLowerCase();

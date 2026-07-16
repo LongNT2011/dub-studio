@@ -32,11 +32,11 @@ This is **v2 — a fully native rewrite**. No embeddable Python, no torch, no CU
 
 **[▶ Watch the before/after video showcase →](https://timoncool.github.io/dub-studio/#showcase)** — real clips dubbed end‑to‑end on a local GPU: different videos, different modes, different languages, nothing left the machine.
 
-| ![Full dub, Russian UI](docs/shots/mode-dub-ru.png) | ![Voice-over, Spanish UI](docs/shots/mode-voiceover-es.png) | ![Transcript, French UI](docs/shots/mode-transcribe-fr.png) |
+| ![Full dub, Russian UI](docs/shots/mode-dub-ru.png) | ![Voice-over, Spanish UI](docs/shots/mode-voiceover-es.png) | ![Full dub, Chinese UI, CJK captions](docs/shots/mode-dub-zh.png) |
 |:--:|:--:|:--:|
-| 🎙️ **Full dub** · EN→RU | 🗣️ **Voice-over** · EN→ES | 🎬 **Transcript** · diarized |
-| ![Subtitles, Chinese UI](docs/shots/mode-subtitles-zh.png) | ![Funny remix, Russian UI](docs/shots/mode-funny-ru.png) | ![Reverse dub RU to EN](docs/shots/mode-dubrev-en.png) |
-| 📝 **Subtitles** · original-lang | ✨ **Funny remix** · rewritten | 🎙️ **Reverse dub** · RU→EN |
+| 🎙️ **Full dub** · EN→RU | 🗣️ **Voice-over** · EN→ES | 🈶 **Full dub** · →中文, CJK on frame |
+| ![Subtitles, Russian UI](docs/shots/mode-subtitles-ru.png) | ![Full dub, widescreen, French UI](docs/shots/mode-dub-cinema-fr.png) | ![Transcript, Portuguese UI](docs/shots/mode-transcribe-pt.png) |
+| 📝 **Subtitles** · original-lang | 🎬 **Full dub** · widescreen 16:9 | 🔤 **Transcript** · diarized |
 
 ## Five modes, switchable on the fly
 
