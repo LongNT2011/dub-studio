@@ -37,6 +37,8 @@ pub struct AnalyzePaths {
     pub mmproj: std::path::PathBuf,   // mmproj GGUF (vision-проектор)
     pub models_root: std::path::PathBuf, // корень моделей (для OCR: <root>/ocr/…)
     pub caption_fps: i32,             // частота семплинга кадров OCR
+    /// Импортированные субтитры (SRT/ASS) — если есть, берём текст+тайминг отсюда вместо ASR.
+    pub import_subs: Option<std::path::PathBuf>,
 }
 
 /// Колбэк прогресса джобы (msg + произвольные поля). stage — фаза как в питоне.
@@ -88,6 +90,21 @@ fn resolve_modes(args: &AnalyzeArgs) -> (String, String) {
     }
     .to_string();
     (mode, subs)
+}
+
+/// Спикер для импортированной реплики субтитров — по максимальному перекрытию по времени с
+/// диаризацией. Нет перекрытия / нет диаризации -> "0" (тот же single-speaker контракт, что у ASR).
+fn speaker_for(start: f64, end: f64, turns: &[dub_asr::Turn]) -> String {
+    let mut best_spk = 0i32;
+    let mut best_ov = 0.0f64;
+    for t in turns {
+        let ov = end.min(t.end) - start.max(t.start);
+        if ov > best_ov {
+            best_ov = ov;
+            best_spk = t.speaker;
+        }
+    }
+    best_spk.to_string()
 }
 
 /// Запустить analyze: extract -> diarize -> transcribe -> Project. Возвращает готовый Project.
@@ -142,10 +159,39 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         None
     };
 
-    // 4) транскрипция. n_spk>1 -> transcribe_turns (каждая реплика одного спикера); иначе whole-clip.
-    //    Движок выбран настройкой (Parakeet/Whisper) — analyze не знает деталей (build_engine).
-    let mut asr = crate::models::build_engine(&paths.asr);
-    let (segments, n_spk): (Vec<Segment>, usize) = match &diar {
+    // 4) сегменты: из импортированных субтитров (точный текст+тайминг, ASR пропущен) ЛИБО через ASR.
+    //    Импорт: спикеров всё равно раздаём — по максимальному перекрытию реплики с диаризацией.
+    let (segments, n_spk): (Vec<Segment>, usize) = if let Some(subs_path) = &paths.import_subs {
+        let content = std::fs::read_to_string(subs_path)
+            .map_err(|e| format!("чтение субтитров {}: {e}", subs_path.display()))?;
+        let ext = subs_path.extension().and_then(|s| s.to_str()).unwrap_or("srt");
+        let cues = crate::subimport::parse(&content, ext);
+        if cues.is_empty() {
+            return Err(format!("субтитры не распознаны/пусты: {}", subs_path.display()));
+        }
+        let turns: &[dub_asr::Turn] = diar.as_ref().map(|d| d.turns.as_slice()).unwrap_or(&[]);
+        let segs: Vec<Segment> = cues
+            .into_iter()
+            .enumerate()
+            .map(|(i, c)| Segment {
+                id: format!("s{i}"),
+                start: c.start,
+                end: c.end,
+                speaker: Some(speaker_for(c.start, c.end, turns)),
+                src_text: c.text,
+                tgt_text: String::new(),
+                voice: None,
+                dirty: false,
+                extra: Default::default(),
+            })
+            .collect();
+        let n = diar.as_ref().map(|d| d.n_speakers).unwrap_or(1).max(1);
+        emit(progress, "asr", &format!("субтитры импортированы: {} реплик, {} спикер(ов)", segs.len(), n));
+        (segs, n)
+    } else {
+        // Движок выбран настройкой (Parakeet/Whisper) — analyze не знает деталей (build_engine).
+        let mut asr = crate::models::build_engine(&paths.asr);
+        match &diar {
         Some(d) if d.n_speakers > 1 && !d.turns.is_empty() => {
             emit(
                 progress,
@@ -209,6 +255,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
                 })
                 .collect();
             (segs, 1)
+        }
         }
     };
 

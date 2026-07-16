@@ -20,6 +20,7 @@ mod record;
 mod render;
 mod setup;
 mod spa;
+mod subimport;
 mod translate;
 mod wavio;
 
@@ -89,6 +90,7 @@ pub fn verify_captions_e2e(
         mmproj,
         models_root: mroot,
         caption_fps: opts.caption_fps,
+        import_subs: None,
     };
     let cb = |ev: Value| {
         if let Some(m) = ev.get("msg").and_then(|v| v.as_str()) {
@@ -687,9 +689,11 @@ async fn create_project(
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
 
+    // Поля мультипарта: видео + (опц.) файл субтитров. Роутим по расширению — порядок неважен.
+    // Субтитры (srt/ass/ssa) -> import_subs.<ext> (analyze возьмёт текст+тайминг оттуда, ASR skip).
     let mut filename: Option<String> = None;
+    let mut imported_subs = false;
     while let Ok(Some(field)) = multipart.next_field().await {
-        // Поле файла (в app.py параметр называется `file`); берём первое с именем файла.
         let fname = field.file_name().map(|s| s.to_string());
         let data = match field.bytes().await {
             Ok(b) => b,
@@ -699,7 +703,16 @@ async fn create_project(
             .as_deref()
             .and_then(|f| Path::new(f).extension())
             .and_then(|e| e.to_str())
-            .unwrap_or("mp4");
+            .unwrap_or("mp4")
+            .to_ascii_lowercase();
+        if matches!(ext.as_str(), "srt" | "ass" | "ssa") {
+            let dst = d.join(format!("import_subs.{ext}"));
+            if let Err(e) = tokio::fs::write(&dst, &data).await {
+                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+            }
+            imported_subs = true;
+            continue;
+        }
         let dst = d.join(format!("source.{ext}"));
         if let Err(e) = tokio::fs::write(&dst, &data).await {
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
@@ -711,10 +724,9 @@ async fn create_project(
             let _ = tokio::fs::write(d.join("name.txt"), n.as_bytes()).await;
         }
         filename = fname;
-        break;
     }
 
-    Json(json!({ "project_id": pid, "filename": filename })).into_response()
+    Json(json!({ "project_id": pid, "filename": filename, "imported_subs": imported_subs })).into_response()
 }
 
 // ─── GET /projects ──────────────────────────────────────────────────────────
@@ -837,6 +849,14 @@ async fn analyze_project(
     let (mt_model, mmproj) = models::resolve_mt(&st.models_root, &sel);
     let asr = models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel);
     eprintln!("[models] analyze: MT={} · ASR={}", mt_model.display(), asr.describe());
+    // Импортированные субтитры (если юзер загрузил их при создании) — берём текст+тайминг оттуда, ASR skip.
+    let import_subs = ["srt", "ass", "ssa"]
+        .iter()
+        .map(|e| dir.join(format!("import_subs.{e}")))
+        .find(|p| p.is_file());
+    if let Some(p) = &import_subs {
+        eprintln!("[analyze] импорт субтитров: {}", p.display());
+    }
     let paths = analyze::AnalyzePaths {
         input,
         work_dir: dir.clone(),
@@ -847,6 +867,7 @@ async fn analyze_project(
         mmproj,
         models_root: st.models_root.clone(),
         caption_fps: st.opts.caption_fps,
+        import_subs,
     };
 
     // Тело джобы: analyze -> project.json (атомарно). Прогресс -> SSE.

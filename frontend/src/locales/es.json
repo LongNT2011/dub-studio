@@ -387,5 +387,10 @@
   "audio": {
     "onlyTitle": "Proyecto solo de audio",
     "onlyHint": "Sin pista de vídeo. Edita la transcripción, elige voces y exporta para obtener el audio doblado (WAV)."
+  },
+  "import": {
+    "subs": "Importar subtítulos (SRT / ASS)",
+    "subsHint": "¿Ya tienes subtítulos? Súbelos: usamos su texto y tiempos como base en lugar del reconocimiento automático (los hablantes se asignan solos, luego traducción y voz).",
+    "subsClear": "Quitar — usar reconocimiento automático"
   }
 }

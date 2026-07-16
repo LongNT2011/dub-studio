@@ -387,5 +387,10 @@
   "audio": {
     "onlyTitle": "Projeto somente de áudio",
     "onlyHint": "Sem faixa de vídeo. Edite a transcrição, escolha vozes e exporte para obter o áudio dublado (WAV)."
+  },
+  "import": {
+    "subs": "Importar legendas (SRT / ASS)",
+    "subsHint": "Já tem legendas? Envie-as: usamos o texto e o tempo como base em vez do reconhecimento automático (falantes atribuídos automaticamente, depois tradução e voz).",
+    "subsClear": "Remover — usar reconhecimento automático"
   }
 }

@@ -538,6 +538,7 @@ function DropZone() {
     }
   }
   const [file, setFile] = useState<File | null>(null);                          // staged video — analyzed on Start, not on drop
+  const [subsFile, setSubsFile] = useState<File | null>(null);                  // опц. готовые субтитры (SRT/ASS) -> текст+тайминг вместо ASR
   // Композируемые опции обработки (независимы, любые комбинации). audio = аудио-выход; subs = содержимое
   // субтитров; burn = вжигать ли их на видео; funnyOn+funny = шуточный ремикс (сочетается с дубляжом/голосом).
   const [audio, setAudio] = useState<"nodub" | "dub" | "voiceover" | "transcribe">("dub");
@@ -581,7 +582,7 @@ function DropZone() {
     s.setStage("analyzing");
     s.setProgress("", "", null);             // fresh stepper for this run
     try {
-      const { project_id } = await api.createProject(file);
+      const { project_id } = await api.createProject(file, isAudioFile(file) ? null : subsFile);   // сабы — только для видео
       s.setPid(project_id);
       // subtitles = ОРИГИНАЛ: исходная дорожка + субтитры на языке оригинала (без дубляжа, без перевода);
       // voiceover = закадровый (перевод+TTS, оригинал слышно приглушённым); transcribe = транскрипт+диаризация.
@@ -724,6 +725,20 @@ function DropZone() {
           {asrNote
             ? <p className="mt-1 text-center text-[10px] text-[var(--color-accent-2)] leading-tight">{t("comp.asrSwitched", { lang: asrNote })}</p>
             : <p className="mt-1 text-center text-[10px] text-[var(--color-muted)] leading-tight">{t("comp.langHint")}</p>}
+          {/* Импорт готовых субтитров (SRT/ASS): точный текст+тайминг вместо авто-распознавания (ASR skip). */}
+          {!(file && isAudioFile(file)) && (
+            <div className="mt-2 flex flex-col items-center gap-0.5">
+              <label className={`inline-flex items-center gap-1.5 text-[11px] cursor-pointer transition-colors ${subsFile ? "text-[var(--color-accent-2)]" : "text-[var(--color-muted)] hover:text-[var(--color-accent-2)]"}`}>
+                <Captions size={13} />
+                {subsFile ? subsFile.name : t("import.subs")}
+                <input type="file" accept=".srt,.ass,.ssa" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0] ?? null; setSubsFile(f); e.currentTarget.value = ""; }} />
+              </label>
+              {subsFile
+                ? <button onClick={() => setSubsFile(null)} className="inline-flex items-center gap-1 text-[10px] text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={10} />{t("import.subsClear")}</button>
+                : <span className="text-[10px] text-[var(--color-muted)] leading-tight text-center max-w-[300px]">{t("import.subsHint")}</span>}
+            </div>
+          )}
           {/* АУДИО-ВЫХОД (независимо от субтитров) */}
           <div className="mt-3 flex items-center gap-1.5 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("comp.audioLabel")}<span title={t("comp.optionsHelp")} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span></div>
           <div className="grid grid-cols-2 gap-1.5">

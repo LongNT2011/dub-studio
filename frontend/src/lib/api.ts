@@ -116,9 +116,10 @@ export const api = {
   voicesDelete: (name: string) => postJson<{ voices: string[] }>("/voices/delete", { name }),
   speakerVoice: (pid: string, speaker: string, name: string) => postJson<{ ok: boolean; name: string; voices: string[] }>(`/projects/${pid}/speaker-voice`, { speaker, name }),
   presets: () => getJson<{ presets: Record<string, Record<string, unknown>>; reveals: string[] }>("/presets"),
-  createProject: (file: File) => {
+  createProject: (file: File, subs?: File | null) => {
     const fd = new FormData(); fd.append("file", file);
-    return fetch(`${BASE}/projects`, { method: "POST", body: fd }).then(j<{ project_id: string }>);
+    if (subs) fd.append("subs", subs);   // готовые субтитры (SRT/ASS) -> analyze возьмёт текст+тайминг вместо ASR
+    return fetch(`${BASE}/projects`, { method: "POST", body: fd }).then(j<{ project_id: string; imported_subs?: boolean }>);
   },
   analyze: (pid: string, tgt_lang: string, mode = "auto", src_lang = "auto", subs = "auto", rewrite = "", burn = true, detect = true) =>
     fetch(`${BASE}/projects/${pid}/analyze?tgt_lang=${tgt_lang}&mode=${mode}&src_lang=${src_lang}&subs=${subs}&rewrite=${encodeURIComponent(rewrite)}&burn=${burn ? 1 : 0}&detect=${detect ? 1 : 0}`, { method: "POST" }).then(j<{ job_id: string }>),

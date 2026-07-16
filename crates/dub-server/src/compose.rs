@@ -947,6 +947,7 @@ mod tests {
             mmproj: p.clone(),
             models_root: p.clone(),
             caption_fps: 4,
+            import_subs: None,
         }
     }
 
