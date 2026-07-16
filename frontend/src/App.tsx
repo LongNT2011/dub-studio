@@ -418,7 +418,7 @@ function StatusBar() {
   const errored = !busy && last?.kind === "error";
   const fmt = (ms: number) => new Date(ms).toLocaleTimeString();
   return (
-    <div className="relative flex-1 min-w-0 flex justify-center px-3">
+    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex justify-center max-w-[40vw] px-3">
       <button onClick={() => setOpen((o) => !o)} title={t("status.log")}
         className="inline-flex items-center gap-2 max-w-full px-3 py-1 rounded-md text-[12px] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors">
         {busy
@@ -464,7 +464,7 @@ function TopBar() {
     try { history.replaceState(null, "", location.pathname); } catch { /* no-op */ }
   };
   return (
-    <header className="flex items-center justify-between px-5 h-14 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+    <header className="relative flex items-center justify-between px-5 h-14 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
       <div className="flex items-center gap-3">
         <span className="flex items-center gap-2 font-bold tracking-tight">
           <img src="/favicon.svg" alt="" width={20} height={20} className="rounded-[5px] shadow-[0_0_10px_rgba(198,242,78,0.25)]" />
@@ -476,9 +476,9 @@ function TopBar() {
       </div>
       <StatusBar />
       <div className="flex items-center gap-2">
-        {/* Экспорт-сплит редактора телепортируется сюда (портал). */}
-        <div id="editor-actions-slot" className="flex items-center gap-2" />
         <div id="dock-slot" className="flex items-center gap-2" />
+        {/* Экспорт-сплит редактора (портал) — статично рядом с «Новый». */}
+        <div id="editor-actions-slot" className="flex items-center gap-2" />
         {stage !== "empty" && (
           <button onClick={newProject} title={t("nav.newHint")}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[13px] font-medium text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors">
