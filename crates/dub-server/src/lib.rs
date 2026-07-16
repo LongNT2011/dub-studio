@@ -333,6 +333,9 @@ pub fn build_router(state: AppState) -> Router {
         // фронт (ComparePane) вставляет его как <img src>. Range-раздача сырого видео — /dub.
         .route("/projects/{pid}/original", get(endpoints::original_frame))
         .route("/projects/{pid}/dub", get(dub_video))
+        .route("/projects/{pid}/source", get(source_video))   // исходное видео (Range) для живого превью
+        .route("/projects/{pid}/subs.ass", get(subs_ass))     // живой ASS для JASSUB-оверлея
+        .route("/fonts/{name}", get(font_file))               // TTF-файл для JASSUB availableFonts
         .route("/jobs/{job_id}/events", get(job_events))
         // SPA fallback — монтируется последним, чтобы не затенять API.
         .fallback(spa_fallback)
@@ -1112,6 +1115,92 @@ async fn dub_video(
 
 /// Отдать файл с поддержкой Range (для <video> seek). Используем tower-http ServeFile — он
 /// корректно обрабатывает Range/If-Range/Content-Range. dl -> Content-Disposition attachment.
+/// GET /projects/{pid}/source — сырое ИСХОДНОЕ видео (Range) для нативного <video> в живом превью
+/// (JASSUB-оверлей рисует субтитры/титры поверх, dub-звук отдельной дорожкой). Путь из source.txt.
+async fn source_video(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let mut f = std::fs::read_to_string(dir.join("source.txt"))
+        .ok()
+        .map(|s| PathBuf::from(s.trim().to_string()))
+        .filter(|p| p.is_file());
+    if f.is_none() {
+        if let Ok(rd) = std::fs::read_dir(&dir) {
+            for e in rd.flatten() {
+                let p = e.path();
+                if p.file_stem().and_then(|s| s.to_str()) == Some("source") && p.is_file() {
+                    f = Some(p);
+                    break;
+                }
+            }
+        }
+    }
+    match f {
+        Some(f) => serve_file_range(&f, req, None).await,
+        None => (StatusCode::NOT_FOUND, "no source video").into_response(),
+    }
+}
+
+/// GET /projects/{pid}/subs.ass — ЖИВОЙ ASS текущего Project (субтитры + титры), тот же build_ass, что и
+/// финальный burn -> текст пиксель-в-пиксель. JASSUB (WASM-libass) рисует его в браузере поверх <video> на
+/// 60fps без серверного рендера кадров. Блюр-боксы сюда НЕ входят (это ffmpeg-гаусс; фронт кладёт CSS-blur).
+async fn subs_ass(State(st): State<AppState>, AxPath(pid): AxPath<String>) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let text = match std::fs::read_to_string(dir.join("project.json")) {
+        Ok(t) => t,
+        Err(_) => return (StatusCode::CONFLICT, "project not analyzed").into_response(),
+    };
+    let proj = match Project::from_json(&text) {
+        Ok(p) => p,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+    let (vw, vh, total) = (proj.meta.width, proj.meta.height, proj.meta.duration);
+    if vw <= 0 || vh <= 0 {
+        return (StatusCode::CONFLICT, "audio-only: no video overlay").into_response();
+    }
+    dub_captions::set_fonts_dir(&st.fonts_dir);
+    let ass_path = dir.join("_live.ass");
+    if let Err(e) = render::build_ass(&proj, &ass_path, vw, vh, total) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    match std::fs::read_to_string(&ass_path) {
+        Ok(ass) => (
+            [(axum::http::header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+            ass,
+        )
+            .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// GET /fonts/{name} — bundled TTF/OTF из fonts_dir для JASSUB (availableFonts). Санитизация: только
+/// basename + шрифтовое расширение (без path-traversal).
+async fn font_file(
+    State(st): State<AppState>,
+    AxPath(name): AxPath<String>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Response {
+    let base = std::path::Path::new(&name).file_name().and_then(|s| s.to_str()).unwrap_or("");
+    let ok_ext = [".ttf", ".otf", ".ttc", ".woff2"].iter().any(|e| base.to_ascii_lowercase().ends_with(e));
+    if base.is_empty() || !ok_ext {
+        return (StatusCode::BAD_REQUEST, "bad font name").into_response();
+    }
+    let f = st.fonts_dir.join(base);
+    if !f.is_file() {
+        return (StatusCode::NOT_FOUND, "no font").into_response();
+    }
+    serve_file_range(&f, req, None).await
+}
+
 async fn serve_file_range(
     path: &Path,
     req: axum::http::Request<axum::body::Body>,

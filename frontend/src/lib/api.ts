@@ -134,6 +134,9 @@ export const api = {
   reveal: (pid: string, name: string) => postJson<{ ok: boolean }>(`/projects/${pid}/reveal`, { name }),   // показать файл в проводнике с выделением
   saveText: (pid: string, name: string, text: string) => postJson<{ ok: boolean; path: string }>(`/projects/${pid}/save-text`, { name, text }),   // записать SRT/TXT в каталог проекта + reveal (webview не качает blob)
   dubUrl: (pid: string, rev = 0) => `${BASE}/projects/${pid}/dub?rev=${rev}`,   // playable dubbed video (frames + dub audio)
+  sourceVideoUrl: (pid: string) => `${BASE}/projects/${pid}/source`,            // сырое исходное видео (Range) для живого превью
+  subsAssUrl: (pid: string, rev = 0) => `${BASE}/projects/${pid}/subs.ass?rev=${rev}`,   // живой ASS для JASSUB (rev — cache-bust на правках)
+  fontUrl: (file: string) => `${BASE}/fonts/${file}`,                           // bundled TTF для JASSUB availableFonts
   // SSE job progress -> onEvent per message; resolves on done, rejects on error
   watchJob: (jobId: string, onEvent: (e: JobEvent) => void) =>
     new Promise<unknown>((resolve, reject) => {
