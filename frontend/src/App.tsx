@@ -1450,9 +1450,11 @@ function Editor() {
                   <input key={`sz${i}-${ti.size_px ?? "a"}`} type="number" min={12} max={300} defaultValue={ti.size_px ?? undefined} placeholder="px" title={t("style.size")}
                     onBlur={(e) => branch("title", { idx: i, size_px: e.target.value ? parseInt(e.target.value) : null })}
                     className="w-12 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 text-[11px] focus:border-[var(--color-accent)] focus:outline-none" />
-                  <Combobox value={ti.font || ""} onChange={(f) => branch("title", { idx: i, font: f })}
-                    options={Object.keys(fonts).map((f) => ({ value: f, label: f }))}
-                    placeholder={t("style.font")} noResults={t("voice.noMatch")} allowClear size="sm" className="w-[110px]" />
+                  <select value={ti.font || ""} onChange={(e) => branch("title", { idx: i, font: e.target.value })}
+                    className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-[11px] focus:border-[var(--color-accent)] focus:outline-none">
+                    <option value="">{t("style.font")}</option>
+                    {Object.keys(fonts).map((f) => <option key={f} value={f}>{f}</option>)}
+                  </select>
                   <span className="inline-flex rounded border border-[var(--color-border)] overflow-hidden">
                     {([["left", AlignLeft, "edit.alignLeft"], ["center", AlignCenter, "edit.alignCenter"], ["right", AlignRight, "edit.alignRight"]] as const).map(([a, Ic, k]) => (
                       <button key={a} onClick={(e) => { e.stopPropagation(); branch("title", { idx: i, align: a }); }} title={t(k)}
@@ -1610,9 +1612,12 @@ function Editor() {
         {ss && (
           <div className="space-y-3">
             <Row label={t("style.font")}>
-              <Combobox value={ss.font || "Montserrat"} onChange={(f) => branch("caption", { font: f })}
-                options={(Object.keys(fonts).length ? Object.keys(fonts) : [ss.font || "Montserrat"]).map((f) => ({ value: f, label: f }))}
-                placeholder={t("style.font")} noResults={t("voice.noMatch")} size="sm" className="w-[160px] max-w-[160px]" />
+              <select value={ss.font || "Montserrat"} onChange={(e) => branch("caption", { font: e.target.value })}
+                className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] max-w-[160px] focus:border-[var(--color-accent)] focus:outline-none transition-colors"
+                title={fonts[ss.font || "Montserrat"] || ""}>
+                {Object.keys(fonts).length ? Object.keys(fonts).map((f) => <option key={f} value={f}>{f}</option>)
+                                           : <option value={ss.font || "Montserrat"}>{ss.font || "Montserrat"}</option>}
+              </select>
             </Row>
             <Toggle label={t("style.bold")} on={ss.bold} onClick={() => branch("caption", { bold: !ss.bold })} />
             <Toggle label={t("style.italic")} on={ss.italic} onClick={() => branch("caption", { italic: !ss.italic })} />
