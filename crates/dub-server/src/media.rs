@@ -68,25 +68,40 @@ pub fn probe(input: &Path) -> Result<MediaMeta, String> {
         .get("streams")
         .and_then(|s| s.as_array())
         .ok_or("ffprobe: нет streams")?;
+    // Видеопоток ОПЦИОНАЛЕН: чистый аудио-вход (WAV/mp3/…) поддерживается в аудио-режиме (без видео).
+    // Нет видео -> width/height/fps=0 (сигнал audio-only), кодек берём из аудиопотока.
     let vstream = streams
         .iter()
-        .find(|s| s.get("codec_type").and_then(|t| t.as_str()) == Some("video"))
-        .ok_or("во входе нет видеопотока")?;
+        .find(|s| s.get("codec_type").and_then(|t| t.as_str()) == Some("video"));
+    let astream = streams
+        .iter()
+        .find(|s| s.get("codec_type").and_then(|t| t.as_str()) == Some("audio"));
+    if vstream.is_none() && astream.is_none() {
+        return Err("во входе нет ни видео-, ни аудиопотока".to_string());
+    }
     let duration = v
         .get("format")
         .and_then(|f| f.get("duration"))
         .and_then(|d| d.as_str())
         .and_then(|d| d.parse::<f64>().ok())
+        .or_else(|| {
+            // некоторые WAV не имеют format.duration -> берём из аудиопотока
+            astream
+                .and_then(|s| s.get("duration"))
+                .and_then(|d| d.as_str())
+                .and_then(|d| d.parse::<f64>().ok())
+        })
         .ok_or("не удалось определить длительность")?;
-    let width = vstream.get("width").and_then(|w| w.as_i64()).unwrap_or(0);
-    let height = vstream.get("height").and_then(|h| h.as_i64()).unwrap_or(0);
+    let width = vstream.and_then(|s| s.get("width")).and_then(|w| w.as_i64()).unwrap_or(0);
+    let height = vstream.and_then(|s| s.get("height")).and_then(|h| h.as_i64()).unwrap_or(0);
     let fps = vstream
-        .get("r_frame_rate")
+        .and_then(|s| s.get("r_frame_rate"))
         .and_then(|r| r.as_str())
         .map(parse_fps)
         .unwrap_or(0.0);
     let src_codec = vstream
-        .get("codec_name")
+        .or(astream)
+        .and_then(|s| s.get("codec_name"))
         .and_then(|c| c.as_str())
         .unwrap_or("")
         .to_string();
@@ -251,6 +266,16 @@ pub fn mux(video: &Path, audio: &Path, out: &Path) -> Result<(), String> {
         OsStr::new("-map"), OsStr::new("0:v:0"), OsStr::new("-map"), OsStr::new("1:a:0?"),
         OsStr::new("-af"), OsStr::new("aformat=channel_layouts=stereo"),
         OsStr::new("-c:v"), OsStr::new("copy"), OsStr::new("-c:a"), OsStr::new("aac"), out.as_os_str(),
+    ])
+}
+
+/// Сконвертировать аудио в PCM 16-bit WAV (стерео). Финальный формат аудио-режима (вход без видео):
+/// пачка WAV -> пачка озвученных WAV. Лоссовость только от исходного mix (aac), сам WAV без потерь.
+pub fn to_wav(src: &Path, dst: &Path) -> Result<(), String> {
+    run_ff(&[
+        OsStr::new("-y"), OsStr::new("-i"), src.as_os_str(),
+        OsStr::new("-af"), OsStr::new("aformat=channel_layouts=stereo"),
+        OsStr::new("-c:a"), OsStr::new("pcm_s16le"), dst.as_os_str(),
     ])
 }
 

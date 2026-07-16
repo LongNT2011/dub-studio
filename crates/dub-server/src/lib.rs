@@ -964,12 +964,15 @@ async fn output(
         Ok(d) => d,
         Err(resp) => return resp,
     };
+    // output.mp4 (видео) или output.wav (аудио-режим, вход без видео).
     let f = dir.join("output.mp4");
+    let f = if f.is_file() { f } else { dir.join("output.wav") };
     if !f.is_file() {
         return (StatusCode::NOT_FOUND, "not rendered").into_response();
     }
     let dl = q.get("dl").map(|v| v == "1").unwrap_or(false);
-    let filename = if dl { Some(format!("{pid}_dub.mp4")) } else { None };
+    let ext = f.extension().and_then(|s| s.to_str()).unwrap_or("mp4");
+    let filename = if dl { Some(format!("{pid}_dub.{ext}")) } else { None };
     serve_file_range(&f, req, filename).await
 }
 
@@ -981,6 +984,7 @@ async fn open_output(State(st): State<AppState>, AxPath(pid): AxPath<String>) ->
         Err(r) => return r,
     };
     let f = dir.join("output.mp4");
+    let f = if f.is_file() { f } else { dir.join("output.wav") };
     if !f.is_file() {
         return (StatusCode::NOT_FOUND, "not rendered").into_response();
     }
@@ -1062,15 +1066,22 @@ async fn dub_video(
         Ok(d) => d,
         Err(resp) => return resp,
     };
-    // Что играет <audio>: собранный output.mp4 (после рендера), иначе dub_audio.m4a (озвучка после
-    // анализа — слушать дуб, не собирая видео), иначе analyzed.mp4 (оригинальная дорожка).
-    let mut f = dir.join("output.mp4");
-    if !f.is_file() {
-        f = dir.join("dub_audio.m4a");
-    }
-    if !f.is_file() {
-        f = dir.join("analyzed.mp4");
-    }
+    // Что играет <audio>: свежайший дубляж. И output.mp4 (после Экспорта), и dub_audio.m4a (после
+    // «перегенерировать озвучку»/regen) несут актуальную дорожку — но regen обновляет ТОЛЬКО dub_audio.m4a,
+    // не output.mp4. Прежний жёсткий приоритет output.mp4 играл в превью УСТАРЕВШИЙ дубляж после regen
+    // (юзеры: «перегенерировать не работает, новое слышно только после Экспорта») -> берём НОВЕЙШИЙ по mtime.
+    let output_mp4 = dir.join("output.mp4");
+    let output = if output_mp4.is_file() { output_mp4 } else { dir.join("output.wav") }; // .wav = аудио-режим
+    let dub_audio = dir.join("dub_audio.m4a");
+    let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let mut f = match (output.is_file(), dub_audio.is_file()) {
+        (true, true) => {
+            if mtime(&dub_audio) > mtime(&output) { dub_audio } else { output }
+        }
+        (true, false) => output,
+        (false, true) => dub_audio,
+        (false, false) => dir.join("analyzed.mp4"),
+    };
     if !f.is_file() {
         // nodub / субтитры / транскрипт: озвучки нет — играем ОРИГИНАЛЬНУЮ дорожку видео (source.*),
         // чтобы плей в редакторе работал (переиспользуем аудиодорожку исходника, <audio> берёт её из mp4).

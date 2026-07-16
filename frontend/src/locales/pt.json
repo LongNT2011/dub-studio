@@ -10,7 +10,8 @@
     "change": "clique para trocar",
     "browse": "Procurar",
     "recent": "Recentes",
-    "demo": "Testar demo"
+    "demo": "Testar demo",
+    "audioMode": "Sem vídeo — modo somente áudio"
   },
   "hero": {
     "eyebrow": "LOCAL · OFFLINE · 100+ IDIOMAS",
@@ -351,5 +352,9 @@
     "burnHint": "Gravar legendas/títulos no vídeo (desligado = vídeo limpo, ex. dublagem sem legendas)",
     "funny": "Remix divertido",
     "voiceHint": "Voz: clone / elenco auto / do pacote"
+  },
+  "audio": {
+    "onlyTitle": "Projeto somente de áudio",
+    "onlyHint": "Sem faixa de vídeo. Edite a transcrição, escolha vozes e exporte para obter o áudio dublado (WAV)."
   }
 }

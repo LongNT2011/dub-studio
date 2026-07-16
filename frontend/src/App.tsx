@@ -510,6 +510,12 @@ function Feature({ icon: Icon, title, desc, delay }: { icon: typeof Languages; t
 
 // Принимаем все распространённые видео-форматы (ffmpeg декодит их все) — не только mp4/mov.
 const VIDEO_ACCEPT = "video/*,.mp4,.mov,.mkv,.avi,.webm,.m4v,.flv,.wmv,.ts,.mpg,.mpeg,.3gp,.ogv,.mts,.m2ts,.vob,.f4v";
+// Аудио-режим: вход без видео (пачка WAV/mp3 → пачка озвученных WAV). ffmpeg декодит всё.
+const AUDIO_ACCEPT = "audio/*,.wav,.mp3,.flac,.m4a,.aac,.ogg,.opus,.wma,.aiff,.aif,.alac";
+const MEDIA_ACCEPT = `${VIDEO_ACCEPT},${AUDIO_ACCEPT}`;
+const AUDIO_EXT = /\.(wav|mp3|flac|m4a|aac|ogg|opus|wma|aiff|aif|alac)$/i;
+// Файл — аудио (без видеодорожки)? По MIME или расширению. Видео-MIME имеет приоритет (напр. .ogv/.m4v).
+const isAudioFile = (f: File) => !f.type.startsWith("video/") && (f.type.startsWith("audio/") || AUDIO_EXT.test(f.name));
 
 function DropZone() {
   const { t, i18n } = useTranslation();
@@ -541,6 +547,7 @@ function DropZone() {
   const [funnyOn, setFunnyOn] = useState(false);
   const [funny, setFunny] = useState("");                                       // Gemma rewrite instruction (тема ремикса)
   const [preview, setPreview] = useState<string | null>(null);                  // objectURL превью выбранного видео (первый кадр)
+  const audioOnly = !!file && isAudioFile(file);                                // вход без видео -> режим «только аудио»
   useEffect(() => {                                                             // создаём/освобождаем objectURL под выбранный файл
     if (!file) { setPreview(null); return; }
     const url = URL.createObjectURL(file);
@@ -558,12 +565,15 @@ function DropZone() {
       // subtitles = ОРИГИНАЛ: исходная дорожка + субтитры на языке оригинала (без дубляжа, без перевода);
       // voiceover = закадровый (перевод+TTS, оригинал слышно приглушённым); transcribe = транскрипт+диаризация.
       // Композируемо: аудио-выход, содержимое субтитров, шуточный ремикс — независимы.
+      const audioOnly = isAudioFile(file);                          // вход без видео -> нет субтитров/бёрна/OCR
       const eMode = audio;                                          // nodub | dub | voiceover | transcribe
-      const eSubs = audio === "transcribe" ? "transcribe" : subs;   // none | transcribe(оригинал) | translate
+      const eSubs = audioOnly ? "none" : audio === "transcribe" ? "transcribe" : subs;   // none | transcribe(оригинал) | translate
       const eRewrite = funnyOn && (audio === "dub" || audio === "voiceover") ? funny.trim() : "";
       // Транскрипт всегда вжигает субтитры (иначе транскрипт-режим дал бы видео без текста): чекбокс
       // «Вжигать» для transcribe скрыт, поэтому форсируем burn=true, не полагаясь на его прежнее значение.
-      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, audio === "transcribe" ? true : burn, detectText);
+      // Аудио-режим: субтитры/бёрн/OCR не нужны (нет видео) -> off.
+      const eBurn = audioOnly ? false : audio === "transcribe" ? true : burn;
+      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       s.setProject(await api.getProject(project_id));
       // Озвучку готовим ЗДЕСЬ, на экране загрузки (не собирая видео — кадры даёт per-frame preview),
@@ -621,7 +631,7 @@ function DropZone() {
               ${over ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_9%,var(--color-surface))] shadow-[0_0_0_4px_color-mix(in_oklab,var(--color-accent)_18%,transparent)]"
                      : "border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)] hover:border-[#3a414c]"}`}
           >
-            {file && preview && (   // превью выбранного видео (первый кадр) заполняет рамку; скрим — для читаемости текста
+            {file && preview && !audioOnly && (   // превью выбранного видео (первый кадр) заполняет рамку; скрим — для читаемости текста
               <>
                 <video src={preview} muted playsInline preload="metadata" className="absolute inset-0 w-full h-full object-cover" />
                 <div className="absolute inset-0 bg-black/45" />
@@ -638,8 +648,13 @@ function DropZone() {
               </div>
               {file ? (
                 <>
-                  <div className={`mt-5 text-lg font-semibold break-all px-2 ${preview ? "text-white drop-shadow" : ""}`}>{file.name}</div>
-                  <div className={`mt-1.5 text-sm ${preview ? "text-white/80" : "text-[var(--color-muted)]"}`}>{(file.size / 1048576).toFixed(1)} MB · {t("drop.change")}</div>
+                  <div className={`mt-5 text-lg font-semibold break-all px-2 ${preview && !audioOnly ? "text-white drop-shadow" : ""}`}>{file.name}</div>
+                  <div className={`mt-1.5 text-sm ${preview && !audioOnly ? "text-white/80" : "text-[var(--color-muted)]"}`}>{(file.size / 1048576).toFixed(1)} MB · {t("drop.change")}</div>
+                  {audioOnly && (
+                    <div className="mt-3 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[color-mix(in_oklab,var(--color-accent)_16%,transparent)] text-[var(--color-accent)] text-[12px] font-medium">
+                      <AudioLines size={13} /> {t("drop.audioMode")}
+                    </div>
+                  )}
                 </>
               ) : (
                 <>
@@ -688,7 +703,7 @@ function DropZone() {
               className="mt-1.5 w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-2 text-[12px] focus:border-[var(--color-accent)] focus:outline-none resize-none" />
           )}
           {/* СУБТИТРЫ (независимо от аудио) */}
-          {audio !== "transcribe" && (
+          {audio !== "transcribe" && !audioOnly && (
             <>
               <div className="mt-3 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("comp.subsLabel")}</div>
               <div className="grid grid-cols-3 gap-1.5">
@@ -721,9 +736,9 @@ function DropZone() {
           </div>
         </motion.div>
       </motion.div>
-      <input ref={inputRef} type="file" accept={VIDEO_ACCEPT} className="hidden"
+      <input ref={inputRef} type="file" accept={MEDIA_ACCEPT} className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f); }} />
-      <input ref={batchRef} type="file" multiple accept={VIDEO_ACCEPT} className="hidden"
+      <input ref={batchRef} type="file" multiple accept={MEDIA_ACCEPT} className="hidden"
         onChange={(e) => { const fs = [...(e.target.files || [])]; if (fs.length) { batchState.files = fs; batchState.tgt = tgt; batchState.src = src; batchState.audio = audio; batchState.subs = subs; batchState.burn = burn; batchState.detectText = detectText; batchState.funnyOn = funnyOn; batchState.funny = funny; s.setStage("batch"); } }} />
     </div>
   );
@@ -1138,6 +1153,7 @@ function Editor() {
 
   const isActive = (seg: Project["segments"][number]) => scrub >= seg.start && scrub < seg.end;
   const activeId = p.segments.find(isActive)?.id;
+  const audioOnly = !((p.meta.width || 0) > 0 && (p.meta.height || 0) > 0);   // вход без видео -> режим только аудио
   const mode = p.mode === "voiceover" ? "voiceover" : p.mode === "transcribe" ? "transcribe" : p.audio.rewrite ? "funny" : (p.mode === "nodub" ? "subtitles" : "dub");   // derived output mode
   const MODES = [["subtitles", Captions], ["dub", AudioLines], ["voiceover", Mic2], ["funny", Sparkles], ["transcribe", FileText]] as const;
   const cmds = [
@@ -1403,6 +1419,7 @@ function Editor() {
             ))}
           </div>
           <span className="text-[12px] text-[var(--color-muted)] truncate hidden 2xl:inline">{t(`mode.${mode}_desc`)}</span>
+          {!audioOnly && (
           <div className="flex items-center gap-1.5 shrink-0" title={t("comp.hint")}>
             <select value={p.subs.mode} onChange={(e) => branch("subs_content", { value: e.target.value })}
               className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none">
@@ -1415,6 +1432,7 @@ function Editor() {
               {t("comp.burn")}
             </button>
           </div>
+          )}
           <div className="flex-1" />
           <button onClick={doUndo} disabled={!canUndo} title="Ctrl+Z"
             className="p-1.5 rounded-md text-[var(--color-muted)] hover:text-[var(--color-text)] disabled:opacity-30 transition-colors"><Undo2 size={16} /></button>
@@ -1426,7 +1444,15 @@ function Editor() {
           </button>
         </div>
         <div className="flex-1 min-h-0 p-3 overflow-hidden">
-          {compare ? (
+          {audioOnly ? (
+            <div className="w-full h-full grid place-items-center rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)]">
+              <div className="text-center px-6">
+                <AudioLines size={42} className="mx-auto text-[var(--color-accent)]" />
+                <div className="mt-4 text-[16px] font-semibold">{t("audio.onlyTitle")}</div>
+                <div className="mt-1.5 text-[13px] text-[var(--color-muted)] max-w-sm mx-auto leading-snug">{t("audio.onlyHint")}</div>
+              </div>
+            </div>
+          ) : compare ? (
             <div className="w-full h-full grid grid-cols-2 gap-2 min-h-0">
               <ComparePane label={t("compare.original")} src={api.originalUrl(pid, scrub)} />
               <ComparePane label={t("compare.result")} src={api.previewUrl(pid, scrub, rev)} />
@@ -2111,11 +2137,15 @@ function BatchView() {
       const upd = (patch: Partial<BatchItem>) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
       try {
         upd({ status: "analyzing", pct: 0 });
-        const { project_id } = await api.createProject(filesRef.current[i]);
+        const bf = filesRef.current[i];
+        const ao = isAudioFile(bf);                                // этот файл — аудио (без видео)?
+        const { project_id } = await api.createProject(bf);
         upd({ pid: project_id });
-        // Транскрипт всегда вжигает субтитры (иначе транскрипт-режим дал бы видео без текста): чекбокс
-      // «Вжигать» для transcribe скрыт, поэтому форсируем burn=true, не полагаясь на его прежнее значение.
-      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, audio === "transcribe" ? true : burn, detectText);
+        // Транскрипт всегда вжигает субтитры (иначе транскрипт-режим дал бы видео без текста); аудио-файл ->
+        // субтитры/бёрн/OCR off (нет видео) -> на выходе озвученный WAV.
+        const fSubs = ao ? "none" : eSubs;
+        const fBurn = ao ? false : audio === "transcribe" ? true : burn;
+        const { job_id } = await api.analyze(project_id, tgt, eMode, src, fSubs, eRewrite, fBurn, ao ? false : detectText);
         await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0 }); });
         if (doRender) {
           upd({ status: "rendering", pct: 0 });

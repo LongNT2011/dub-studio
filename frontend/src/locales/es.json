@@ -10,7 +10,8 @@
     "change": "clic para cambiar",
     "browse": "Examinar",
     "recent": "Recientes",
-    "demo": "Probar demo"
+    "demo": "Probar demo",
+    "audioMode": "Sin vídeo — modo solo audio"
   },
   "hero": {
     "eyebrow": "LOCAL · SIN CONEXIÓN · 100+ IDIOMAS",
@@ -351,5 +352,9 @@
     "burnHint": "Grabar subtítulos/títulos en el vídeo (apagado = vídeo limpio, p. ej. doblaje sin subtítulos)",
     "funny": "Remix divertido",
     "voiceHint": "Voz: clon / reparto auto / del pack"
+  },
+  "audio": {
+    "onlyTitle": "Proyecto solo de audio",
+    "onlyHint": "Sin pista de vídeo. Edita la transcripción, elige voces y exporta para obtener el audio doblado (WAV)."
   }
 }

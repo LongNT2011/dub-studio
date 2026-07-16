@@ -10,7 +10,8 @@
     "change": "cliquer pour changer",
     "browse": "Parcourir",
     "recent": "Récents",
-    "demo": "Essayer la démo"
+    "demo": "Essayer la démo",
+    "audioMode": "Sans vidéo — mode audio uniquement"
   },
   "hero": {
     "eyebrow": "LOCAL · HORS LIGNE · 100+ LANGUES",
@@ -351,5 +352,9 @@
     "burnHint": "Incruster sous-titres/titres sur la vidéo (désactivé = vidéo propre, ex. doublage sans sous-titres)",
     "funny": "Remix drôle",
     "voiceHint": "Voix : clone / casting auto / du pack"
+  },
+  "audio": {
+    "onlyTitle": "Projet audio uniquement",
+    "onlyHint": "Pas de piste vidéo. Modifiez la transcription, choisissez les voix, puis exportez pour obtenir l'audio doublé (WAV)."
   }
 }

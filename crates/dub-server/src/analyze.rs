@@ -267,8 +267,10 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     //    Порт pipeline.run ocr_detect + compose.analyze_layout. Fail-safe: сбой OCR не валит analyze
     //    (боксы блюра — не блокер; их можно добавить руками в редакторе). Дорогая стадия (минуты на 4K):
     //    пропускаем по галочке detect_text (в режиме без субтитров вшитый текст не трогаем — экономит время).
-    if args.detect_text {
+    if args.detect_text && meta.width > 0 && meta.height > 0 {
         crate::ocr::stage(args, paths, &mut proj, meta.width, meta.height, meta.duration, progress);
+    } else if meta.width == 0 || meta.height == 0 {
+        emit(progress, "ocr_detect", "аудио-режим: без видео, детекция экранного текста не нужна");
     } else {
         emit(progress, "ocr_detect", "детекция вшитого текста отключена (галочка)");
     }

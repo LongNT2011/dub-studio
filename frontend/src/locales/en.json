@@ -10,7 +10,8 @@
     "change": "click to change",
     "browse": "Browse",
     "recent": "Recent",
-    "demo": "Try a demo"
+    "demo": "Try a demo",
+    "audioMode": "No video — audio-only mode"
   },
   "hero": {
     "eyebrow": "LOCAL · OFFLINE · 100+ LANGUAGES",
@@ -351,5 +352,9 @@
     "burnHint": "Burn subtitles/titles onto the video (off = clean video, e.g. dub without subtitles)",
     "funny": "Funny remix",
     "voiceHint": "Choose voice: clone / auto-cast / from pack"
+  },
+  "audio": {
+    "onlyTitle": "Audio-only project",
+    "onlyHint": "No video track. Edit the transcript, pick voices, then Export to get the dubbed audio (WAV)."
   }
 }
