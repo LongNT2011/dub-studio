@@ -314,7 +314,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/fonts", get(endpoints::fonts))
         .route("/voices", get(voices_list))
         .route("/presets", get(endpoints::presets))
-        .route("/projects", post(create_project))
+        .route("/projects", post(create_project).get(list_projects))
         .route(
             "/projects/{pid}",
             get(get_project).patch(patch_project).put(endpoints::put_project),
@@ -705,11 +705,83 @@ async fn create_project(
         }
         // source.txt хранит абсолютный путь к видео (как в app.py).
         let _ = tokio::fs::write(d.join("source.txt"), dst.to_string_lossy().as_bytes()).await;
+        // name.txt — исходное имя файла (для списка «недавние проекты»; meta.video хранит внутреннее source.*).
+        if let Some(n) = fname.as_deref() {
+            let _ = tokio::fs::write(d.join("name.txt"), n.as_bytes()).await;
+        }
         filename = fname;
         break;
     }
 
     Json(json!({ "project_id": pid, "filename": filename })).into_response()
+}
+
+// ─── GET /projects ──────────────────────────────────────────────────────────
+// Список сохранённых проектов (у которых есть project.json) для экрана «Открыть/недавние».
+// Всё уже персистится в workspace/<pid>/ (каждый PATCH пишет project.json — автосейв),
+// здесь просто отдаём сводку, сортированную по времени последней правки (новые сверху).
+async fn list_projects(State(st): State<AppState>) -> Response {
+    let mut items: Vec<Value> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&st.workspace) {
+        for e in rd.flatten() {
+            let dir = e.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let pj = dir.join("project.json");
+            if !pj.is_file() {
+                continue; // только проанализированные (редактируемые) проекты
+            }
+            let pid = match dir.file_name().and_then(|s| s.to_str()) {
+                Some(s) => s.to_string(),
+                None => continue,
+            };
+            let proj = match std::fs::read_to_string(&pj)
+                .ok()
+                .and_then(|t| Project::from_json(&t).ok())
+            {
+                Some(p) => p,
+                None => continue,
+            };
+            let mtime = std::fs::metadata(&pj)
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            // Имя: исходный файл из name.txt (новые проекты), иначе basename meta.video (старые).
+            let video = std::fs::read_to_string(dir.join("name.txt"))
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| {
+                    Path::new(&proj.meta.video)
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or(proj.meta.video.as_str())
+                        .to_string()
+                });
+            let audio_only = proj.meta.width <= 0 || proj.meta.height <= 0;
+            let done = dir.join("output.mp4").is_file() || dir.join("output.wav").is_file();
+            items.push(json!({
+                "pid": pid,
+                "video": video,
+                "tgt_lang": proj.tgt_lang,
+                "mode": proj.mode,
+                "width": proj.meta.width,
+                "height": proj.meta.height,
+                "duration": proj.meta.duration,
+                "segments": proj.segments.len(),
+                "audio_only": audio_only,
+                "mtime": mtime,
+                "done": done,
+            }));
+        }
+    }
+    items.sort_by(|a, b| {
+        b["mtime"].as_u64().unwrap_or(0).cmp(&a["mtime"].as_u64().unwrap_or(0))
+    });
+    Json(json!({ "projects": items })).into_response()
 }
 
 // ─── GET /projects/{pid} ────────────────────────────────────────────────────

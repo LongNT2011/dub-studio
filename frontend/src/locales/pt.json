@@ -159,6 +159,9 @@
     "volume": "Volume",
     "lagNotice": "A pré-visualização pode atrasar — não é um bug. Resultado exato na exportação."
   },
+  "recent": {
+    "title": "Projetos recentes"
+  },
   "status": {
     "working": "Processando…",
     "idle": "Pronto",

@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine, ChevronDown, ScrollText } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useFloatable, dockSlot } from "./lib/useFloatable";
-import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent } from "./lib/api";
+import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent, type ProjectSummary } from "./lib/api";
 import { LANGS, DUB_LANGS, setLang, type Lang } from "./lib/i18n";
 import { useStore } from "./store";
 import PreviewCanvas from "./components/PreviewCanvas";
@@ -555,6 +555,27 @@ function DropZone() {
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
+  // «Недавние проекты»: всё уже автосохранено в workspace/<pid>/ (каждая правка = PATCH). Здесь тянем
+  // список и даём открыть прошлый проект в один клик. Автообновление URL (?pid=) — чтобы перезагрузка держала.
+  const [recent, setRecent] = useState<ProjectSummary[]>([]);
+  useEffect(() => { api.listProjects().then((r) => setRecent(r.projects)).catch(() => {}); }, []);
+  const rtf = new Intl.RelativeTimeFormat((i18n.language as string) || "en", { numeric: "auto" });
+  function fmtAgo(sec: number) {
+    const min = (sec * 1000 - Date.now()) / 60000;                              // отрицательное = в прошлом
+    if (Math.abs(min) < 60) return rtf.format(Math.round(min), "minute");
+    if (Math.abs(min) < 1440) return rtf.format(Math.round(min / 60), "hour");
+    return rtf.format(Math.round(min / 1440), "day");
+  }
+  async function openProject(pid: string) {
+    try {
+      const p = await api.getProject(pid);
+      s.setPid(pid); s.setProject(p);
+      s.setStage("editor");                                                     // TranscriptView vs Editor выбирается по projMode при рендере
+      window.history.pushState(null, "", `?pid=${pid}`);                        // перезагрузка/боот вернёт этот проект
+      playSfx("success");
+    } catch { /* проект удалён на диске — молча пропускаем */ }
+  }
+
   async function run() {
     if (!file) return;
     s.setStage("analyzing");
@@ -619,6 +640,30 @@ function DropZone() {
             <Feature icon={Sparkles} title={t("actions.funny")} desc={t("hero.f3")} delay={0.3} />
             <Feature icon={FileText} title={t("actions.transcribe")} desc={t("hero.f4")} delay={0.36} />
           </div>
+          {recent.length > 0 && (
+            <div className="mt-8">
+              <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-2.5">{t("recent.title")}</div>
+              <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1 -mr-1">
+                {recent.slice(0, 8).map((p) => (
+                  <button key={p.pid} onClick={() => openProject(p.pid)}
+                    className="w-full flex items-center gap-3 p-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)] hover:border-[#3a414c] transition-colors text-left">
+                    {p.audio_only
+                      ? <div className="w-16 h-10 shrink-0 rounded-md grid place-items-center bg-[var(--color-surface-2)] text-[var(--color-accent)]"><AudioLines size={16} /></div>
+                      : <img src={api.originalUrl(p.pid, 1)} alt="" loading="lazy" className="w-16 h-10 shrink-0 rounded-md object-cover bg-black/40" />}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] font-medium truncate">{p.video}</div>
+                      <div className="mt-0.5 text-[11px] text-[var(--color-muted)] flex items-center gap-1.5">
+                        <span className="uppercase font-semibold text-[var(--color-accent-2)]">{p.tgt_lang}</span>
+                        <span>·</span><span className="truncate">{p.mode}</span>
+                        <span>·</span><span className="shrink-0">{fmtAgo(p.mtime)}</span>
+                        {p.done && <Check size={12} className="text-[var(--color-accent)] shrink-0" />}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} transition={{ duration: 0.5, ease: EASE, delay: 0.1 }}>

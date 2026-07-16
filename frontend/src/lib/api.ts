@@ -32,6 +32,11 @@ export type Project = {
   render: { burn_cq: number; blur_sigma: number; blur: boolean; codec: string };
   work_dir?: string | null;
 };
+export type ProjectSummary = {
+  pid: string; video: string; tgt_lang: string; mode: string;
+  width: number; height: number; duration: number; segments: number;
+  audio_only: boolean; mtime: number; done: boolean;
+};
 export type ModelStack = { asr: string; llm: string; vision: string; tts: string };
 export type Capabilities = {
   device: string; tts_quant: string; asr_model: string; ffmpeg: boolean;
@@ -117,6 +122,7 @@ export const api = {
   },
   analyze: (pid: string, tgt_lang: string, mode = "auto", src_lang = "auto", subs = "auto", rewrite = "", burn = true, detect = true) =>
     fetch(`${BASE}/projects/${pid}/analyze?tgt_lang=${tgt_lang}&mode=${mode}&src_lang=${src_lang}&subs=${subs}&rewrite=${encodeURIComponent(rewrite)}&burn=${burn ? 1 : 0}&detect=${detect ? 1 : 0}`, { method: "POST" }).then(j<{ job_id: string }>),
+  listProjects: () => getJson<{ projects: ProjectSummary[] }>("/projects"),   // недавние/сохранённые проекты для экрана «Открыть»
   getProject: (pid: string) => getJson<Project>(`/projects/${pid}`),
   putProject: (pid: string, project: Project) =>   // undo/redo: serialize through the SAME chain as patch() (no race)
     _chain(() => fetch(`${BASE}/projects/${pid}`, { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(project) }).then(j<Project>)),

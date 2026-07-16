@@ -188,6 +188,9 @@
     "volume": "Preview volume",
     "lagNotice": "Preview may lag — not a bug. Exact result in the export."
   },
+  "recent": {
+    "title": "Recent projects"
+  },
   "status": {
     "working": "Working…",
     "idle": "Ready",

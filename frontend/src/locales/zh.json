@@ -159,6 +159,9 @@
     "volume": "预览音量",
     "lagNotice": "预览可能有延迟——这不是错误。导出即为最终效果。"
   },
+  "recent": {
+    "title": "最近的项目"
+  },
   "status": {
     "working": "处理中…",
     "idle": "就绪",
