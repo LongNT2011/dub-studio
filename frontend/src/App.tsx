@@ -1248,8 +1248,10 @@ function Editor() {
   useEffect(() => { activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }); }, [activeId]);
   return (
     <div className="flex-1 grid grid-cols-[330px_1fr_300px] min-h-0">
-      <aside className="border-r border-[var(--color-border)] overflow-y-auto p-4 bg-[var(--color-surface)]">
-        <div className="inline-flex rounded-lg bg-[var(--color-surface-2)] p-0.5 border border-[var(--color-border)] mb-3 text-[12px]">
+      <aside className="border-r border-[var(--color-border)] flex flex-col min-h-0 overflow-hidden bg-[var(--color-surface)]">
+        {/* Фикс-шапка: вкладки лейнов всегда видны (не скроллятся). */}
+        <div className="shrink-0 px-4 pt-4 pb-2.5 border-b border-[var(--color-border)]">
+        <div className="inline-flex rounded-lg bg-[var(--color-surface-2)] p-0.5 border border-[var(--color-border)] text-[12px]">
           {([["subs", t("mode.subtitles")], ["blur", `${t("blur.title")} ${(p.captions.blur_boxes || []).length}`],
             ["titles", `${t("titles.tab")} ${(p.captions.titles || []).length}`]] as const).map(([k, lbl]) => (
             <button key={k} onClick={() => setLane(k as typeof lane)}
@@ -1257,7 +1259,10 @@ function Editor() {
               {lbl}
             </button>
           ))}
+          </div>
         </div>
+        {/* Скролл-тело: скроллится только список, шапка выше зафиксирована. */}
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 pb-4">
         {lane === "subs" && (
         <div className="space-y-2">
           {(() => {
@@ -1270,17 +1275,17 @@ function Editor() {
             });
             const chip = "px-2 py-0.5 rounded-md text-[11px] border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:border-[var(--color-accent)] transition-colors";
             return (
-              <div className="space-y-1.5 mb-1">
+              <div className="sticky top-0 z-20 -mx-4 px-4 pt-1 pb-2 mb-1 space-y-1.5 bg-[var(--color-surface)] border-b border-[var(--color-border)]">
                 <div className="flex flex-wrap items-center gap-1">
                   <span className="text-[10px] uppercase tracking-wider text-[var(--color-muted)] mr-0.5">{t("sel.pick")}</span>
                   <button onClick={() => toggleMany(idsOf(null))} className={chip}>{t("sel.all")}</button>
                   {spks.length > 1 && spks.map((spk) => <button key={spk} onClick={() => toggleMany(idsOf(spk))} className={chip}>SPK {spk}</button>)}
                 </div>
                 {selSegs.size > 0 && (
-                  <div className="flex items-center gap-1.5 rounded-lg border border-[var(--color-accent)]/50 bg-[color-mix(in_oklab,var(--color-accent)_8%,transparent)] px-2 py-1.5">
-                    <span className="text-[12px] font-medium">{selSegs.size} {t("sel.count")}</span>
+                  <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-[var(--color-accent)]/50 bg-[color-mix(in_oklab,var(--color-accent)_8%,transparent)] px-2 py-1.5">
+                    <span className="text-[12px] font-medium mr-auto">{selSegs.size} {t("sel.count")}</span>
                     <button onClick={() => bulkSeg("keep_segments", { keep: true })} disabled={regenId !== null}
-                      className="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--color-surface-2)] text-[12px] hover:text-[var(--color-accent)] disabled:opacity-40 transition-colors"><Music size={13} />{t("sel.keep")}</button>
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--color-surface-2)] text-[12px] hover:text-[var(--color-accent)] disabled:opacity-40 transition-colors"><Music size={13} />{t("sel.keep")}</button>
                     <button onClick={() => bulkSeg("hide_segments", { hidden: true })} disabled={regenId !== null}
                       className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-[var(--color-surface-2)] text-[12px] hover:text-[var(--color-accent)] disabled:opacity-40 transition-colors"><EyeOff size={13} />{t("sel.hide")}</button>
                     <button onClick={() => bulkSeg("del_segments")} disabled={regenId !== null}
@@ -1504,6 +1509,7 @@ function Editor() {
             </button>
           </div>
         )}
+        </div>
       </aside>
 
       <main className="flex flex-col min-w-0 min-h-0 overflow-hidden">
