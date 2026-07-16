@@ -107,7 +107,9 @@
     "gain": "Ganho",
     "gainHint": "Amplificar toda a faixa (ao regenerar/exportar).",
     "origGain": "Volume original",
-    "origGainHint": "Locução: volume da faixa original sob a tradução."
+    "origGainHint": "Locução: volume da faixa original sob a tradução.",
+    "langSearch": "Buscar idioma…",
+    "noMatch": "Nenhum resultado"
   },
   "remix": {
     "title": "Remix",

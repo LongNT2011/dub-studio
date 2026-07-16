@@ -107,7 +107,9 @@
     "gain": "Ganancia",
     "gainHint": "Amplificar toda la pista (al regenerar/exportar).",
     "origGain": "Volumen original",
-    "origGainHint": "Voz superpuesta: volumen de la pista original bajo la traducción."
+    "origGainHint": "Voz superpuesta: volumen de la pista original bajo la traducción.",
+    "langSearch": "Buscar idioma…",
+    "noMatch": "Sin coincidencias"
   },
   "remix": {
     "title": "Remix",

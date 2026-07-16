@@ -107,7 +107,9 @@
     "gain": "Gain",
     "gainHint": "Amplifier toute la piste (au rendu/export).",
     "origGain": "Volume d’origine",
-    "origGainHint": "Voix off : volume de la piste originale sous la traduction."
+    "origGainHint": "Voix off : volume de la piste originale sous la traduction.",
+    "langSearch": "Rechercher une langue…",
+    "noMatch": "Aucun résultat"
   },
   "remix": {
     "title": "Remix",

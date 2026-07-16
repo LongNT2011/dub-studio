@@ -136,7 +136,9 @@
     "gain": "Track gain",
     "gainHint": "Boost the whole track (applied on regen/export).",
     "origGain": "Original volume",
-    "origGainHint": "Voice-over: how loud the original track sits under the translation."
+    "origGainHint": "Voice-over: how loud the original track sits under the translation.",
+    "langSearch": "Search language…",
+    "noMatch": "No matches"
   },
   "remix": {
     "title": "Remix",

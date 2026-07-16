@@ -713,16 +713,13 @@ function DropZone() {
           </div>
           <div className="mt-3.5 flex items-center justify-center gap-2 text-[12px]">
             <Languages size={14} className="text-[var(--color-accent-2)]" />
-            <select value={src} onChange={(e) => pickSrc(e.target.value)}
-              className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none">
-              <option value="auto">auto</option>
-              {DUB_LANGS.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
-            </select>
+            <Combobox value={src} onChange={pickSrc}
+              options={langOptions(DUB_LANGS, i18n.language, [{ value: "auto", label: "auto", search: "auto" }])}
+              placeholder={t("voice.langSearch")} noResults={t("voice.noMatch")} size="sm" className="w-[130px]" />
             <ArrowRight size={12} className="text-[var(--color-muted)]" />
-            <select value={tgt} onChange={(e) => setTgt(e.target.value)}
-              className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-[11px] text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none">
-              {DUB_LANGS.map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
-            </select>
+            <Combobox value={tgt} onChange={setTgt}
+              options={langOptions(DUB_LANGS, i18n.language)}
+              placeholder={t("voice.langSearch")} noResults={t("voice.noMatch")} size="sm" className="w-[130px]" />
           </div>
           {asrNote
             ? <p className="mt-1 text-center text-[10px] text-[var(--color-accent-2)] leading-tight">{t("comp.asrSwitched", { lang: asrNote })}</p>
@@ -939,7 +936,7 @@ function CommandPalette({ commands }: { commands: { label: string; run: () => vo
 }
 
 function Editor() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const p = useStore((s) => s.project) as Project;
   const rev = useStore((s) => s.rev);   // for the compare 'result' pane refetch (PreviewCanvas reads rev itself)        // subscribe ONLY to what we render -> no re-render on
   const pid = useStore((s) => s.pid) as string;           // rev bumps or progress SSE ticks (those go to PreviewCanvas)
@@ -1453,11 +1450,9 @@ function Editor() {
                   <input key={`sz${i}-${ti.size_px ?? "a"}`} type="number" min={12} max={300} defaultValue={ti.size_px ?? undefined} placeholder="px" title={t("style.size")}
                     onBlur={(e) => branch("title", { idx: i, size_px: e.target.value ? parseInt(e.target.value) : null })}
                     className="w-12 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 text-[11px] focus:border-[var(--color-accent)] focus:outline-none" />
-                  <select value={ti.font || ""} onChange={(e) => branch("title", { idx: i, font: e.target.value })}
-                    className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-[11px] focus:border-[var(--color-accent)] focus:outline-none">
-                    <option value="">{t("style.font")}</option>
-                    {Object.keys(fonts).map((f) => <option key={f} value={f}>{f}</option>)}
-                  </select>
+                  <Combobox value={ti.font || ""} onChange={(f) => branch("title", { idx: i, font: f })}
+                    options={Object.keys(fonts).map((f) => ({ value: f, label: f }))}
+                    placeholder={t("style.font")} noResults={t("voice.noMatch")} allowClear size="sm" className="w-[110px]" />
                   <span className="inline-flex rounded border border-[var(--color-border)] overflow-hidden">
                     {([["left", AlignLeft, "edit.alignLeft"], ["center", AlignCenter, "edit.alignCenter"], ["right", AlignRight, "edit.alignRight"]] as const).map(([a, Ic, k]) => (
                       <button key={a} onClick={(e) => { e.stopPropagation(); branch("title", { idx: i, align: a }); }} title={t(k)}
@@ -1538,11 +1533,9 @@ function Editor() {
                     ))}
                   </div>
                 )}
-                <select value="" onChange={(e) => { const c = e.target.value; if (c && !exportLangs.includes(c)) setExportLangs((xs) => [...xs, c]); }}
-                  className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-1 text-[11px] focus:border-[var(--color-accent)] focus:outline-none">
-                  <option value="">{t("multilang.add")}</option>
-                  {DUB_LANGS.filter((l) => !exportLangs.includes(l.code) && l.code !== p.tgt_lang).map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
-                </select>
+                <Combobox value="" onChange={(c) => { if (c && !exportLangs.includes(c)) setExportLangs((xs) => [...xs, c]); }}
+                  options={langOptions(DUB_LANGS.filter((l) => !exportLangs.includes(l.code) && l.code !== p.tgt_lang), i18n.language)}
+                  placeholder={t("multilang.add")} noResults={t("voice.noMatch")} size="sm" className="w-full" />
                 <button disabled={exportLangs.length === 0}
                   onClick={() => {
                     Object.assign(multiLangState, { sourcePid: pid, sourceName: p.meta.video || pid, langs: exportLangs });
@@ -1617,12 +1610,9 @@ function Editor() {
         {ss && (
           <div className="space-y-3">
             <Row label={t("style.font")}>
-              <select value={ss.font || "Montserrat"} onChange={(e) => branch("caption", { font: e.target.value })}
-                className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[12px] max-w-[160px] focus:border-[var(--color-accent)] focus:outline-none transition-colors"
-                title={fonts[ss.font || "Montserrat"] || ""}>
-                {Object.keys(fonts).length ? Object.keys(fonts).map((f) => <option key={f} value={f}>{f}</option>)
-                                           : <option value={ss.font || "Montserrat"}>{ss.font || "Montserrat"}</option>}
-              </select>
+              <Combobox value={ss.font || "Montserrat"} onChange={(f) => branch("caption", { font: f })}
+                options={(Object.keys(fonts).length ? Object.keys(fonts) : [ss.font || "Montserrat"]).map((f) => ({ value: f, label: f }))}
+                placeholder={t("style.font")} noResults={t("voice.noMatch")} size="sm" className="w-[160px] max-w-[160px]" />
             </Row>
             <Toggle label={t("style.bold")} on={ss.bold} onClick={() => branch("caption", { bold: !ss.bold })} />
             <Toggle label={t("style.italic")} on={ss.italic} onClick={() => branch("caption", { italic: !ss.italic })} />
@@ -1733,11 +1723,10 @@ function Editor() {
               const names = (p.audio.voice.name || "").split(",").map((s) => s.trim());
               const pick = (cur: string, on: (v: string) => void) => (
                 <div className="flex items-center gap-1.5">
-                  <select value={cur} onChange={(e) => on(e.target.value)}
-                    className="w-[200px] max-w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[13px] focus:border-[var(--color-accent)] focus:outline-none transition-colors">
-                    <option value="">{voiceList.length ? "—" : "(пак не найден)"}</option>
-                    {voiceList.map((v) => <option key={v} value={v}>{v}</option>)}
-                  </select>
+                  <Combobox value={cur} onChange={on}
+                    options={voiceList.map((v) => ({ value: v, label: v }))}
+                    placeholder={voiceList.length ? t("voice.search") : "(пак не найден)"}
+                    noResults={t("voice.noMatch")} allowClear className="w-[200px] max-w-full" />
                   <button type="button" disabled={!cur} onClick={() => toggleVoicePreview(cur)} title={t("voice.preview")}
                     className="shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg border border-[var(--color-border)] hover:border-[var(--color-accent)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                     {voicePreview === cur && cur ? <Pause size={14} className="text-[var(--color-accent)]" /> : <Play size={14} />}
@@ -1863,6 +1852,75 @@ function VoicePackModal({ have, onVoices, onClose }: { have: string[]; onVoices:
           {all !== null && filtered.length > 300 && <div className="mono text-[10px] text-[var(--color-muted)] text-center py-2">{t("voice.narrowSearch")}</div>}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Языки с поиском по нативному имени + имени на языке интерфейса + английскому + коду (Intl.DisplayNames).
+// На русском UI «французский»/«фра» найдёт Français, на английском — «french».
+function langOptions(langs: { code: string; name: string }[], uiLang: string, extra: { value: string; label: string; search?: string }[] = []) {
+  let dnUI: Intl.DisplayNames | null = null, dnEN: Intl.DisplayNames | null = null;
+  try { dnUI = new Intl.DisplayNames([uiLang], { type: "language" }); } catch { /* локаль без поддержки */ }
+  try { dnEN = new Intl.DisplayNames(["en"], { type: "language" }); } catch { /* */ }
+  const nameIn = (dn: Intl.DisplayNames | null, code: string) => { try { return dn?.of(code) ?? ""; } catch { return ""; } };
+  return [
+    ...extra,
+    ...langs.map((l) => ({ value: l.code, label: l.name, search: `${l.name} ${nameIn(dnUI, l.code)} ${nameIn(dnEN, l.code)} ${l.code}` })),
+  ];
+}
+
+// Фильтруемый комбобокс: печатаешь кусок имени -> список сужается. Для больших списков (голоса/языки/шрифты).
+function Combobox({ value, options, onChange, placeholder, noResults, allowClear, className, size = "md" }: {
+  value: string;
+  options: { value: string; label: string; search?: string }[];
+  onChange: (v: string) => void;
+  placeholder?: string;
+  noResults?: string;
+  allowClear?: boolean;               // пункт «—» для сброса в ""
+  className?: string;
+  size?: "sm" | "md";
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) { setOpen(false); setQ(""); } };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  const ql = q.trim().toLowerCase();
+  const filtered = ql ? options.filter((o) => `${o.label} ${o.value} ${o.search ?? ""}`.toLowerCase().includes(ql)) : options;
+  const curLabel = options.find((o) => o.value === value)?.label ?? value;
+  const commit = (v: string) => { onChange(v); setQ(""); setOpen(false); };
+  const pad = size === "sm" ? "px-1.5 py-0.5 text-[11px]" : "px-2.5 py-1.5 text-[13px]";
+  return (
+    <div ref={boxRef} className={`relative ${className ?? ""}`}>
+      <input
+        value={open ? q : curLabel}
+        placeholder={open ? (curLabel || placeholder) : placeholder}
+        onFocus={() => { setOpen(true); setQ(""); }}
+        onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && filtered.length) { e.preventDefault(); commit(filtered[0].value); (e.target as HTMLInputElement).blur(); }
+          else if (e.key === "Escape") { setOpen(false); setQ(""); (e.target as HTMLInputElement).blur(); }
+        }}
+        className={`w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg ${pad} text-[var(--color-text)] focus:border-[var(--color-accent)] focus:outline-none transition-colors`} />
+      {open && (
+        <div className="absolute z-40 mt-1 w-full min-w-[180px] max-h-64 overflow-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] shadow-xl">
+          {allowClear && (
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => commit("")}
+              className="block w-full text-left px-2.5 py-1.5 text-[12px] text-[var(--color-muted)] hover:bg-[var(--color-overlay)]">—</button>
+          )}
+          {filtered.length === 0 && <div className="px-2.5 py-2 text-[12px] text-[var(--color-muted)]">{noResults ?? "∅"}</div>}
+          {filtered.map((o) => (
+            <button key={o.value} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => commit(o.value)}
+              title={o.label}
+              className={`block w-full text-left px-2.5 py-1.5 text-[12px] truncate hover:bg-[var(--color-overlay)] ${o.value === value ? "text-[var(--color-accent)]" : "text-[var(--color-text)]"}`}>
+              {o.label}</button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
