@@ -8,7 +8,6 @@ import { api, type Project, type Capabilities, type SetupStatus, type SetupCompo
 import { LANGS, DUB_LANGS, setLang, type Lang } from "./lib/i18n";
 import { useStore } from "./store";
 import PreviewCanvas from "./components/PreviewCanvas";
-import LivePreview from "./components/LivePreview";
 import { playSfx, sfxEnabled, setSfxEnabled } from "./lib/sfx";
 import ResourceMonitor from "./components/ResourceMonitor";
 
@@ -1453,9 +1452,6 @@ function Editor() {
                 <div className="mt-1.5 text-[13px] text-[var(--color-muted)] max-w-sm mx-auto leading-snug">{t("audio.onlyHint")}</div>
               </div>
             </div>
-          ) : play && !rendered ? (
-            // Плавное живое превью на плее: нативное видео + JASSUB-сабы + CSS-блюр, без пожадорного рендера.
-            <LivePreview pid={pid} project={p} rev={rev} audioRef={audioRef} playing={play} />
           ) : compare ? (
             <div className="w-full h-full grid grid-cols-2 gap-2 min-h-0">
               <ComparePane label={t("compare.original")} src={api.originalUrl(pid, scrub)} />
