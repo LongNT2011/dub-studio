@@ -69,7 +69,7 @@ export default function ResourceMonitor() {
     if (!slot) return null;
     return createPortal(
       <button onClick={fl.pop} title="Оторвать монитор ресурсов"
-        className="inline-flex items-center gap-2 px-2.5 h-8 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)] transition-colors">
+        className="inline-flex shrink-0 whitespace-nowrap items-center gap-2 px-2.5 h-8 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)] transition-colors">
         <Dot pct={lead} />
         {hasGpu && <span className="mono text-[11px] tabular-nums">{Math.round(hw.gpuUtilization)}%</span>}
         <span className="mono text-[10px] text-[var(--color-muted)] tabular-nums hidden md:inline">{hasGpu ? `${fmtGb(hw.usedVram)}/${fmtGb(hw.totalVram)}` : `RAM ${Math.round(ramPct)}%`}</span>

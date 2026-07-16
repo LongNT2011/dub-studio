@@ -418,7 +418,7 @@ function StatusBar() {
   const errored = !busy && last?.kind === "error";
   const fmt = (ms: number) => new Date(ms).toLocaleTimeString();
   return (
-    <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 flex justify-center max-w-[40vw] px-3">
+    <div className="relative flex-1 min-w-0 flex justify-center px-3">
       <button onClick={() => setOpen((o) => !o)} title={t("status.log")}
         className="inline-flex items-center gap-2 max-w-full px-3 py-1 rounded-md text-[12px] text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] transition-colors">
         {busy
@@ -464,8 +464,8 @@ function TopBar() {
     try { history.replaceState(null, "", location.pathname); } catch { /* no-op */ }
   };
   return (
-    <header className="relative flex items-center justify-between px-5 h-14 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="flex items-center gap-3">
+    <header className="flex items-center gap-2 px-5 h-14 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+      <div className="flex items-center gap-3 shrink-0">
         <span className="flex items-center gap-2 font-bold tracking-tight">
           <img src="/favicon.svg" alt="" width={20} height={20} className="rounded-[5px] shadow-[0_0_10px_rgba(198,242,78,0.25)]" />
           {t("app.name")}
@@ -475,8 +475,8 @@ function TopBar() {
         <div id="editor-modes-slot" className="flex items-center" />
       </div>
       <StatusBar />
-      <div className="flex items-center gap-2">
-        <div id="dock-slot" className="flex items-center gap-2" />
+      <div className="flex items-center gap-2 shrink-0">
+        <div id="dock-slot" className="flex items-center gap-2 shrink-0" />
         {/* Экспорт-сплит редактора (портал) — статично рядом с «Новый». */}
         <div id="editor-actions-slot" className="flex items-center gap-2" />
         {stage !== "empty" && (
@@ -1346,7 +1346,7 @@ function Editor() {
                     <span className="text-[10px] text-[var(--color-muted)]">{t("seg.seconds")}</span>
                   </div>
                 )}
-                {(speakers.length > 1 || on) && !seg.keep_original && (
+                {(on || selSegs.has(seg.id)) && !seg.keep_original && (
                   <div className="flex items-center gap-1.5 mt-1.5" onClick={(e) => e.stopPropagation()} title={t("seg.speakerHint")}>
                     <Users size={11} className="text-[var(--color-muted)] shrink-0" />
                     <select value={seg.speaker ?? ""}
@@ -1519,7 +1519,7 @@ function Editor() {
             {MODES.map(([k, Ic]) => (
               <button key={k} onClick={() => branch("mode", { value: k })} title={t(`mode.${k}_desc`)}
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[13px] transition-colors ${mode === k ? "bg-[var(--color-accent)] text-[var(--color-on-accent)] font-semibold" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
-                <Ic size={15} /> <span className="hidden lg:inline">{t(`mode.${k}`)}</span>
+                <Ic size={15} /> <span className="hidden xl:inline">{t(`mode.${k}`)}</span>
               </button>
             ))}
           </div>, s) : null; })()}

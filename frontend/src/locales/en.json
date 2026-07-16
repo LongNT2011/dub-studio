@@ -200,7 +200,7 @@
   "multilang": {
     "title": "Multiple languages",
     "exportTitle": "Export to other languages",
-    "exportHint": "Keeps your subtitle layout, styles and voice — re-translates the text and re-voices it.",
+    "exportHint": "Exports this clip into several languages one after another with the same settings — subtitle layout, styles, blur and voice are kept; only translation and voicing change.",
     "exportGo": "Export · {{n}}",
     "add": "＋ Add a language",
     "langsWord": "languages",

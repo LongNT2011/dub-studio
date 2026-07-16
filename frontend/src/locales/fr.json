@@ -171,7 +171,7 @@
   "multilang": {
     "title": "Plusieurs langues",
     "exportTitle": "Exporter vers d'autres langues",
-    "exportHint": "Conserve votre mise en page des sous-titres, styles et voix — retraduit le texte et le redouble.",
+    "exportHint": "Exporte ce clip dans plusieurs langues l’une après l’autre avec les mêmes réglages : mise en page des sous-titres, styles, flou et voix sont conservés ; seuls la traduction et le doublage changent.",
     "exportGo": "Exporter · {{n}}",
     "add": "＋ Ajouter une langue",
     "langsWord": "langues",

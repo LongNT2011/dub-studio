@@ -171,7 +171,7 @@
   "multilang": {
     "title": "Vários idiomas",
     "exportTitle": "Exportar para outros idiomas",
-    "exportHint": "Mantém o layout das legendas, estilos e voz — re-traduz o texto e redobra.",
+    "exportHint": "Exporta este vídeo para vários idiomas em sequência com as mesmas configurações: layout de legendas, estilos, desfoque e voz são mantidos; só mudam a tradução e a dublagem.",
     "exportGo": "Exportar · {{n}}",
     "add": "＋ Adicionar idioma",
     "langsWord": "idiomas",
