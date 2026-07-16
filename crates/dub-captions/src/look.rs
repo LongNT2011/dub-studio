@@ -46,6 +46,8 @@ pub fn is_known_font(name: &str) -> bool {
     matches!(
         name,
         "Montserrat" | "Oswald" | "Roboto" | "Russo One" | "Pacifico" | "Playfair Display" | "Caveat"
+            | "Noto Sans" | "Fira Sans" | "Rubik" | "Comfortaa" | "Exo 2" | "Philosopher"
+            | "Prata" | "Yeseva One" | "Pangolin" | "Marck Script"
     )
 }
 
@@ -256,14 +258,24 @@ pub fn fonts_map() -> HashMap<&'static str, &'static str> {
 }
 
 /// FONTS в порядке питона (dict(captions.FONTS)) — для GET /fonts. Порядок вставки сохраняем.
-pub const FONTS_ORDERED: [(&str, &str); 7] = [
+pub const FONTS_ORDERED: [(&str, &str); 17] = [
     ("Montserrat", "clean geometric sans"),
     ("Oswald", "tall condensed sans (impact)"),
     ("Roboto", "neutral plain sans"),
+    ("Noto Sans", "universal neutral sans (widest language coverage)"),
+    ("Fira Sans", "clean humanist sans"),
+    ("Rubik", "rounded geometric sans"),
+    ("Exo 2", "techno futuristic sans"),
+    ("Comfortaa", "soft rounded geometric display"),
     ("Russo One", "very heavy bold geometric display (max impact)"),
-    ("Pacifico", "flowing brush script"),
+    ("Yeseva One", "heavy elegant display serif"),
     ("Playfair Display", "elegant high-contrast serif"),
+    ("Prata", "high-contrast didone serif (fashion/elegant)"),
+    ("Philosopher", "elegant humanist sans-serif"),
+    ("Pacifico", "flowing brush script"),
     ("Caveat", "casual handwritten"),
+    ("Pangolin", "casual rounded handwritten"),
+    ("Marck Script", "flowing handwritten script"),
 ];
 
 /// Имена TEMPLATES в порядке питона (list(captions.TEMPLATES)) — для GET /presets.

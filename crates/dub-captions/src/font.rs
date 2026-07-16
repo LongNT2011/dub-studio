@@ -193,6 +193,17 @@ pub fn font_file_for(family: &str) -> Option<&'static str> {
         "Pacifico" => "Pacifico-Regular.ttf",
         "Playfair Display" => "PlayfairDisplay.ttf",
         "Caveat" => "Caveat.ttf",
+        // Доп. шрифты (кириллица+латиница, добавлены 2026-07-16).
+        "Noto Sans" => "NotoSans-Regular.ttf",
+        "Fira Sans" => "FiraSans-Regular.ttf",
+        "Rubik" => "Rubik-Regular.ttf",
+        "Comfortaa" => "Comfortaa-Regular.ttf",
+        "Exo 2" => "Exo2-Regular.ttf",
+        "Philosopher" => "Philosopher-Regular.ttf",
+        "Prata" => "Prata-Regular.ttf",
+        "Yeseva One" => "YesevaOne-Regular.ttf",
+        "Pangolin" => "Pangolin-Regular.ttf",
+        "Marck Script" => "MarckScript-Regular.ttf",
         _ => return None,
     })
 }
