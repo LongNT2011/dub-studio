@@ -2364,7 +2364,7 @@ function MultiLangView() {
   const [doneN, setDoneN] = useState(0);
   const langName = (code: string) => DUB_LANGS.find((l) => l.code === code)?.name ?? code.toUpperCase();
   const mounted = useRef(true);                                         // не дёргаем локальный setState после размонтирования
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);  // setup обязателен: StrictMode remount иначе оставит false навсегда
 
   async function run() {
     if (!srcPid || running) return;
