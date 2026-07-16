@@ -42,6 +42,12 @@ pub fn stage(
     if proj.segments.is_empty() {
         return;
     }
+    // Импортированы субтитры УЖЕ на языке перевода: tgt заполнен из cues (analyze import-ветка),
+    // MT и vision-раскладка не нужны — Даб Студио только озвучивает готовый текст.
+    if args.import_translated {
+        emit(progress, "translate", "субтитры уже на языке перевода -> без MT (только озвучка)");
+        return;
+    }
     let rewrite = if args.rewrite.is_empty() { None } else { Some(args.rewrite.as_str()) };
     let do_translate = wants_translate(proj) || rewrite.is_some();
     if !do_translate {

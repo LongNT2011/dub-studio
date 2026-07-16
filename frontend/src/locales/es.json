@@ -391,6 +391,8 @@
   "import": {
     "subs": "Importar subtítulos (SRT / ASS)",
     "subsHint": "¿Ya tienes subtítulos? Súbelos: usamos su texto y tiempos como base en lugar del reconocimiento automático (los hablantes se asignan solos, luego traducción y voz).",
-    "subsClear": "Quitar — usar reconocimiento automático"
+    "subsClear": "Quitar — usar reconocimiento automático",
+    "translated": "Los subtítulos ya están en el idioma de destino (sin traducción)",
+    "translatedHint": "Ej.: vídeo en inglés + subtítulos en ruso → doblaje en ruso. El texto va directo a la voz; se omiten el reconocimiento y la traducción."
   }
 }

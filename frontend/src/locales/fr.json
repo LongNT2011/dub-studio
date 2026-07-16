@@ -391,6 +391,8 @@
   "import": {
     "subs": "Importer des sous-titres (SRT / ASS)",
     "subsHint": "Vous avez déjà des sous-titres ? Importez-les : on prend leur texte et leur timing comme base au lieu de la reconnaissance auto (locuteurs attribués automatiquement, puis traduction et voix).",
-    "subsClear": "Retirer — utiliser la reconnaissance auto"
+    "subsClear": "Retirer — utiliser la reconnaissance auto",
+    "translated": "Sous-titres déjà dans la langue cible (sans traduction)",
+    "translatedHint": "Ex. : vidéo anglaise + sous-titres russes → doublage russe. Le texte va directement à la voix ; reconnaissance et traduction ignorées."
   }
 }

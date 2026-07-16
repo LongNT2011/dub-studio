@@ -391,6 +391,8 @@
   "import": {
     "subs": "Import subtitles (SRT / ASS)",
     "subsHint": "Already have subtitles? Upload them — we take their text and timing as the base instead of auto-recognition (speakers assigned automatically, then translate & voice).",
-    "subsClear": "Remove — use auto-recognition"
+    "subsClear": "Remove — use auto-recognition",
+    "translated": "Subtitles already in the target language (no translation)",
+    "translatedHint": "E.g. English video + Russian subtitles → Russian dub. Subtitle text goes straight to voicing; ASR and translation are skipped."
   }
 }

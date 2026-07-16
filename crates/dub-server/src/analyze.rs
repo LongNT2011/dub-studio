@@ -24,6 +24,8 @@ pub struct AnalyzeArgs {
     pub burn: bool,     // вжигать ли субтитры/титры на видео (композируемость; дефолт true)
     pub detect_text: bool, // OCR-детекция вшитого текста (блюр + локализация титров). Дорогая (минуты на 4K);
                            // в режиме без субтитров/блюра не нужна — галочка в UI, дефолт true.
+    pub import_translated: bool, // импортированные субтитры УЖЕ на языке перевода -> MT/vision пропустить,
+                                 // tgt = импортированный текст, Даб Студио только озвучивает. Работает лишь с import_subs.
 }
 
 /// Пути к моделям/входу для одной джобы analyze.
@@ -173,16 +175,25 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         let segs: Vec<Segment> = cues
             .into_iter()
             .enumerate()
-            .map(|(i, c)| Segment {
-                id: format!("s{i}"),
-                start: c.start,
-                end: c.end,
-                speaker: Some(speaker_for(c.start, c.end, turns)),
-                src_text: c.text,
-                tgt_text: String::new(),
-                voice: None,
-                dirty: false,
-                extra: Default::default(),
+            .map(|(i, c)| {
+                // Сабы УЖЕ на языке перевода -> текст в tgt (озвучка читает tgt), src пустой (оригинал не
+                // транскрибировали). Иначе (сабы на языке оригинала) -> текст в src, перевод заполнит tgt.
+                let (src_text, tgt_text) = if args.import_translated {
+                    (String::new(), c.text)
+                } else {
+                    (c.text, String::new())
+                };
+                Segment {
+                    id: format!("s{i}"),
+                    start: c.start,
+                    end: c.end,
+                    speaker: Some(speaker_for(c.start, c.end, turns)),
+                    src_text,
+                    tgt_text,
+                    voice: None,
+                    dirty: false,
+                    extra: Default::default(),
+                }
             })
             .collect();
         let n = diar.as_ref().map(|d| d.n_speakers).unwrap_or(1).max(1);

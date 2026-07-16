@@ -77,6 +77,7 @@ pub fn verify_captions_e2e(
         rewrite: String::new(),
         burn: proj.subs.burn,
         detect_text: true,
+        import_translated: false,
     };
     let sel = models::load_selection(&mroot);
     let (mt_model, mmproj) = models::resolve_mt(&mroot, &sel);
@@ -834,21 +835,6 @@ async fn analyze_project(
 
     // Параметры analyze из query (дефолты как в app.py.analyze_project).
     let qget = |k: &str, d: &str| q.get(k).cloned().unwrap_or_else(|| d.to_string());
-    let args = analyze::AnalyzeArgs {
-        tgt_lang: qget("tgt_lang", "en"),
-        mode: qget("mode", "auto"),
-        src_lang: qget("src_lang", "auto"),
-        subs: qget("subs", "auto"),
-        rewrite: qget("rewrite", ""),
-        burn: qget("burn", "1") != "0",
-        detect_text: qget("detect", "1") != "0",
-    };
-    // Активный вариант модели резолвится ПРИ КАЖДОЙ джобе (не морозится на старте): скачал/выбрал
-    // квант -> применяется без рестарта. См. models::resolve_*.
-    let sel = models::load_selection(&st.models_root);
-    let (mt_model, mmproj) = models::resolve_mt(&st.models_root, &sel);
-    let asr = models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel);
-    eprintln!("[models] analyze: MT={} · ASR={}", mt_model.display(), asr.describe());
     // Импортированные субтитры (если юзер загрузил их при создании) — берём текст+тайминг оттуда, ASR skip.
     let import_subs = ["srt", "ass", "ssa"]
         .iter()
@@ -857,6 +843,23 @@ async fn analyze_project(
     if let Some(p) = &import_subs {
         eprintln!("[analyze] импорт субтитров: {}", p.display());
     }
+    let args = analyze::AnalyzeArgs {
+        tgt_lang: qget("tgt_lang", "en"),
+        mode: qget("mode", "auto"),
+        src_lang: qget("src_lang", "auto"),
+        subs: qget("subs", "auto"),
+        rewrite: qget("rewrite", ""),
+        burn: qget("burn", "1") != "0",
+        detect_text: qget("detect", "1") != "0",
+        // «сабы уже на языке перевода» — эффективно только если сабы реально импортированы.
+        import_translated: import_subs.is_some() && qget("import_translated", "0") == "1",
+    };
+    // Активный вариант модели резолвится ПРИ КАЖДОЙ джобе (не морозится на старте): скачал/выбрал
+    // квант -> применяется без рестарта. См. models::resolve_*.
+    let sel = models::load_selection(&st.models_root);
+    let (mt_model, mmproj) = models::resolve_mt(&st.models_root, &sel);
+    let asr = models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel);
+    eprintln!("[models] analyze: MT={} · ASR={}", mt_model.display(), asr.describe());
     let paths = analyze::AnalyzePaths {
         input,
         work_dir: dir.clone(),

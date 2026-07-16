@@ -391,6 +391,8 @@
   "import": {
     "subs": "Importar legendas (SRT / ASS)",
     "subsHint": "Já tem legendas? Envie-as: usamos o texto e o tempo como base em vez do reconhecimento automático (falantes atribuídos automaticamente, depois tradução e voz).",
-    "subsClear": "Remover — usar reconhecimento automático"
+    "subsClear": "Remover — usar reconhecimento automático",
+    "translated": "Legendas já no idioma de destino (sem tradução)",
+    "translatedHint": "Ex.: vídeo em inglês + legendas em russo → dublagem em russo. O texto vai direto para a voz; reconhecimento e tradução são ignorados."
   }
 }

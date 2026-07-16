@@ -539,6 +539,7 @@ function DropZone() {
   }
   const [file, setFile] = useState<File | null>(null);                          // staged video — analyzed on Start, not on drop
   const [subsFile, setSubsFile] = useState<File | null>(null);                  // опц. готовые субтитры (SRT/ASS) -> текст+тайминг вместо ASR
+  const [subsTranslated, setSubsTranslated] = useState(false);                  // сабы уже на языке перевода -> tgt из них, MT пропустить (Даб Студио только озвучивает)
   // Композируемые опции обработки (независимы, любые комбинации). audio = аудио-выход; subs = содержимое
   // субтитров; burn = вжигать ли их на видео; funnyOn+funny = шуточный ремикс (сочетается с дубляжом/голосом).
   const [audio, setAudio] = useState<"nodub" | "dub" | "voiceover" | "transcribe">("dub");
@@ -595,7 +596,7 @@ function DropZone() {
       // «Вжигать» для transcribe скрыт, поэтому форсируем burn=true, не полагаясь на его прежнее значение.
       // Аудио-режим: субтитры/бёрн/OCR не нужны (нет видео) -> off.
       const eBurn = audioOnly ? false : audio === "transcribe" ? true : burn;
-      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText);
+      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       s.setProject(await api.getProject(project_id));
       // Озвучку готовим ЗДЕСЬ, на экране загрузки (не собирая видео — кадры даёт per-frame preview),
@@ -735,7 +736,13 @@ function DropZone() {
                   onChange={(e) => { const f = e.target.files?.[0] ?? null; setSubsFile(f); e.currentTarget.value = ""; }} />
               </label>
               {subsFile
-                ? <button onClick={() => setSubsFile(null)} className="inline-flex items-center gap-1 text-[10px] text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={10} />{t("import.subsClear")}</button>
+                ? <div className="flex flex-col items-center gap-1 mt-0.5">
+                    <label className="inline-flex items-center gap-1.5 text-[10px] text-[var(--color-muted)] cursor-pointer" title={t("import.translatedHint")}>
+                      <input type="checkbox" checked={subsTranslated} onChange={(e) => setSubsTranslated(e.target.checked)} className="accent-[var(--color-accent)]" />
+                      {t("import.translated")}
+                    </label>
+                    <button onClick={() => { setSubsFile(null); setSubsTranslated(false); }} className="inline-flex items-center gap-1 text-[10px] text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={10} />{t("import.subsClear")}</button>
+                  </div>
                 : <span className="text-[10px] text-[var(--color-muted)] leading-tight text-center max-w-[300px]">{t("import.subsHint")}</span>}
             </div>
           )}
