@@ -89,8 +89,20 @@ fn op_segment(p: &mut Project, edit: &Value) -> PatchResult {
     if let Some(t) = edit.get("src_text").and_then(|x| x.as_str()) {
         seg.src_text = t.to_string();
     }
-    // переброс фразы другому спикеру: голос спикера задаётся в настройках голосов, здесь лишь меняем
-    // принадлежность -> ref_of при рендере берёт реф целевого спикера. "" -> None (снять привязку).
+    // правка тайминга: start/end (сек). Клампим end > start; порядок в списке не трогаем (рендер сортирует
+    // по времени сам). Полезно, когда ASR-тайминг чуть разъехался с речью.
+    if let Some(v) = edit.get("start").and_then(|x| x.as_f64()) {
+        seg.start = v.max(0.0);
+    }
+    if let Some(v) = edit.get("end").and_then(|x| x.as_f64()) {
+        seg.end = v.max(seg.start + 0.1);
+    }
+    if seg.end <= seg.start {
+        seg.end = seg.start + 0.1;
+    }
+    // переброс фразы другому спикеру (в т.ч. НОВОМУ id, если ASR определил меньше спикеров, чем есть):
+    // голос спикера задаётся в настройках голосов, здесь лишь меняем принадлежность -> ref_of при рендере
+    // берёт реф целевого спикера. "" -> None (снять привязку).
     if let Some(sp) = edit.get("speaker") {
         seg.speaker = sp.as_str().filter(|s| !s.is_empty()).map(|s| s.to_string());
     }

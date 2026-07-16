@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
-import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine, ChevronDown, ScrollText } from "lucide-react";
+import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine, ChevronDown, ScrollText, Clock } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useFloatable, dockSlot } from "./lib/useFloatable";
 import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent, type ProjectSummary } from "./lib/api";
@@ -569,7 +569,7 @@ function DropZone() {
   async function openProject(pid: string) {
     try {
       const p = await api.getProject(pid);
-      s.setPid(pid); s.setProject(p);
+      s.setPid(pid); s.setProject(p); s.setRendered(false);                     // покадровое превью, не старое output-видео
       s.setStage("editor");                                                     // TranscriptView vs Editor выбирается по projMode при рендере
       window.history.pushState(null, "", `?pid=${pid}`);                        // перезагрузка/боот вернёт этот проект
       playSfx("success");
@@ -728,10 +728,10 @@ function DropZone() {
             ? <p className="mt-1 text-center text-[10px] text-[var(--color-accent-2)] leading-tight">{t("comp.asrSwitched", { lang: asrNote })}</p>
             : <p className="mt-1 text-center text-[10px] text-[var(--color-muted)] leading-tight">{t("comp.langHint")}</p>}
           {/* АУДИО-ВЫХОД (независимо от субтитров) */}
-          <div className="mt-3 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("comp.audioLabel")}</div>
+          <div className="mt-3 flex items-center gap-1.5 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("comp.audioLabel")}<span title={t("comp.optionsHelp")} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span></div>
           <div className="grid grid-cols-2 gap-1.5">
-            {([["nodub", Captions, "audioNone"], ["dub", AudioLines, "audioDub"], ["voiceover", Mic2, "audioVoiceover"], ["transcribe", FileText, "mode.transcribe"]] as const).map(([a, Icon, key]) => (
-              <button key={a} onClick={() => setAudio(a)}
+            {([["nodub", Captions, "audioNone", "comp.audioNoneHint"], ["dub", AudioLines, "audioDub", "comp.audioDubHint"], ["voiceover", Mic2, "audioVoiceover", "comp.audioVoiceoverHint"], ["transcribe", FileText, "mode.transcribe", "comp.audioTranscribeHint"]] as const).map(([a, Icon, key, hint]) => (
+              <button key={a} onClick={() => setAudio(a)} title={t(hint)}
                 className={`flex items-center justify-center gap-1.5 px-2 py-2 rounded-lg border text-[12px] font-medium transition-colors ${audio === a ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
                 <Icon size={14} />{key.includes(".") ? t(key) : t(`comp.${key}`)}</button>
             ))}
@@ -750,23 +750,25 @@ function DropZone() {
           {/* СУБТИТРЫ (независимо от аудио) */}
           {audio !== "transcribe" && !audioOnly && (
             <>
-              <div className="mt-3 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("comp.subsLabel")}</div>
+              <div className="mt-3 flex items-center gap-1.5 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("comp.subsLabel")}<span title={t("comp.optionsHelp")} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span></div>
               <div className="grid grid-cols-3 gap-1.5">
-                {([["none", "subsNone"], ["transcribe", "subsOriginal"], ["translate", "subsTranslate"]] as const).map(([sv, key]) => (
-                  <button key={sv} onClick={() => setSubs(sv)}
+                {([["none", "subsNone", "comp.subsNoneHint"], ["transcribe", "subsOriginal", "comp.subsOriginalHint"], ["translate", "subsTranslate", "comp.subsTranslateHint"]] as const).map(([sv, key, hint]) => (
+                  <button key={sv} onClick={() => setSubs(sv)} title={t(hint)}
                     className={`px-2 py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${subs === sv ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
                     {t(`comp.${key}`)}</button>
                 ))}
               </div>
               {subs !== "none" && (
-                <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none" title={t("comp.burnHint")}>
+                <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit">
                   <input type="checkbox" checked={burn} onChange={(e) => setBurn(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
                   {t("comp.burn")}
+                  <span title={t("comp.burnHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
                 </label>
               )}
-              <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none" title={t("comp.detectHint")}>
+              <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit">
                 <input type="checkbox" checked={detectText} onChange={(e) => setDetectText(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
                 {t("comp.detect")}
+                <span title={t("comp.detectHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
               </label>
             </>
           )}
@@ -944,7 +946,11 @@ function Editor() {
   const rendered = useStore((s) => s.rendered);
   const setProject = useStore((s) => s.setProject);
   const setRendered = useStore((s) => s.setRendered);
+  const setStage = useStore((s) => s.setStage);
   const bump = useStore((s) => s.bump);
+  // Экспорт на другие языки: поповер с мультиселектом -> клон+ре-перевод+рендер (наследует правки).
+  const [langMenu, setLangMenu] = useState(false);
+  const [exportLangs, setExportLangs] = useState<string[]>([]);
   const selBlur = useStore((s) => s.selBlur);             // selected blur zone (shared with the canvas overlay)
   const setSelBlur = useStore((s) => s.setSelBlur);
   const selTitle = useStore((s) => s.selTitle);           // selected title (shared with the canvas overlay)
@@ -1297,14 +1303,36 @@ function Editor() {
                   onClick={(e) => e.stopPropagation()}                       // editing text must not re-seek on every click
                   onBlur={(e) => { burstRef.current = null; persistSeg(seg.id, e.target.value); }}   // end the edit burst
                   className="w-full mt-1.5 bg-[var(--color-bg)]/60 border border-[var(--color-border)] rounded-lg p-1.5 text-[13px] leading-snug resize-none focus:border-[var(--color-accent)] focus:outline-none transition-colors" rows={2} />
-                {speakers.length > 1 && !seg.keep_original && (
+                {on && (
+                  <div className="flex items-center gap-1.5 mt-1.5" onClick={(e) => e.stopPropagation()} title={t("seg.timingHint")}>
+                    <Clock size={11} className="text-[var(--color-muted)] shrink-0" />
+                    <input type="number" step={0.1} min={0} defaultValue={seg.start.toFixed(2)} key={`st${seg.id}-${seg.start}`}
+                      onBlur={async (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && Math.abs(v - seg.start) > 0.001) { setRendered(false); try { setProject(await api.patch(pid, { op: "segment", id: seg.id, start: v })); bump(); } catch (err) { await surfaceErr(err); } } }}
+                      className="w-[62px] bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-[11px] mono tabnum focus:border-[var(--color-accent)] focus:outline-none" />
+                    <ArrowRight size={11} className="text-[var(--color-muted)] shrink-0" />
+                    <input type="number" step={0.1} min={0} defaultValue={seg.end.toFixed(2)} key={`en${seg.id}-${seg.end}`}
+                      onBlur={async (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && Math.abs(v - seg.end) > 0.001) { setRendered(false); try { setProject(await api.patch(pid, { op: "segment", id: seg.id, end: v })); bump(); } catch (err) { await surfaceErr(err); } } }}
+                      className="w-[62px] bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-[11px] mono tabnum focus:border-[var(--color-accent)] focus:outline-none" />
+                    <span className="text-[10px] text-[var(--color-muted)]">{t("seg.seconds")}</span>
+                  </div>
+                )}
+                {(speakers.length > 1 || on) && !seg.keep_original && (
                   <div className="flex items-center gap-1.5 mt-1.5" onClick={(e) => e.stopPropagation()} title={t("seg.speakerHint")}>
                     <Users size={11} className="text-[var(--color-muted)] shrink-0" />
                     <select value={seg.speaker ?? ""}
-                      onChange={async (e) => { setRendered(false); try { setProject(await api.patch(pid, { op: "segment", id: seg.id, speaker: e.target.value })); bump(); } catch (err) { await surfaceErr(err); } }}
+                      onChange={async (e) => {
+                        let val = e.target.value;
+                        if (val === "__new__") {                          // добавить НОВОГО спикера (ASR нашёл меньше, чем есть): следующий свободный id
+                          const nums = p.segments.map((x) => parseInt(x.speaker ?? "", 10)).filter((n) => !isNaN(n));
+                          val = String(nums.length ? Math.max(...nums) + 1 : 1);
+                        }
+                        setRendered(false);
+                        try { setProject(await api.patch(pid, { op: "segment", id: seg.id, speaker: val })); bump(); } catch (err) { await surfaceErr(err); }
+                      }}
                       className="flex-1 min-w-0 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-[11px] focus:border-[var(--color-accent)] focus:outline-none transition-colors">
                       {seg.speaker == null && <option value="">—</option>}
                       {speakers.map((s) => <option key={s} value={s}>SPK {s}</option>)}
+                      <option value="__new__">＋ {t("seg.newSpeaker")}</option>
                     </select>
                   </div>
                 )}
@@ -1483,10 +1511,49 @@ function Editor() {
             className="p-1.5 rounded-md text-[var(--color-muted)] hover:text-[var(--color-text)] disabled:opacity-30 transition-colors"><Undo2 size={16} /></button>
           <button onClick={doRedo} disabled={!canRedo} title="Ctrl+Shift+Z"
             className="p-1.5 rounded-md text-[var(--color-muted)] hover:text-[var(--color-text)] disabled:opacity-30 transition-colors"><Redo2 size={16} /></button>
-          <button onClick={doExport} disabled={rendering}
-            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-70 hover:brightness-105 transition shrink-0">
-            {rendering ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}{t("export.proceed")}
-          </button>
+          {/* Экспорт как split-button: основная кнопка — экспорт текущего языка; стрелка ▾ — «ещё языки». */}
+          <div className="relative shrink-0 flex items-stretch">
+            <button onClick={doExport} disabled={rendering}
+              className={`inline-flex items-center gap-2 px-4 py-1.5 ${audioOnly ? "rounded-lg" : "rounded-l-lg"} bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-70 hover:brightness-105 transition`}>
+              {rendering ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}{t("export.proceed")}
+            </button>
+            {!audioOnly && (
+              <button onClick={() => { setLangMenu((v) => !v); if (exportLangs.length === 0) setExportLangs([p.tgt_lang]); }}
+                title={t("multilang.exportHint")} disabled={rendering}
+                className="inline-flex items-center px-1.5 rounded-r-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] border-l border-[color-mix(in_oklab,var(--color-on-accent)_30%,transparent)] disabled:opacity-70 hover:brightness-105 transition">
+                <ChevronDown size={16} className={langMenu ? "rotate-180 transition-transform" : "transition-transform"} />
+              </button>
+            )}
+            {langMenu && !audioOnly && (
+              <div className="absolute right-0 top-full mt-2 z-30 w-72 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xl p-3">
+                <div className="text-[12px] font-semibold mb-1">{t("multilang.exportTitle")}</div>
+                <div className="text-[11px] text-[var(--color-muted)] mb-2 leading-snug">{t("multilang.exportHint")}</div>
+                {exportLangs.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {exportLangs.map((code) => (
+                      <span key={code} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md bg-[color-mix(in_oklab,var(--color-accent)_16%,transparent)] text-[var(--color-accent)] text-[11px]">
+                        {DUB_LANGS.find((l) => l.code === code)?.name ?? code}
+                        <button onClick={() => setExportLangs((xs) => xs.filter((x) => x !== code))} className="hover:text-[var(--color-text)]"><X size={11} /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <select value="" onChange={(e) => { const c = e.target.value; if (c && !exportLangs.includes(c)) setExportLangs((xs) => [...xs, c]); }}
+                  className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-1 text-[11px] focus:border-[var(--color-accent)] focus:outline-none">
+                  <option value="">{t("multilang.add")}</option>
+                  {DUB_LANGS.filter((l) => !exportLangs.includes(l.code)).map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
+                </select>
+                <button disabled={exportLangs.length === 0}
+                  onClick={() => {
+                    Object.assign(multiLangState, { file: null, sourcePid: pid, sourceName: p.meta.video || pid, langs: exportLangs, src: "auto", audio: p.mode, subs: p.subs.mode, burn: p.subs.burn !== false, detectText: false, funnyOn: false, funny: "" });
+                    setLangMenu(false); setStage("multilang");
+                  }}
+                  className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[12px] font-semibold disabled:opacity-50 hover:brightness-105">
+                  <Languages size={13} />{t("multilang.exportGo", { n: exportLangs.length })}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex-1 min-h-0 p-3 overflow-hidden">
           {audioOnly ? (
@@ -1637,6 +1704,25 @@ function Editor() {
                 </div>
               );
             })()}
+            {/* Добавить спикера: если ASR нашёл меньше спикеров, чем есть. Выделенные галочками фразы (или
+                текущую под плейхедом) назначаем новому SPK N — дальше ему можно задать свой голос выше. */}
+            <button onClick={async () => {
+              const nums = p.segments.map((x) => parseInt(x.speaker ?? "", 10)).filter((n) => !isNaN(n));
+              const nid = String(nums.length ? Math.max(...nums) + 1 : 1);
+              const targets = selSegs.size ? [...selSegs] : (() => { const act = p.segments.find((s) => scrub >= s.start && scrub <= s.end); return act ? [act.id] : []; })();
+              if (!targets.length) { pushActivity(t("voice.addSpeakerPick"), "info"); return; }
+              setRendered(false);
+              try {
+                let fresh = p;
+                for (const id of targets) fresh = await api.patch(pid, { op: "segment", id, speaker: nid });
+                setProject(fresh); bump(); setSelSegs(new Set());
+                pushActivity(t("voice.addSpeakerDone", { spk: nid, n: targets.length }), "info");
+              } catch (err) { await surfaceErr(err); }
+            }}
+              title={t("voice.addSpeakerHint")}
+              className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-dashed border-[var(--color-border)] text-[12px] text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition-colors">
+              <Plus size={13} />{t("voice.addSpeaker")}
+            </button>
             {p.audio.voice.mode !== "voice" && (
               <div className="mt-1 text-[10px] text-[var(--color-muted)] leading-snug">{t("voice.recordHint")}</div>
             )}
@@ -2191,11 +2277,11 @@ function BatchView() {
         const fSubs = ao ? "none" : eSubs;
         const fBurn = ao ? false : audio === "transcribe" ? true : burn;
         const { job_id } = await api.analyze(project_id, tgt, eMode, src, fSubs, eRewrite, fBurn, ao ? false : detectText);
-        await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0 }); });
+        await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); });
         if (doRender) {
           upd({ status: "rendering", pct: 0 });
           const r = await api.render(project_id);
-          await api.watchJob(r.job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0 }); });
+          await api.watchJob(r.job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); });
         }
         upd({ status: "done", pct: 100 });
       } catch (err) {
@@ -2248,6 +2334,139 @@ function BatchView() {
           className="mt-3 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-50 hover:brightness-105 transition">
           {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}{t("batch.start")}
         </button>
+      </div>
+    </main>
+  );
+}
+
+// Мультиязык. Два режима:
+//  • создание (sourcePid=null): DropZone кладёт ОДИН файл + языки -> createProject/analyze/render с нуля.
+//  • экспорт (sourcePid задан): редактор кладёт pid готового проекта -> exportLang (клон+ре-перевод+рендер),
+//    наследуя ВСЕ правки (раскладку/стиль/блюр/титры/голос). file тогда null.
+const multiLangState: { file: File | null; sourcePid: string | null; sourceName: string; langs: string[]; src: string; audio: string; subs: string; burn: boolean; detectText: boolean; funnyOn: boolean; funny: string } =
+  { file: null, sourcePid: null, sourceName: "", langs: [], src: "auto", audio: "dub", subs: "translate", burn: true, detectText: false, funnyOn: false, funny: "" };
+
+type MLItem = { lang: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string };
+
+// Мультиязычный перевод: ОДИН ролик -> сразу на N языков. Для каждого языка createProject(тот же файл) ->
+// analyze(tgt=язык) -> render -> output. Последовательно (движок одно-воркерный, GPU сериализует).
+// Переиспользует те же эндпоинты, что batch/DropZone — отдельного backend не нужно. Результат: N проектов.
+function MultiLangView() {
+  const { t } = useTranslation();
+  const setStage = useStore((s) => s.setStage);
+  const setPid = useStore((s) => s.setPid);
+  const setProject = useStore((s) => s.setProject);
+  const setRendered = useStore((s) => s.setRendered);
+  const fileRef = useRef<File | null>(multiLangState.file);
+  const srcPid = multiLangState.sourcePid;                              // задан -> экспорт-режим (наследует правки)
+  const { langs, src, audio, subs, burn, detectText, funnyOn, funny, sourceName } = multiLangState;
+  const [items, setItems] = useState<MLItem[]>(() => langs.map((l) => ({ lang: l, status: "queued", pid: null, pct: 0 })));
+  const [running, setRunning] = useState(false);
+  const [doneN, setDoneN] = useState(0);
+
+  const file = fileRef.current;
+  const ao = !!file && isAudioFile(file);
+  const eMode = audio;
+  const eSubs = ao ? "none" : audio === "transcribe" ? "transcribe" : subs;
+  const fBurn = ao ? false : audio === "transcribe" ? true : burn;
+  const eRewrite = funnyOn && (audio === "dub" || audio === "voiceover") ? funny.trim() : "";
+  const doRender = audio === "dub" || audio === "voiceover";
+  const langName = (code: string) => DUB_LANGS.find((l) => l.code === code)?.name ?? code.toUpperCase();
+
+  async function run() {
+    if ((!file && !srcPid) || running) return;
+    setRunning(true);
+    for (let i = 0; i < langs.length; i++) {
+      const upd = (patch: Partial<MLItem>) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+      try {
+        if (srcPid) {
+          // Экспорт-режим: клон готового проекта + ре-перевод + рендер ОДНИМ джобом (наследует все правки).
+          upd({ status: "rendering", pct: 0 });
+          useStore.getState().pushActivity(`${langName(langs[i])} — ${t("multilang.title")}`, "work");
+          const { job_id, project_id } = await api.exportLang(srcPid, langs[i]);
+          upd({ pid: project_id });
+          // Глобальный прогресс: чтобы статус/журнал показывали работу даже если ушли в редактор.
+          await api.watchJob(job_id, (e) => { if (e.type === "progress") { upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); useStore.getState().setProgress("multilang", `${langName(langs[i])}: ${e.msg || ""}`, e.pct ?? null); } });
+        } else if (file) {
+          // Создание-режим: отдельный проект с нуля под каждый язык.
+          upd({ status: "analyzing", pct: 0 });
+          const { project_id } = await api.createProject(file);
+          upd({ pid: project_id });
+          const { job_id } = await api.analyze(project_id, langs[i], eMode, src, eSubs, eRewrite, fBurn, ao ? false : detectText);
+          await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); });
+          if (doRender) {
+            upd({ status: "rendering", pct: 0 });
+            const r = await api.render(project_id);
+            await api.watchJob(r.job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); });
+          }
+        }
+        upd({ status: "done", pct: 100 });
+      } catch (err) {
+        upd({ status: "error", msg: String(err) });
+      }
+      setDoneN((n) => n + 1);
+    }
+    setRunning(false);
+    useStore.getState().setProgress("", "", null);   // очистить глобальный статус по завершении всех языков
+  }
+  // Языки уже выбраны на экране создания, «Начать обработку» уже нажата -> стартуем сразу.
+  useEffect(() => { run(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function openInEditor(pid: string) {
+    try {
+      const p = await api.getProject(pid);
+      setPid(pid); setProject(p); setRendered(false);   // сброс: покадровое превью, а не старое output-видео (чёрный кадр)
+      setStage("editor");
+      window.history.pushState(null, "", `?pid=${pid}`);
+    } catch { /* пропало */ }
+  }
+  const icon = (s: MLItem["status"]) =>
+    s === "done" ? <Check size={15} className="text-[var(--color-accent)]" /> :
+    s === "error" ? <X size={15} className="text-[var(--color-warn)]" /> :
+    s === "queued" ? <Square size={13} className="text-[var(--color-muted)]" /> :
+    <Loader2 size={15} className="animate-spin text-[var(--color-accent)]" />;
+
+  return (
+    <main className="flex-1 min-h-0 overflow-hidden flex flex-col p-4">
+      <div className="max-w-3xl w-full mx-auto flex flex-col min-h-0">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <button onClick={() => setStage(srcPid ? "editor" : "empty")} className="text-[13px] text-[var(--color-muted)] hover:text-[var(--color-text)] inline-flex items-center gap-1"><ArrowRight size={14} className="rotate-180" />{t("batch.back")}</button>
+            <span className="text-[15px] font-semibold flex items-center gap-2"><Languages size={16} className="text-[var(--color-accent)]" />{t("multilang.title")}</span>
+          </div>
+          <span className="text-[12px] text-[var(--color-muted)]">{doneN}/{items.length} · {items.length} {t("multilang.langsWord")}</span>
+        </div>
+        <div className="text-[12px] text-[var(--color-muted)] mb-2 truncate">{file?.name || sourceName} → {items.length} {t("multilang.langsWord")}</div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] divide-y divide-[var(--color-border)]">
+          {items.map((it, i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-2.5">
+              <span className="shrink-0">{icon(it.status)}</span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px] truncate">{langName(it.lang)}</div>
+                {(it.status === "analyzing" || it.status === "rendering") && (
+                  <div className="mt-1 h-1 rounded bg-[var(--color-surface-2)] overflow-hidden">
+                    <div className="h-full bg-[var(--color-accent)] transition-all" style={{ width: `${Math.round((it.pct || 0) * 100)}%` }} />
+                  </div>
+                )}
+                {it.status === "error" && <div className="text-[10px] text-[var(--color-warn)] truncate mono">{it.msg}</div>}
+              </div>
+              <span className="text-[11px] text-[var(--color-muted)] shrink-0">{t(`batch.${it.status}`)}</span>
+              {it.status === "done" && it.pid && (
+                <>
+                  <button onClick={() => it.pid && openInEditor(it.pid)} className="text-[11px] text-[var(--color-muted)] inline-flex items-center gap-1 shrink-0 hover:text-[var(--color-text)]"><Eye size={12} />{t("multilang.openEditor")}</button>
+                  <button onClick={() => { if (it.pid) api.openOutput(it.pid).catch(() => it.pid && openInEditor(it.pid)); }} className="text-[11px] text-[var(--color-accent)] inline-flex items-center gap-1 shrink-0 hover:underline"><ExternalLink size={12} />{t("batch.open_out")}</button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        {!running && doneN === items.length && (
+          <button onClick={() => setStage("empty")}
+            className="mt-3 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold hover:brightness-105 transition">
+            <Check size={15} />{t("multilang.done")}
+          </button>
+        )}
       </div>
     </main>
   );
@@ -2422,12 +2641,13 @@ export default function App() {
       {stage === "empty" && <DropZone />}
       {stage === "analyzing" && <AnalyzeProgress />}
       {stage === "batch" && <BatchView />}
+      {stage === "multilang" && <MultiLangView />}
       {stage === "editor" && (projMode === "transcribe" ? <TranscriptView /> : <Editor />)}
       <footer className="mono h-6 px-4 flex items-center gap-2 text-[10px] text-[var(--color-muted)] border-t border-[var(--color-border)] bg-[var(--color-surface)]">
         <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)]" />{cap}
       </footer>
       <FilesPanel />
-      {(stage === "editor" || stage === "analyzing") && <ResourceMonitor />}
+      {(stage === "editor" || stage === "analyzing" || stage === "multilang" || stage === "batch") && <ResourceMonitor />}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Project } from "./lib/api";
 
-type Stage = "boot" | "setup" | "empty" | "analyzing" | "editor" | "batch";
+type Stage = "boot" | "setup" | "empty" | "analyzing" | "editor" | "batch" | "multilang";
 export type ExportItem = { id: string; name: string; status: "rendering" | "done" | "error"; msg: string; url?: string; pid?: string };
 export type Activity = { t: number; text: string; kind: "work" | "done" | "error" };   // строка лога «что делает приложение»
 

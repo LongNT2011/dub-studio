@@ -322,6 +322,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects/{pid}/analyze", post(analyze_project))
         .route("/projects/{pid}/remix", post(endpoints::remix_project))
         .route("/projects/{pid}/render", post(render_project))
+        .route("/projects/{pid}/export-lang", post(export_lang))   // клон+ре-перевод+рендер на другом языке (экспорт-уровень мультиязыка)
         .route("/projects/{pid}/waveform", get(endpoints::waveform))
         .route("/projects/{pid}/preview", get(endpoints::preview))
         .route("/projects/{pid}/output", get(output))
@@ -968,6 +969,151 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
     });
     let job_id = st.jobs.enqueue(job).await;
     Json(json!({ "job_id": job_id })).into_response()
+}
+
+/// Клонировать каталог проекта для ре-перевода на другой язык: копируем ВСЁ, кроме пожадорных/финальных
+/// выводов (они перегенерируются рендером). Сохраняем project.json (раскладка/стили/блюр/титры), исходник,
+/// референсы клона голоса (ref_*.wav) и разделённые вокал/аудио-кэши — чтобы дубляж взял ТОТ ЖЕ голос,
+/// а раскладка субтитров осталась как у пользователя. НЕ гоняем заново ASR/OCR/vision.
+fn clone_project_for_relang(src: &Path, dst: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+    let rd = std::fs::read_dir(src).map_err(|e| e.to_string())?;
+    for e in rd.flatten() {
+        let p = e.path();
+        if !p.is_file() {
+            continue; // подкаталоги (frames/) не нужны — vision/OCR не перезапускаем
+        }
+        let name = match p.file_name().and_then(|s| s.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        let skip = name.starts_with("seg_")
+            || name.starts_with("output.")
+            || name == "captioned.mp4"
+            || name.starts_with("_preview")
+            || name == "_original.png"
+            || name == "new_audio.m4a"
+            || name == "final_audio.m4a"
+            || name == "dub_audio.m4a"
+            || name == "dub_fit.wav";
+        if !skip {
+            std::fs::copy(&p, dst.join(&name)).map_err(|e| format!("copy {name}: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+// ─── POST /projects/{pid}/export-lang?lang=Lx ───────────────────────────────
+// Экспорт-уровень мультиязыка: КЛОНИРУЕТ уже отредактированный проект (сохраняя раскладку субтитров,
+// стили, блюр, титры и клон голоса) в НОВЫЙ проект на языке Lx, переводит ТОЛЬКО текст (сегменты+титры)
+// через Gemma (flat_run — без пере-раскладки vision), помечает dirty и рендерит. Возвращает {project_id, job_id}.
+async fn export_lang(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let lang = q.get("lang").cloned().unwrap_or_default().trim().to_string();
+    if lang.is_empty() {
+        return (StatusCode::BAD_REQUEST, "no lang").into_response();
+    }
+    let src_dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    if !src_dir.join("project.json").is_file() {
+        return (StatusCode::CONFLICT, "project not analyzed yet").into_response();
+    }
+    let mut new_pid = uuid::Uuid::new_v4().simple().to_string();
+    new_pid.truncate(12);
+    let dst_dir = st.workspace.join(&new_pid);
+    if let Err(e) = clone_project_for_relang(&src_dir, &dst_dir) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    let input = match std::fs::read_to_string(dst_dir.join("source.txt")) {
+        Ok(s) => PathBuf::from(s.trim()),
+        Err(_) => return (StatusCode::CONFLICT, "no source").into_response(),
+    };
+
+    let llama_bin = st.llama_bin.clone();
+    let mt_model = st.opts.mt_model_path.clone();
+    let sel = models::load_selection(&st.models_root);
+    let (higgs_model_root, higgs_quant) = models::resolve_tts(&st.models_root, &sel);
+    let sep_model = models::resolve_sep(&st.models_root, &sel);
+    let output = dst_dir.join("output.mp4");
+    let paths = render::RenderPaths {
+        input,
+        work_dir: dst_dir.clone(),
+        output: output.clone(),
+        bsroformer_cli: st.bsroformer_cli.clone(),
+        bsroformer_model: sep_model,
+        higgs_dll: st.higgs_dll.clone(),
+        higgs_model_root,
+        higgs_quant,
+        fonts_dir: st.fonts_dir.clone(),
+        higgs_backend: st.opts.device.clone(),
+        higgs_device: 0,
+        higgs_threads: st.opts.num_threads,
+        max_stretch: st.opts.max_stretch as f64,
+        voices_dir: st.voices_dir.clone(),
+        asr: models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel),
+        ref_secs: models::higgs_ref_secs(&st.models_root),
+    };
+
+    let dst_for_job = dst_dir.clone();
+    let lang_c = lang.clone();
+    let new_pid_res = new_pid.clone();
+    let out_res = output.clone();
+    let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
+        use dub_llm::{ChatClient, LlamaServer, ServerOpts};
+        use dub_translate::{flat_run, Seg};
+        let pj = dst_for_job.join("project.json");
+        let text = std::fs::read_to_string(&pj).map_err(|e| e.to_string())?;
+        let mut p = Project::from_json(&text).map_err(|e| e.to_string())?;
+        p.tgt_lang = lang_c.clone();
+        if !llama_bin.is_file() || !mt_model.is_file() {
+            return Err("Gemma (llama-server/GGUF) недоступна для перевода".into());
+        }
+        let spoken = matches!(p.mode.as_str(), "dub" | "voiceover");
+        progress(json!({ "type": "progress", "stage": "translate",
+            "msg": format!("Перевод {} строк → {}", p.segments.len(), lang_c) }));
+        let opts = ServerOpts::new(&llama_bin, &mt_model);
+        let srv = LlamaServer::start(&opts).map_err(|e| format!("llama-server: {e}"))?;
+        let client = ChatClient::new(srv.base_url()).map_err(|e| format!("chat client: {e}"))?;
+        // Сегменты: src_text -> Lx (раскладка/стили/тайминг остаются от пользователя).
+        let mut segs: Vec<Seg> = p
+            .segments
+            .iter()
+            .map(|s| {
+                let spk = s.speaker.as_deref().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0);
+                Seg::new(s.src_text.clone(), spk)
+            })
+            .collect();
+        flat_run(&client, &mut segs, "auto", &lang_c, spoken).map_err(|e| format!("translate: {e}"))?;
+        for (s, sg) in p.segments.iter_mut().zip(segs) {
+            if !sg.tgt.trim().is_empty() {
+                s.tgt_text = sg.tgt;
+            }
+            s.dirty = true; // форсим ре-TTS на новом языке
+        }
+        // Титры: text -> Lx (позиции/стиль остаются).
+        if !p.captions.titles.is_empty() {
+            let mut tsegs: Vec<Seg> = p.captions.titles.iter().map(|ti| Seg::new(ti.text.clone(), 0)).collect();
+            if flat_run(&client, &mut tsegs, "auto", &lang_c, false).is_ok() {
+                for (ti, sg) in p.captions.titles.iter_mut().zip(tsegs) {
+                    if !sg.tgt.trim().is_empty() {
+                        ti.tgt = sg.tgt;
+                    }
+                }
+            }
+        }
+        drop(srv); // освободить VRAM перед TTS/рендером
+        save_project_atomic(&dst_for_job, &p)?;
+        let cb = |ev: Value| progress(ev);
+        render::run(&p, &paths, true, &cb)?;
+        Ok(json!({ "output": out_res.to_string_lossy(), "project_id": new_pid_res }))
+    });
+    let job_id = st.jobs.enqueue(job).await;
+    Json(json!({ "job_id": job_id, "project_id": new_pid })).into_response()
 }
 
 /// POST /projects/{pid}/dub-audio — сгенерить ТОЛЬКО озвучку (без сборки видео) -> dub_audio.m4a.
