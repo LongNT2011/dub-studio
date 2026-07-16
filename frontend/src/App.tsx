@@ -2708,7 +2708,14 @@ export default function App() {
   const setProject = useStore((s) => s.setProject);
   const setStage = useStore((s) => s.setStage);
   const [cap, setCap] = useState("");
-  useEffect(() => { api.capabilities().then((c) => setCap(`${c.device} · ${c.asr_model}`)).catch(() => setCap("backend offline")); }, []);
+  useEffect(() => { api.capabilities().then((c) => {
+    const base = (p?: string) => p ? (p.split(/[\\/]/).pop() || p).replace(/\.(gguf|onnx|bin|pt|safetensors)$/i, "") : "";
+    const parts = [c.device, `ASR ${c.asr_model}`];
+    if (c.models?.llm) parts.push(`MT+vision ${base(c.models.llm)}`);
+    if (c.models?.tts) parts.push(`TTS ${c.models.tts}${c.tts_quant ? ` ${c.tts_quant}` : ""}`);
+    parts.push("sep BSRoformer", "diar Sortformer", "OCR PP-OCR");   // фикс-движки пайплайна
+    setCap(parts.join(" · "));
+  }).catch(() => setCap("backend offline")); }, []);
   // boot: resume ?pid=… project, else gate on /setup/status — missing required components -> «first run».
   useEffect(() => {
     const pid = new URLSearchParams(location.search).get("pid");
@@ -2727,8 +2734,8 @@ export default function App() {
       {stage === "batch" && <BatchView />}
       {stage === "multilang" && <MultiLangView />}
       {stage === "editor" && (projMode === "transcribe" ? <TranscriptView /> : <Editor />)}
-      <footer className="mono h-6 px-4 flex items-center gap-2 text-[10px] text-[var(--color-muted)] border-t border-[var(--color-border)] bg-[var(--color-surface)]">
-        <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)]" />{cap}
+      <footer className="mono h-6 px-4 flex items-center gap-2 text-[10px] text-[var(--color-muted)] border-t border-[var(--color-border)] bg-[var(--color-surface)] overflow-hidden">
+        <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] shrink-0" /><span className="truncate" title={cap}>{cap}</span>
       </footer>
       <FilesPanel />
       {(stage === "editor" || stage === "analyzing" || stage === "multilang" || stage === "batch") && <ResourceMonitor />}

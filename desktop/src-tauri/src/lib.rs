@@ -227,7 +227,7 @@ pub fn run() {
                 "main",
                 WebviewUrl::External(url.parse().expect("валидный URL")),
             )
-            .title("Dub Studio")
+            .title(format!("Dub Studio {}", app.package_info().version))
             .inner_size(1280.0, 860.0)
             .min_inner_size(1180.0, 720.0)
             .resizable(true)
