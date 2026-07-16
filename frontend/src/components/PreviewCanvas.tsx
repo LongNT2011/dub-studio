@@ -41,6 +41,9 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, lane, pla
   const [imgSrc, setImgSrc] = useState(() => api.previewUrl(pid, scrub, rev));
   const loadingRef = useRef(false);
   const pendingRef = useRef<string | null>(null);
+  // Сброс backpressure-латча при смене rendered/pid: когда rendered флипается в true, <img> размонтируется
+  // и его onLoad уже НЕ придёт -> loadingRef остался бы навсегда true, и при возврате в preview кадр замер бы.
+  useEffect(() => { loadingRef.current = false; pendingRef.current = null; }, [rendered, pid]);
   useEffect(() => {
     if (rendered) return;
     const want = api.previewUrl(pid, scrub, rev, playing);   // при плее -> lr=1 (низкое разрешение на больших видео)

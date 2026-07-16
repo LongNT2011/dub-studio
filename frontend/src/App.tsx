@@ -649,7 +649,7 @@ function DropZone() {
                     className="w-full flex items-center gap-3 p-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)] hover:border-[#3a414c] transition-colors text-left">
                     {p.audio_only
                       ? <div className="w-16 h-10 shrink-0 rounded-md grid place-items-center bg-[var(--color-surface-2)] text-[var(--color-accent)]"><AudioLines size={16} /></div>
-                      : <img src={api.originalUrl(p.pid, 1)} alt="" loading="lazy" className="w-16 h-10 shrink-0 rounded-md object-cover bg-black/40" />}
+                      : <img src={api.originalUrl(p.pid, Math.min(1, (p.duration || 3) / 3))} alt="" loading="lazy" className="w-16 h-10 shrink-0 rounded-md object-cover bg-black/40" />}
                     <div className="min-w-0 flex-1">
                       <div className="text-[13px] font-medium truncate">{p.video}</div>
                       <div className="mt-0.5 text-[11px] text-[var(--color-muted)] flex items-center gap-1.5">
@@ -1518,7 +1518,7 @@ function Editor() {
               {rendering ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}{t("export.proceed")}
             </button>
             {!audioOnly && (
-              <button onClick={() => { setLangMenu((v) => !v); if (exportLangs.length === 0) setExportLangs([p.tgt_lang]); }}
+              <button onClick={() => setLangMenu((v) => !v)}
                 title={t("multilang.exportHint")} disabled={rendering}
                 className="inline-flex items-center px-1.5 rounded-r-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] border-l border-[color-mix(in_oklab,var(--color-on-accent)_30%,transparent)] disabled:opacity-70 hover:brightness-105 transition">
                 <ChevronDown size={16} className={langMenu ? "rotate-180 transition-transform" : "transition-transform"} />
@@ -1541,11 +1541,11 @@ function Editor() {
                 <select value="" onChange={(e) => { const c = e.target.value; if (c && !exportLangs.includes(c)) setExportLangs((xs) => [...xs, c]); }}
                   className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-1 text-[11px] focus:border-[var(--color-accent)] focus:outline-none">
                   <option value="">{t("multilang.add")}</option>
-                  {DUB_LANGS.filter((l) => !exportLangs.includes(l.code)).map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
+                  {DUB_LANGS.filter((l) => !exportLangs.includes(l.code) && l.code !== p.tgt_lang).map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
                 </select>
                 <button disabled={exportLangs.length === 0}
                   onClick={() => {
-                    Object.assign(multiLangState, { file: null, sourcePid: pid, sourceName: p.meta.video || pid, langs: exportLangs, src: "auto", audio: p.mode, subs: p.subs.mode, burn: p.subs.burn !== false, detectText: false, funnyOn: false, funny: "" });
+                    Object.assign(multiLangState, { sourcePid: pid, sourceName: p.meta.video || pid, langs: exportLangs });
                     setLangMenu(false); setStage("multilang");
                   }}
                   className="mt-2 w-full inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[12px] font-semibold disabled:opacity-50 hover:brightness-105">
@@ -2317,7 +2317,7 @@ function BatchView() {
                 <div className="text-[13px] truncate">{it.name}</div>
                 {(it.status === "analyzing" || it.status === "rendering") && (
                   <div className="mt-1 h-1 rounded bg-[var(--color-surface-2)] overflow-hidden">
-                    <div className="h-full bg-[var(--color-accent)] transition-all" style={{ width: `${Math.round((it.pct || 0) * 100)}%` }} />
+                    <div className="h-full bg-[var(--color-accent)] transition-all" style={{ width: `${Math.min(100, Math.round(it.pct || 0))}%` }} />
                   </div>
                 )}
                 {it.status === "error" && <div className="text-[10px] text-[var(--color-warn)] truncate mono">{it.msg}</div>}
@@ -2343,8 +2343,8 @@ function BatchView() {
 //  • создание (sourcePid=null): DropZone кладёт ОДИН файл + языки -> createProject/analyze/render с нуля.
 //  • экспорт (sourcePid задан): редактор кладёт pid готового проекта -> exportLang (клон+ре-перевод+рендер),
 //    наследуя ВСЕ правки (раскладку/стиль/блюр/титры/голос). file тогда null.
-const multiLangState: { file: File | null; sourcePid: string | null; sourceName: string; langs: string[]; src: string; audio: string; subs: string; burn: boolean; detectText: boolean; funnyOn: boolean; funny: string } =
-  { file: null, sourcePid: null, sourceName: "", langs: [], src: "auto", audio: "dub", subs: "translate", burn: true, detectText: false, funnyOn: false, funny: "" };
+const multiLangState: { sourcePid: string | null; sourceName: string; langs: string[] } =
+  { sourcePid: null, sourceName: "", langs: [] };
 
 type MLItem = { lang: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string; detail?: string };
 
@@ -2357,60 +2357,40 @@ function MultiLangView() {
   const setPid = useStore((s) => s.setPid);
   const setProject = useStore((s) => s.setProject);
   const setRendered = useStore((s) => s.setRendered);
-  const fileRef = useRef<File | null>(multiLangState.file);
-  const srcPid = multiLangState.sourcePid;                              // задан -> экспорт-режим (наследует правки)
-  const { langs, src, audio, subs, burn, detectText, funnyOn, funny, sourceName } = multiLangState;
+  const srcPid = multiLangState.sourcePid;                              // pid готового проекта -> экспорт на N языков
+  const { langs, sourceName } = multiLangState;
   const [items, setItems] = useState<MLItem[]>(() => langs.map((l) => ({ lang: l, status: "queued", pid: null, pct: 0 })));
   const [running, setRunning] = useState(false);
   const [doneN, setDoneN] = useState(0);
-
-  const file = fileRef.current;
-  const ao = !!file && isAudioFile(file);
-  const eMode = audio;
-  const eSubs = ao ? "none" : audio === "transcribe" ? "transcribe" : subs;
-  const fBurn = ao ? false : audio === "transcribe" ? true : burn;
-  const eRewrite = funnyOn && (audio === "dub" || audio === "voiceover") ? funny.trim() : "";
-  const doRender = audio === "dub" || audio === "voiceover";
   const langName = (code: string) => DUB_LANGS.find((l) => l.code === code)?.name ?? code.toUpperCase();
+  const mounted = useRef(true);                                         // не дёргаем локальный setState после размонтирования
+  useEffect(() => () => { mounted.current = false; }, []);
 
   async function run() {
-    if ((!file && !srcPid) || running) return;
+    if (!srcPid || running) return;
     setRunning(true);
     for (let i = 0; i < langs.length; i++) {
-      const upd = (patch: Partial<MLItem>) => setItems((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+      const upd = (patch: Partial<MLItem>) => { if (mounted.current) setItems((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x))); };
       try {
-        if (srcPid) {
-          // Экспорт-режим: клон готового проекта + ре-перевод + рендер ОДНИМ джобом (наследует все правки).
-          upd({ status: "rendering", pct: 0 });
-          useStore.getState().pushActivity(`${langName(langs[i])} — ${t("multilang.title")}`, "work");
-          const { job_id, project_id } = await api.exportLang(srcPid, langs[i]);
-          upd({ pid: project_id });
-          // Глобальный прогресс: чтобы статус/журнал показывали работу даже если ушли в редактор.
-          await api.watchJob(job_id, (e) => { if (e.type === "progress") { upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); useStore.getState().setProgress("multilang", `${langName(langs[i])}: ${e.msg || ""}`, e.pct ?? null); } });
-        } else if (file) {
-          // Создание-режим: отдельный проект с нуля под каждый язык.
-          upd({ status: "analyzing", pct: 0 });
-          const { project_id } = await api.createProject(file);
-          upd({ pid: project_id });
-          const { job_id } = await api.analyze(project_id, langs[i], eMode, src, eSubs, eRewrite, fBurn, ao ? false : detectText);
-          await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); });
-          if (doRender) {
-            upd({ status: "rendering", pct: 0 });
-            const r = await api.render(project_id);
-            await api.watchJob(r.job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); });
-          }
-        }
+        // Клон готового проекта + ре-перевод + рендер ОДНИМ джобом (наследует все правки).
+        upd({ status: "rendering", pct: 0 });
+        useStore.getState().pushActivity(`${langName(langs[i])} — ${t("multilang.title")}`, "work");
+        const { job_id, project_id } = await api.exportLang(srcPid, langs[i]);
+        upd({ pid: project_id });
+        // Глобальный прогресс: чтобы статус/журнал показывали работу даже если ушли в редактор.
+        await api.watchJob(job_id, (e) => { if (e.type === "progress") { upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); useStore.getState().setProgress("multilang", `${langName(langs[i])}: ${e.msg || ""}`, e.pct ?? null); } });
         upd({ status: "done", pct: 100 });
       } catch (err) {
         upd({ status: "error", msg: String(err) });
       }
-      setDoneN((n) => n + 1);
+      if (mounted.current) setDoneN((n) => n + 1);
     }
-    setRunning(false);
+    if (mounted.current) setRunning(false);
     useStore.getState().setProgress("", "", null);   // очистить глобальный статус по завершении всех языков
   }
-  // Языки уже выбраны на экране создания, «Начать обработку» уже нажата -> стартуем сразу.
-  useEffect(() => { run(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Стартуем один раз: гвард от двойного mount в React 19 StrictMode (иначе экспорт запустится ДВАЖДЫ).
+  const started = useRef(false);
+  useEffect(() => { if (started.current) return; started.current = true; run(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   async function openInEditor(pid: string) {
     try {
@@ -2436,7 +2416,7 @@ function MultiLangView() {
           </div>
           <span className="text-[12px] text-[var(--color-muted)]">{doneN}/{items.length} · {items.length} {t("multilang.langsWord")}</span>
         </div>
-        <div className="text-[12px] text-[var(--color-muted)] mb-2 truncate">{file?.name || sourceName} → {items.length} {t("multilang.langsWord")}</div>
+        <div className="text-[12px] text-[var(--color-muted)] mb-2 truncate">{sourceName} → {items.length} {t("multilang.langsWord")}</div>
 
         <div className="flex-1 min-h-0 overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] divide-y divide-[var(--color-border)]">
           {items.map((it, i) => (
@@ -2446,7 +2426,7 @@ function MultiLangView() {
                 <div className="text-[13px] truncate">{langName(it.lang)}</div>
                 {(it.status === "analyzing" || it.status === "rendering") && (
                   <div className="mt-1 h-1 rounded bg-[var(--color-surface-2)] overflow-hidden">
-                    <div className="h-full bg-[var(--color-accent)] transition-all" style={{ width: `${Math.round((it.pct || 0) * 100)}%` }} />
+                    <div className="h-full bg-[var(--color-accent)] transition-all" style={{ width: `${Math.min(100, Math.round(it.pct || 0))}%` }} />
                   </div>
                 )}
                 {it.status === "error" && <div className="text-[10px] text-[var(--color-warn)] truncate mono">{it.msg}</div>}

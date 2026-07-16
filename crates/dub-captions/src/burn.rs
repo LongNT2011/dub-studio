@@ -263,8 +263,10 @@ pub fn burn_frame(
                     fill: b.fill.clone(),
                 })
                 .collect();
-            w = (w as f64 * k).round() as i64;
-            h = (h as f64 * k).round() as i64;
+            // scale={sw}:-2 -> ширина ровно sw, высота = ближайшая ЧЁТНАЯ (как трактует -2 ffmpeg). Считаем
+            // так же, иначе frame_h разойдётся с реальным кадром на 1px и кламп нижних blur-боксов упадёт.
+            w = sw;
+            h = ((h as f64 * k / 2.0).round() as i64 * 2).max(2);
             Some(format!("scale={sw}:-2"))
         }
         _ => None,

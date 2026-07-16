@@ -82,6 +82,7 @@ fn del_one<T>(v: &mut Vec<T>, edit: &Value, what: &str) -> PatchResult {
 
 /// edit_segment — правка одной строки транскрипта. Порт api.edit_segment.
 fn op_segment(p: &mut Project, edit: &Value) -> PatchResult {
+    let timing_changed = edit.get("start").is_some() || edit.get("end").is_some();
     let seg = seg_by_id(p, edit)?;
     if let Some(t) = edit.get("tgt_text").and_then(|x| x.as_str()) {
         seg.tgt_text = t.to_string();
@@ -114,6 +115,13 @@ fn op_segment(p: &mut Project, edit: &Value) -> PatchResult {
         seg.extra.insert("keep_original".into(), Value::Bool(k));
     }
     seg.dirty = true;
+    // Правка тайминга могла нарушить монотонность списка по времени, а render считает слот озвучки по
+    // ИНДЕКСУ списка (nxt = segments[i+1].start) — поэтому пересортируем по start (как op_add_segment).
+    // Кэш seg-файлов привязан к id сегмента (render.rs), переупорядочивание безопасно.
+    if timing_changed {
+        p.segments
+            .sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+    }
     Ok(())
 }
 

@@ -164,8 +164,17 @@ fn hide_console_window() {
     extern "system" {
         fn GetConsoleWindow() -> isize;
         fn ShowWindow(hwnd: isize, n_cmd_show: i32) -> i32;
+        fn GetConsoleProcessList(lpdw_process_list: *mut u32, dw_process_count: u32) -> u32;
     }
     unsafe {
+        // Прячем ТОЛЬКО собственную консоль. Если exe запущен ИЗ существующего терминала, наш процесс
+        // делит его консоль (к ней привязано >1 процесса) — это ЧУЖОЕ окно терминала пользователя, трогать
+        // нельзя. При двойном клике из Проводника загрузчик создаёт нам отдельную консоль (count==1).
+        let mut pids = [0u32; 4];
+        let n = GetConsoleProcessList(pids.as_mut_ptr(), pids.len() as u32);
+        if n != 1 {
+            return;
+        }
         let hwnd = GetConsoleWindow();
         if hwnd != 0 {
             ShowWindow(hwnd, 0); // SW_HIDE
@@ -213,7 +222,7 @@ pub fn run() {
             // Иконка бандла для GUI-окна: без явной установки окно оставалось пустым в ALT+TAB/панели задач
             // (иконка висела на консольном окне). Ставим её на само GUI-окно.
             let icon = app.default_window_icon().cloned();
-            let mut builder = WebviewWindowBuilder::new(
+            let win = WebviewWindowBuilder::new(
                 app,
                 "main",
                 WebviewUrl::External(url.parse().expect("валидный URL")),
@@ -224,12 +233,12 @@ pub fn run() {
             .resizable(true)
             // Tauri v2 по умолчанию перехватывает OS-drop файлов -> HTML5 onDrop в дропзоне НЕ срабатывает
             // (юзеры жаловались «перетаскивание не работает»). Отключаем перехват -> webview сам ловит drop.
-            .disable_drag_drop_handler();
+            .disable_drag_drop_handler()
+            .build()?;
+            // Иконка окна (ALT+TAB/таскбар) — ПОСЛЕ создания: не паникуем, если не выйдет, окно рабочее.
             if let Some(ic) = icon {
-                builder = builder.icon(ic).expect("иконка окна");
+                let _ = win.set_icon(ic);
             }
-            let win = builder.build()?;
-            let _ = win;
             // авто-обновление: проверка на GitHub-релизе в фоне, установка по согласию (см. spawn_update_check)
             spawn_update_check(app.handle().clone(), is_portable());
             Ok(())

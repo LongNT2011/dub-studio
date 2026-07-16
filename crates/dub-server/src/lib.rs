@@ -1085,7 +1085,10 @@ async fn export_lang(
             .iter()
             .map(|s| {
                 let spk = s.speaker.as_deref().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0);
-                Seg::new(s.src_text.clone(), spk)
+                // Вручную добавленные фразы имеют пустой src_text — их перевод берём из текущего tgt_text
+                // (он на СТАРОМ целевом языке), иначе flat_run их пропустит и они останутся на старом языке.
+                let src = if s.src_text.trim().is_empty() { s.tgt_text.clone() } else { s.src_text.clone() };
+                Seg::new(src, spk)
             })
             .collect();
         flat_run(&client, &mut segs, "auto", &lang_c, spoken).map_err(|e| format!("translate: {e}"))?;
@@ -1095,15 +1098,13 @@ async fn export_lang(
             }
             s.dirty = true; // форсим ре-TTS на новом языке
         }
-        // Титры: text -> Lx (позиции/стиль остаются).
+        // Титры: text -> Lx (позиции/стиль остаются). При сбое перевода НЕ оставляем старый целевой язык:
+        // очищаем tgt -> рендер покажет исходный text (лучше, чем титр на старом языке рядом с новыми сегментами).
         if !p.captions.titles.is_empty() {
             let mut tsegs: Vec<Seg> = p.captions.titles.iter().map(|ti| Seg::new(ti.text.clone(), 0)).collect();
-            if flat_run(&client, &mut tsegs, "auto", &lang_c, false).is_ok() {
-                for (ti, sg) in p.captions.titles.iter_mut().zip(tsegs) {
-                    if !sg.tgt.trim().is_empty() {
-                        ti.tgt = sg.tgt;
-                    }
-                }
+            let ok = flat_run(&client, &mut tsegs, "auto", &lang_c, false).is_ok();
+            for (ti, sg) in p.captions.titles.iter_mut().zip(tsegs) {
+                ti.tgt = if ok && !sg.tgt.trim().is_empty() { sg.tgt } else { String::new() };
             }
         }
         drop(srv); // освободить VRAM перед TTS/рендером
