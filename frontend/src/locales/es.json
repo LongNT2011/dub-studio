@@ -156,7 +156,8 @@
   },
   "play": {
     "dub": "Reproducir el doblaje (vídeo + voz)",
-    "volume": "Volumen"
+    "volume": "Volumen",
+    "lagNotice": "La vista previa puede retrasarse: no es un error. El resultado exacto está en la exportación."
   },
   "status": {
     "working": "Trabajando…",

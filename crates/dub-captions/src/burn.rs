@@ -239,19 +239,51 @@ pub fn burn_frame(
     frame_size: Option<(i64, i64)>,
     blur: bool,
     blur_sigma: i64,
+    scale_w: Option<i64>,
 ) -> Result<(), String> {
     let t = t.max(0.0);
     let ass_f = ass_filter(ass_path);
-    let (w, h) = frame_size.unwrap_or((1_000_000_000, 1_000_000_000));
+    let (mut w, mut h) = frame_size.unwrap_or((1_000_000_000, 1_000_000_000));
+    // Опциональный даунскейл для быстрого превью больших видео (плей): масштабируем видео и КООРДИНАТЫ
+    // blur-боксов на k. ASS-фильтр авто-масштабируется к размеру кадра (PlayRes), поэтому субтитры/титры
+    // остаются на своих местах — только рендерятся в низком разрешении (мягче, но 1-в-1 по геометрии).
+    let mut scaled_boxes: Vec<BlurBox> = Vec::new();
+    let scale_step: Option<String> = match scale_w {
+        Some(sw) if sw > 0 && w < 1_000_000_000 && sw < w => {
+            let k = sw as f64 / w as f64;
+            scaled_boxes = blur_boxes
+                .iter()
+                .map(|b| BlurBox {
+                    x: (b.x as f64 * k).round() as i64,
+                    y: (b.y as f64 * k).round() as i64,
+                    w: (b.w as f64 * k).round() as i64,
+                    h: (b.h as f64 * k).round() as i64,
+                    t0: b.t0,
+                    t1: b.t1,
+                    fill: b.fill.clone(),
+                })
+                .collect();
+            w = (w as f64 * k).round() as i64;
+            h = (h as f64 * k).round() as i64;
+            Some(format!("scale={sw}:-2"))
+        }
+        _ => None,
+    };
+    let boxes: &[BlurBox] = if scale_step.is_some() { &scaled_boxes } else { blur_boxes };
     let sel = format!("select='gte(t\\,{:.3})'", t);
+    // Префикс кадра: select [+ scale]. Одинаков для blur- и не-blur веток (ASS/боксы идут ПОСЛЕ).
+    let pre = match &scale_step {
+        Some(s) => format!("{sel},{s}"),
+        None => sel.clone(),
+    };
 
-    let vargs: Vec<String> = if !blur_boxes.is_empty() && blur {
-        // lead: select -> [sel]; base label = sel.
-        let lead = vec![format!("[0:v]{sel}[sel]")];
-        let graph = blur_graph(&ass_f, blur_boxes, w, h, blur_sigma, &lead, "sel");
+    let vargs: Vec<String> = if !boxes.is_empty() && blur {
+        // lead: select[,scale] -> [sel]; base label = sel.
+        let lead = vec![format!("[0:v]{pre}[sel]")];
+        let graph = blur_graph(&ass_f, boxes, w, h, blur_sigma, &lead, "sel");
         vec!["-filter_complex".into(), graph, "-map".into(), "[outv]".into()]
     } else {
-        vec!["-vf".into(), format!("{sel},{ass_f}")]
+        vec!["-vf".into(), format!("{pre},{ass_f}")]
     };
 
     let mut cmd = Command::new(FFMPEG);

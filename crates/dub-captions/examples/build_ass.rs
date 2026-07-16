@@ -47,7 +47,7 @@ fn main() {
     build(w, h, &out, args).expect("build");
     if let (Some(video), Some(png)) = (burn_video, burn_png) {
         // живой burn одного кадра через ffmpeg+libass (проверка, что ASS парсится движком).
-        burn_frame(&video, &out, &png, burn_t, &[], Some((w, h)), false, 60).expect("burn_frame");
+        burn_frame(&video, &out, &png, burn_t, &[], Some((w, h)), false, 60, None).expect("burn_frame");
         eprintln!("burned frame -> {}", png.display());
     } else {
         print!("{}", std::fs::read_to_string(&out).unwrap());

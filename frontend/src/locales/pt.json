@@ -156,7 +156,8 @@
   },
   "play": {
     "dub": "Reproduzir a dublagem (vídeo + voz)",
-    "volume": "Volume"
+    "volume": "Volume",
+    "lagNotice": "A pré-visualização pode atrasar — não é um bug. Resultado exato na exportação."
   },
   "status": {
     "working": "Processando…",

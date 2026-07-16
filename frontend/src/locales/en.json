@@ -185,7 +185,8 @@
   },
   "play": {
     "dub": "Play the dub (video + voiceover)",
-    "volume": "Preview volume"
+    "volume": "Preview volume",
+    "lagNotice": "Preview may lag — not a bug. Exact result in the export."
   },
   "status": {
     "working": "Working…",

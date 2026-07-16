@@ -1458,7 +1458,7 @@ function Editor() {
               <ComparePane label={t("compare.result")} src={api.previewUrl(pid, scrub, rev)} />
             </div>
           ) : (
-            <PreviewCanvas pid={pid} project={p} scrub={scrub} rendered={rendered} lane={lane}
+            <PreviewCanvas pid={pid} project={p} scrub={scrub} rendered={rendered} lane={lane} playing={play}
               onChanged={(fresh) => setProject(fresh)} />
           )}
         </div>

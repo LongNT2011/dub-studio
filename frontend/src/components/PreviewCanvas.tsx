@@ -4,15 +4,17 @@
 // (subs | blur | titles): on the titles tab you edit titles, on the mask tab you edit blur zones — они не
 // перехватывают клики друг друга. (A 60fps JASSUB live layer over HTML5 <video> is the M2 upgrade.)
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Stage, Layer, Rect, Line, Transformer } from "react-konva";
 import type Konva from "konva";
 import { api, type Project } from "../lib/api";
 import { useStore } from "../store";
 
 type Lane = "subs" | "blur" | "titles";
-type Props = { pid: string; project: Project; scrub: number; rendered: boolean; lane: Lane; onChanged: (fresh: Project) => void };
+type Props = { pid: string; project: Project; scrub: number; rendered: boolean; lane: Lane; playing?: boolean; onChanged: (fresh: Project) => void };
 
-export default function PreviewCanvas({ pid, project, scrub, rendered, lane, onChanged }: Props) {
+export default function PreviewCanvas({ pid, project, scrub, rendered, lane, playing = false, onChanged }: Props) {
+  const { t } = useTranslation();
   const rev = useStore((s) => s.rev);
   const bump = useStore((s) => s.bump);
   const sel = useStore((s) => s.selBlur);        // SHARED with the left blur list (click list <-> click canvas)
@@ -30,6 +32,28 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, lane, onC
   const vw = project.meta.width || 1, vh = project.meta.height || 1;
   const sx = disp.w / vw, sy = disp.h / vh;
   const previewSrc = rendered ? api.outputUrl(pid) : api.previewUrl(pid, scrub, rev);
+
+  // Backpressure превью-кадра: <img> тянет СЛЕДУЮЩИЙ кадр только когда загрузился предыдущий (onLoad),
+  // и всегда самый свежий scrub — промежуточные пропускаем. Без этого плей тикает быстрее серверного
+  // рендера (~150мс/кадр, сериализовано) → очередь растёт, кадр отстаёт от звука → «фриз/слайдшоу».
+  // Теперь превью едет на реальной скорости сервера (свежий кадр под звук, с потерей промежуточных —
+  // ровно «пусть с потерей кадров, но видно»). В rendered-режиме (<video>) не нужно.
+  const [imgSrc, setImgSrc] = useState(() => api.previewUrl(pid, scrub, rev));
+  const loadingRef = useRef(false);
+  const pendingRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (rendered) return;
+    const want = api.previewUrl(pid, scrub, rev, playing);   // при плее -> lr=1 (низкое разрешение на больших видео)
+    if (want === imgSrc) return;                                    // этот кадр уже показан/грузится
+    if (loadingRef.current) { pendingRef.current = want; return; }  // сервер занят — запомнить самый свежий
+    loadingRef.current = true; setImgSrc(want);
+  }, [pid, scrub, rev, rendered, playing, imgSrc]);
+  const onFrameSettled = () => {
+    const next = pendingRef.current;
+    pendingRef.current = null;
+    if (next && next !== imgSrc) setImgSrc(next);   // грузим самый свежий из отложенных (loadingRef остаётся true)
+    else loadingRef.current = false;                // очередь пуста — свободны
+  };
 
   // fit the overlay to the displayed media (preserve aspect)
   useEffect(() => {
@@ -90,7 +114,8 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, lane, onC
       <div className="relative" style={{ width: disp.w, height: disp.h }}>
         {rendered
           ? <video src={previewSrc} controls className="absolute inset-0 w-full h-full rounded-lg" />
-          : <img src={previewSrc} alt="frame" className="absolute inset-0 w-full h-full rounded-lg" />}
+          : <img src={imgSrc} alt="frame" onLoad={onFrameSettled} onError={onFrameSettled}
+                 className="absolute inset-0 w-full h-full rounded-lg" />}
         {!rendered && disp.w > 0 && (
           <Stage width={disp.w} height={disp.h} className="absolute inset-0"
                  onMouseDown={(e) => { if (e.target === e.target.getStage()) { setSel(null); setSelT(null); } }}>
@@ -151,6 +176,11 @@ export default function PreviewCanvas({ pid, project, scrub, rendered, lane, onC
           </Stage>
         )}
         {busy && <div className="absolute top-2 right-2 text-[11px] text-[var(--color-accent-2)] bg-black/60 px-2 py-0.5 rounded">updating…</div>}
+        {playing && !rendered && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 max-w-[92%] text-center text-[10.5px] leading-tight text-white/90 bg-black/60 backdrop-blur-sm px-2.5 py-1 rounded-full pointer-events-none">
+            {t("play.lagNotice")}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -11,19 +11,32 @@ use std::path::Path;
 
 use crate::render::build_ass;
 
-/// Собрать ОДИН превью-кадр (PNG-байты) на времени t. Порт api.preview_frame: build ASS из текущего
-/// Project + burn_frame (blur-боксы + ASS). fonts_dir нужен libass/измерению глифов.
+/// Собрать ОДИН превью-кадр (JPEG-байты) на времени t. Порт api.preview_frame: build ASS из текущего
+/// Project + burn_frame (blur-боксы + ASS). fonts_dir нужен libass/измерению глифов. JPEG (не PNG) —
+/// кодируется/качается/декодится в разы быстрее для фотокадра (замер: 0.07с vs 0.10с, 53КБ vs 674КБ).
+/// lowres=true (плей) на БОЛЬШИХ видео рендерит кадр в низком разрешении (быстрее ~кратно площади) —
+/// геометрия сабов/боксов сохраняется; на паузе/малых видео — полный размер для точных правок.
 pub fn preview_frame(
     proj: &Project,
     input: &Path,
     work_dir: &Path,
     fonts_dir: &Path,
     t: f64,
+    lowres: bool,
 ) -> Result<Vec<u8>, String> {
     dub_captions::set_fonts_dir(fonts_dir);
     let vw = proj.meta.width;
     let vh = proj.meta.height;
     let total = proj.meta.duration;
+    // Даунскейл только при плее И только для больших видео (длинная сторона > 1280) — цель ~960 по длинной
+    // стороне. Малые/паузные кадры идут в полном разрешении (WYSIWYG для правок боксов).
+    let long = vw.max(vh);
+    let scale_w: Option<i64> = if lowres && long > 1280 {
+        let k = 960.0 / long as f64;
+        Some(((vw as f64 * k / 2.0).round() as i64 * 2).max(2))
+    } else {
+        None
+    };
     let ass_p = work_dir.join("_preview.ass");
     // WYSIWYG-паритет с render::run: subs.burn=false -> финальный рендер НЕ накладывает ничего (чистое
     // видео), поэтому и превью должно быть чистым. Иначе редактор показывал бы субтитры/блюр, которых в
@@ -53,18 +66,21 @@ pub fn preview_frame(
             .map_err(|e| format!("пустой ASS: {e}"))?;
     }
 
-    let png = work_dir.join("_preview.png");
+    // Разные файлы для полного/низкого разрешения — чтобы параллельные запросы (backpressure сериализует,
+    // но подстрахуемся) не перезаписывали кадр друг друга.
+    let out = work_dir.join(if scale_w.is_some() { "_preview_lr.jpg" } else { "_preview.jpg" });
     dub_captions::burn_frame(
         input,
         &ass_p,
-        &png,
+        &out,
         t,
         &blur_boxes,
         Some((vw, vh)),
         proj.render.blur,
         proj.render.blur_sigma,
+        scale_w,
     )?;
-    std::fs::read(&png).map_err(|e| format!("чтение превью-кадра: {e}"))
+    std::fs::read(&out).map_err(|e| format!("чтение превью-кадра: {e}"))
 }
 
 /// Сырой кадр ОРИГИНАЛА (PNG-байты) на t — без сабов/блюра/дубляжа (для before/after). Порт

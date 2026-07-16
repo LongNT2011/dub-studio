@@ -246,10 +246,12 @@ pub async fn preview(
         Err(_) => return (StatusCode::CONFLICT, "no source uploaded").into_response(),
     };
     let t: f64 = q.get("t").and_then(|v| v.parse().ok()).unwrap_or(0.0);
+    // lr=1 (плей) -> низкое разрешение кадра на больших видео (решает preview_frame). JPEG-кадр.
+    let lowres = q.get("lr").map(|v| v == "1" || v == "true").unwrap_or(false);
     let fonts_dir = st.fonts_dir.clone();
     let work_dir = dir.clone();
-    frame_job(&st, 300, move |_p| {
-        crate::frame::preview_frame(&proj, &input, &work_dir, &fonts_dir, t)
+    frame_job(&st, 300, "image/jpeg", move |_p| {
+        crate::frame::preview_frame(&proj, &input, &work_dir, &fonts_dir, t, lowres)
     })
     .await
 }
@@ -276,12 +278,12 @@ pub async fn original_frame(
     }
     let t: f64 = q.get("t").and_then(|v| v.parse().ok()).unwrap_or(0.0);
     let work_dir = dir.clone();
-    frame_job(&st, 60, move |_p| crate::frame::source_frame(&input, &work_dir, t)).await
+    frame_job(&st, 60, "image/png", move |_p| crate::frame::source_frame(&input, &work_dir, t)).await
 }
 
-/// Общий помощник: поставить синхронную PNG-джобу в GPU-воркер, ждать с таймаутом, вернуть image/png
-/// или 504. Порт паттерна app.py.preview/original (enqueue + wait_for + abandoned на таймауте).
-async fn frame_job<F>(st: &AppState, timeout_s: u64, f: F) -> Response
+/// Общий помощник: поставить синхронную кадр-джобу в GPU-воркер, ждать с таймаутом, вернуть
+/// байты с заданным content-type (`mime`) или 504. Порт паттерна app.py.preview/original.
+async fn frame_job<F>(st: &AppState, timeout_s: u64, mime: &'static str, f: F) -> Response
 where
     F: FnOnce(jobs::ProgressFn) -> Result<Vec<u8>, String> + Send + 'static,
 {
@@ -299,7 +301,7 @@ where
                 .as_array()
                 .map(|a| a.iter().filter_map(|x| x.as_u64().map(|n| n as u8)).collect())
                 .unwrap_or_default();
-            ([("content-type", "image/png")], bytes).into_response()
+            ([("content-type", mime)], bytes).into_response()
         }
         Ok(Ok(Err(e))) => {
             st.jobs.remove(&job_id).await;

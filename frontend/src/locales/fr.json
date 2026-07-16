@@ -156,7 +156,8 @@
   },
   "play": {
     "dub": "Lire le doublage (vidéo + voix)",
-    "volume": "Volume"
+    "volume": "Volume",
+    "lagNotice": "L'aperçu peut être différé — ce n'est pas un bug. Résultat exact à l'export."
   },
   "status": {
     "working": "En cours…",
