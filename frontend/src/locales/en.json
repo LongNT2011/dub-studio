@@ -205,7 +205,8 @@
     "add": "＋ Add a language",
     "langsWord": "languages",
     "openEditor": "Editor",
-    "done": "Done"
+    "done": "Done",
+    "backToExport": "↩ Back to language export"
   },
   "status": {
     "working": "Working…",

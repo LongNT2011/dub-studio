@@ -176,7 +176,8 @@
     "add": "＋ Ajouter une langue",
     "langsWord": "langues",
     "openEditor": "Éditeur",
-    "done": "Terminé"
+    "done": "Terminé",
+    "backToExport": "↩ Retour à l’export"
   },
   "status": {
     "working": "En cours…",

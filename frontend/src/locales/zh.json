@@ -176,7 +176,8 @@
     "add": "＋ 添加语言",
     "langsWord": "种语言",
     "openEditor": "编辑器",
-    "done": "完成"
+    "done": "完成",
+    "backToExport": "↩ 返回多语言导出"
   },
   "status": {
     "working": "处理中…",

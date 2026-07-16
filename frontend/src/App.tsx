@@ -471,9 +471,13 @@ function TopBar() {
           {t("app.name")}
           <span className="font-normal text-[11px] text-[var(--color-muted)] tracking-normal" title={t("app.name") + " v" + __APP_VERSION__}>v{__APP_VERSION__}</span>
         </span>
+        {/* Режимы редактора телепортируются сюда из Editor (портал), рядом с лого. */}
+        <div id="editor-modes-slot" className="flex items-center" />
       </div>
       <StatusBar />
       <div className="flex items-center gap-2">
+        {/* Экспорт-сплит редактора телепортируется сюда (портал). */}
+        <div id="editor-actions-slot" className="flex items-center gap-2" />
         <div id="dock-slot" className="flex items-center gap-2" />
         {stage !== "empty" && (
           <button onClick={newProject} title={t("nav.newHint")}
@@ -970,6 +974,8 @@ function Editor() {
   // Экспорт на другие языки: поповер с мультиселектом -> клон+ре-перевод+рендер (наследует правки).
   const [langMenu, setLangMenu] = useState(false);
   const [exportLangs, setExportLangs] = useState<string[]>([]);
+  const [, forcePortal] = useState(0);
+  useEffect(() => { forcePortal((n) => n + 1); }, []);   // 2-й рендер: слоты TopBar (#editor-modes-slot/#editor-actions-slot) уже в DOM
   const selBlur = useStore((s) => s.selBlur);             // selected blur zone (shared with the canvas overlay)
   const setSelBlur = useStore((s) => s.setSelBlur);
   const selTitle = useStore((s) => s.selTitle);           // selected title (shared with the canvas overlay)
@@ -1502,15 +1508,21 @@ function Editor() {
 
       <main className="flex flex-col min-w-0 min-h-0 overflow-hidden">
         <div className="flex items-center gap-3 px-4 py-2.5 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
+          {(() => { const s = document.getElementById("editor-modes-slot"); return s ? createPortal(
           <div className="inline-flex rounded-lg bg-[var(--color-surface-2)] p-0.5 border border-[var(--color-border)] shrink-0">
             {MODES.map(([k, Ic]) => (
-              <button key={k} onClick={() => branch("mode", { value: k })}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[13px] transition-colors ${mode === k ? "bg-[var(--color-accent)] text-[var(--color-on-accent)] font-semibold" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
-                <Ic size={15} /> {t(`mode.${k}`)}
+              <button key={k} onClick={() => branch("mode", { value: k })} title={t(`mode.${k}_desc`)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[13px] transition-colors ${mode === k ? "bg-[var(--color-accent)] text-[var(--color-on-accent)] font-semibold" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+                <Ic size={15} /> <span className="hidden lg:inline">{t(`mode.${k}`)}</span>
               </button>
             ))}
-          </div>
-          <span className="text-[12px] text-[var(--color-muted)] truncate hidden 2xl:inline">{t(`mode.${mode}_desc`)}</span>
+          </div>, s) : null; })()}
+          {multiLangState.langs.length > 0 && (
+            <button onClick={() => setStage("multilang")} title={t("multilang.backToExport")}
+              className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-[var(--color-border)] text-[12px] text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] transition-colors">
+              <Languages size={13} /><span className="hidden md:inline">{t("multilang.backToExport")}</span>
+            </button>
+          )}
           {!audioOnly && (
           <div className="flex items-center gap-1.5 shrink-0" title={t("comp.hint")}>
             <select value={p.subs.mode} onChange={(e) => branch("subs_content", { value: e.target.value })}
@@ -1530,7 +1542,8 @@ function Editor() {
             className="p-1.5 rounded-md text-[var(--color-muted)] hover:text-[var(--color-text)] disabled:opacity-30 transition-colors"><Undo2 size={16} /></button>
           <button onClick={doRedo} disabled={!canRedo} title="Ctrl+Shift+Z"
             className="p-1.5 rounded-md text-[var(--color-muted)] hover:text-[var(--color-text)] disabled:opacity-30 transition-colors"><Redo2 size={16} /></button>
-          {/* Экспорт как split-button: основная кнопка — экспорт текущего языка; стрелка ▾ — «ещё языки». */}
+          {/* Экспорт-сплит: телепорт в TopBar (#editor-actions-slot). Основная кнопка — экспорт текущего; ▾ — «ещё языки». */}
+          {(() => { const s = document.getElementById("editor-actions-slot"); return s ? createPortal(
           <div className="relative shrink-0 flex items-stretch">
             <button onClick={doExport} disabled={rendering}
               className={`inline-flex items-center gap-2 px-4 py-1.5 ${audioOnly ? "rounded-lg" : "rounded-l-lg"} bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-70 hover:brightness-105 transition`}>
@@ -1570,7 +1583,7 @@ function Editor() {
                 </button>
               </div>
             )}
-          </div>
+          </div>, s) : null; })()}
         </div>
         <div className="flex-1 min-h-0 p-3 overflow-hidden">
           {audioOnly ? (
