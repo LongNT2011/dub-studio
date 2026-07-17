@@ -30,7 +30,7 @@ fn main() {
         Seg::new("Берём три яйца и немного муки.", 0),
         Seg::new("Готово! Приятного аппетита.", 0),
     ];
-    flat_run(&client, &mut segs, "ru", "en", true).expect("translate");
+    flat_run(&client, &mut segs, "ru", "en", true, "").expect("translate");
     for (i, s) in segs.iter().enumerate() {
         println!("{}. RU: {}", i + 1, s.text);
         println!("   EN: {}", s.tgt);

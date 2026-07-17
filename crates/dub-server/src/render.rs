@@ -476,9 +476,16 @@ fn build_dub(
     // 3) клон-референс. voice.mode="voice" -> реф из пака/записи (voices/<name>.wav|mp3) НА КАЖДОГО спикера.
     //    Имя — CSV; позиция = отсортированный спикер (как во фронте: speaker ?? "0", лексикографически),
     //    пустой слот берёт первое непустое имя. Иначе (clone) — длиннейшая реплика спикера из вокала.
+    //    Слот "-" (CLONE_SLOT, авто-распределение #114) — этот спикер остаётся на КЛОНИРОВАНИИ: пак-реф
+    //    не строим, его identity-реф добавляется ниже из вокала (spk_refs). Существующие CSV без "-"
+    //    ведут себя как раньше.
+    let mut clone_slot_spks: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let pack_refs: std::collections::BTreeMap<String, PathBuf> = if proj.audio.voice.mode == "voice" {
         let names: Vec<&str> = proj.audio.voice.name.as_deref().unwrap_or("").split(',').map(|s| s.trim()).collect();
-        let first_named = names.iter().copied().find(|n| !n.is_empty());
+        let first_named = names
+            .iter()
+            .copied()
+            .find(|n| !n.is_empty() && *n != crate::voice_slots::CLONE_SLOT);
         let mut map = std::collections::BTreeMap::new();
         if first_named.is_some() {
             let sorted: Vec<String> = proj
@@ -490,6 +497,10 @@ fn build_dub(
                 .collect();
             for (i, spk) in sorted.iter().enumerate() {
                 let nm = names.get(i).copied().filter(|s| !s.is_empty()).or(first_named).unwrap_or("");
+                if nm == crate::voice_slots::CLONE_SLOT {
+                    clone_slot_spks.insert(spk.clone()); // спикер на клоне — identity-реф ниже
+                    continue;
+                }
                 let src = ["wav", "mp3"].iter().map(|e| paths.voices_dir.join(format!("{nm}.{e}"))).find(|p| p.is_file());
                 if let Some(src) = src {
                     let out = wd.join(format!("ref_pack_{i}.wav"));
@@ -510,7 +521,19 @@ fn build_dub(
     // src_text выбранного сегмента; пак-режим — АВТОТРАНСКРИПЦИЯ 12с-клипа (как Higgs build_speaker_reference;
     // пак-.txt = полный 3-мин транскрипт, к 12с не подходит). ASR best-effort: сбой -> None (не хуже прежнего).
     let (spk_refs, mut ref_texts, alt_refs) = if use_pack {
-        (std::collections::BTreeMap::new(), std::collections::BTreeMap::new(), std::collections::BTreeMap::new())
+        if clone_slot_spks.is_empty() {
+            (std::collections::BTreeMap::new(), std::collections::BTreeMap::new(), std::collections::BTreeMap::new())
+        } else {
+            // Клон-слоты "-" (#114): identity-рефы из вокала ТОЛЬКО для спикеров на клоне —
+            // build_speaker_refs строит рефы по спикерам переданных сегментов, фильтруем их.
+            let segs_clone: Vec<(usize, &dub_core::Segment)> = segs
+                .iter()
+                .filter(|(_, s)| clone_slot_spks.contains(s.speaker.as_deref().unwrap_or("0")))
+                .cloned()
+                .collect();
+            let mut asr = crate::models::build_engine(&paths.asr);
+            build_speaker_refs(&segs_clone, &vocals16, wd, paths.ref_secs, asr.as_mut(), progress)?
+        }
     } else {
         // Скоринг кандидатов + REF-QC (транскрипт каждого кандидата сверяется с его src_text,
         // брак -> следующий) — ref_text выставляется ВНУТРИ по фактически услышанному.
@@ -532,7 +555,12 @@ fn build_dub(
     let ref_of = |s: &dub_core::Segment| -> PathBuf {
         let key = s.speaker.as_deref().unwrap_or("0");
         if use_pack {
-            return pack_refs.get(key).cloned().unwrap_or_else(|| first_ref.clone());
+            // клон-слот "-" (#114): спикер вне pack_refs берёт свой identity-реф из вокала (spk_refs).
+            return pack_refs
+                .get(key)
+                .or_else(|| spk_refs.get(key))
+                .cloned()
+                .unwrap_or_else(|| first_ref.clone());
         }
         s.speaker
             .as_deref()
@@ -547,7 +575,11 @@ fn build_dub(
         }
         // у спикера есть СВОЁ реф-аудио, но текста нет -> None (чужой текст к чужому аудио хуже, чем без
         // текста). Спикер без своего аудио (fit -> first_ref) берёт текст первого спикера (совпадает с ним).
-        let has_own = if use_pack { pack_refs.contains_key(key) } else { spk_refs.contains_key(key) };
+        let has_own = if use_pack {
+            pack_refs.contains_key(key) || spk_refs.contains_key(key) // клон-слот "-" тоже «своё» аудио
+        } else {
+            spk_refs.contains_key(key)
+        };
         if has_own {
             None
         } else {

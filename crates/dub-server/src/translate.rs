@@ -128,6 +128,8 @@ pub fn stage(
         vh: vh as f64,
         total,
         want_layout,
+        // Стиль перевода (#112): из проекта. Тем же путём, что rewrite попадает в ctx_run.
+        style: proj.audio.translate_style.clone(),
     };
 
     emit(progress, "vision", "ctx-проход: vision layout/scene + перевод транскрипта");

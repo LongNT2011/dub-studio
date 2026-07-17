@@ -65,6 +65,7 @@ fn translate_one(
     extra: &str,
     gloss_str: &str,
     budget: Option<usize>,
+    style_c: &str,
 ) -> Result<String, TranslateError> {
     let lim = match budget {
         Some(n) => format!(
@@ -74,7 +75,7 @@ fn translate_one(
         None => String::new(),
     };
     let prompt = format!(
-        "Translate the following text into {tgt_name}.{extra}{gloss_str}{lim} Note that you should only \
+        "Translate the following text into {tgt_name}.{extra}{style_c}{gloss_str}{lim} Note that you should only \
          output the translated result without any additional explanation:\n\n{txt}"
     );
     let s = Sampling::new(0.7, 0.6, 512).top_k(20).repeat_penalty(1.05);
@@ -195,13 +196,27 @@ fn strip_budget_marker(s: &str) -> String {
     re.replace(s, "").into_owned()
 }
 
-/// run — перевод каждого seg.text -> seg.tgt через Gemma (плоский MT, порт _run_hunyuan).
+/// Доп-инструкция стиля перевода (#112): отдельное предложение в конце инструкционной части sysmsg. Пусто,
+/// если стиль не задан. Формат-контракт нумерованного ответа ставится ПОСЛЕ этого текста и остаётся
+/// приоритетным, поэтому стиль не может сломать разбор ответа.
+pub(crate) fn style_clause(style: &str) -> String {
+    let s = style.trim();
+    if s.is_empty() {
+        String::new()
+    } else {
+        format!(" Translation style: {s}.")
+    }
+}
+
+/// run — перевод каждого seg.text -> seg.tgt через Gemma (плоский MT, порт _run_hunyuan). style (#112) —
+/// доп-инструкция стиля перевода (пусто = без стиля); вставляется в инструкционную часть sysmsg.
 pub fn run(
     llm: &ChatClient,
     segs: &mut [Seg],
     src: &str,
     tgt: &str,
     spoken: bool,
+    style: &str,
 ) -> Result<(), TranslateError> {
     let tgt_name = lang_name(tgt, tgt);
     let gloss_str = glossary(llm, segs.iter().map(|s| s.text.as_str()), &name_src(src), &tgt_name)?;
@@ -210,6 +225,7 @@ pub fn run(
     } else {
         ""
     };
+    let style_c = style_clause(style);
     for s in segs.iter_mut() {
         s.tgt = String::new();
     }
@@ -227,6 +243,8 @@ pub fn run(
         } else {
             String::new()
         };
+        // Стиль (#112) — доп-инструкция ПЕРЕД форматом-контрактом (он остаётся финальным и приоритетным,
+        // чтобы стиль не сломал разбор нумерованного ответа).
         let sysmsg = format!(
             "You are a professional subtitle translator localizing a SHORT video for DUBBING into {tgt_name}.\
              {dlg} Use the WHOLE numbered list as shared context so each line (even one word) is correct and \
@@ -234,7 +252,7 @@ pub fn run(
              SAME LENGTH as its source so it fits the dub timing. After each number, a parenthesis like \
              (\u{2264}45) gives a soft character limit for that line — stay within it: if it doesn't fit, drop \
              filler words and repetitions, keep the meaning, invent nothing. Do NOT copy the (\u{2264}NN) marker \
-             into your output.{extra}{gloss_str} Reply with ONLY the numbered {tgt_name} translations \
+             into your output.{extra}{style_c}{gloss_str} Reply with ONLY the numbered {tgt_name} translations \
              (1., 2., 3., …), one per line, nothing else — no reasoning, no English, no notes."
         );
         let max_tokens = (96 + 48 * chunk.len()).min(4096) as u32;
@@ -250,7 +268,7 @@ pub fn run(
             for &gi in chunk {
                 let txt = segs[gi].text.trim().to_string();
                 let budget = char_budget(segs[gi].end - segs[gi].start);
-                segs[gi].tgt = translate_one(llm, &txt, &tgt_name, extra, &gloss_str, budget)?;
+                segs[gi].tgt = translate_one(llm, &txt, &tgt_name, extra, &gloss_str, budget, &style_c)?;
             }
         }
         c0 += CHUNK;
@@ -274,8 +292,10 @@ pub fn rewrite(
     _src: &str,
     tgt: &str,
     spoken: bool,
+    style: &str,
 ) -> Result<(), TranslateError> {
     let tgt_name = lang_name(tgt, tgt);
+    let style_c = style_clause(style);
     for s in segs.iter_mut() {
         s.tgt = String::new();
     }
@@ -303,7 +323,7 @@ pub fn rewrite(
              NOT translate the source. Keep the SAME number of lines and make each new line roughly the SAME LENGTH as \
              its source line so it fits the dub timing. After each number, a parenthesis like (\u{2264}45) gives a soft \
              character limit for that line — stay within it, invent nothing, and do NOT copy the (\u{2264}NN) marker into \
-             your output.{extra} Output natural spoken {tgt_name}. Reply with ONLY the numbered {tgt_name} lines \
+             your output.{extra}{style_c} Output natural spoken {tgt_name}. Reply with ONLY the numbered {tgt_name} lines \
              (1., 2., 3., …), nothing else — no notes, no source text."
         );
         let max_tokens = (128 + 64 * chunk.len()).min(4096) as u32;
@@ -317,7 +337,7 @@ pub fn rewrite(
             } else {
                 // пропущенная/сбитая строка -> перевести её (не озвучивать сырой исходник).
                 let budget = char_budget(segs[gi].end - segs[gi].start);
-                let one = translate_one(llm, &src_line, &tgt_name, extra, "", budget)?;
+                let one = translate_one(llm, &src_line, &tgt_name, extra, "", budget, &style_c)?;
                 segs[gi].tgt = if one.is_empty() { src_line } else { one };
             }
         }

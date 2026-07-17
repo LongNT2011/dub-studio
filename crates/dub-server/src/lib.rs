@@ -10,6 +10,7 @@ mod analyze;
 mod bench;
 mod compose;
 mod endpoints;
+mod f0;
 mod frame;
 mod hw;
 mod jobs;
@@ -23,6 +24,7 @@ mod setup;
 mod spa;
 mod subimport;
 mod translate;
+mod voice_slots;
 mod wavio;
 
 use axum::extract::{Multipart, Path as AxPath, Query, State};
@@ -319,6 +321,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/voices/rename", post(voices_rename))
         .route("/voices/delete", post(voices_delete))
         .route("/projects/{pid}/speaker-voice", post(speaker_voice))
+        .route("/projects/{pid}/voice-slots", post(voice_slots_assign))
         .route("/fonts", get(endpoints::fonts))
         .route("/voices", get(voices_list))
         .route("/presets", get(endpoints::presets))
@@ -598,6 +601,93 @@ async fn speaker_voice(
     .await;
     match res {
         Ok(Ok(())) => Json(json!({ "ok": true, "name": name, "voices": list_voice_names(&st.voices_dir) })).into_response(),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// POST /projects/{pid}/voice-slots {male:[имена], female:[имена]} — авто-распределение голосов-слотов
+/// по спикерам (#114). Валидирует, что имена есть в voices/; определяет пол каждого спикера по медиане F0
+/// его реплик на чистом вокале, ранжирует по длительности речи, раскладывает по слотам (по кругу сверх
+/// числа слотов), записывает per-speaker голоса (voice.mode/name) и метит сегменты dirty (ре-синтез).
+/// Возвращает итоговый маппинг {speaker:{voice,gender,f0}}. Пустой список пола -> клон; оба пусты -> клон.
+async fn voice_slots_assign(
+    State(st): State<AppState>,
+    axum::extract::Path(pid): axum::extract::Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let mut proj = match st.load_project(&pid) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    // Списки имён из тела; проверяем существование каждого в voices/ (.wav|.mp3).
+    let names_of = |k: &str| -> Vec<String> {
+        body.get(k)
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.trim().to_string())).filter(|s| !s.is_empty()).collect())
+            .unwrap_or_default()
+    };
+    let male = names_of("male");
+    let female = names_of("female");
+    let available: std::collections::BTreeSet<String> = list_voice_names(&st.voices_dir).into_iter().collect();
+    for n in male.iter().chain(female.iter()) {
+        if !available.contains(n) {
+            return (StatusCode::BAD_REQUEST, format!("голос {n:?} не найден в voices/")).into_response();
+        }
+    }
+    // Чистый вокал analyze: vocals16_clean.wav, фолбэк vocals16.wav (сырой 16k). Нет ни того ни другого -> 409.
+    let vocals = {
+        let clean = dir.join("vocals16_clean.wav");
+        let raw = dir.join("vocals16.wav");
+        if clean.is_file() {
+            clean
+        } else if raw.is_file() {
+            raw
+        } else {
+            return (StatusCode::CONFLICT, "нет вокала для замера F0 — сначала analyze").into_response();
+        }
+    };
+
+    let slots = voice_slots::Slots { male, female };
+    let dir_job = dir.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        let assigns = voice_slots::assign(&mut proj, &vocals, &dir_job, &slots);
+        save_project_atomic(&dir_job, &proj)?;
+        Ok::<_, String>((assigns, proj))
+    })
+    .await;
+    match res {
+        Ok(Ok((assigns, proj))) => {
+            let mapping: serde_json::Map<String, Value> = assigns
+                .iter()
+                .map(|a| {
+                    let gender = match a.gender {
+                        Some(voice_slots::Gender::Male) => Value::from("male"),
+                        Some(voice_slots::Gender::Female) => Value::from("female"),
+                        None => Value::Null,
+                    };
+                    (
+                        a.speaker.clone(),
+                        json!({
+                            "voice": a.voice.clone().map(Value::from).unwrap_or(Value::Null),
+                            "gender": gender,
+                            "f0": a.f0,
+                        }),
+                    )
+                })
+                .collect();
+            Json(json!({
+                "ok": true,
+                "voice_mode": proj.audio.voice.mode,
+                "voice_name": proj.audio.voice.name,
+                "speakers": mapping,
+            }))
+            .into_response()
+        }
         Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -1145,7 +1235,7 @@ async fn export_lang(
                 Seg::new(src, spk)
             })
             .collect();
-        flat_run(&client, &mut segs, "auto", &lang_c, spoken).map_err(|e| format!("translate: {e}"))?;
+        flat_run(&client, &mut segs, "auto", &lang_c, spoken, &p.audio.translate_style).map_err(|e| format!("translate: {e}"))?;
         for (s, sg) in p.segments.iter_mut().zip(segs) {
             if !sg.tgt.trim().is_empty() {
                 s.tgt_text = sg.tgt;
@@ -1156,7 +1246,7 @@ async fn export_lang(
         // очищаем tgt -> рендер покажет исходный text (лучше, чем титр на старом языке рядом с новыми сегментами).
         if !p.captions.titles.is_empty() {
             let mut tsegs: Vec<Seg> = p.captions.titles.iter().map(|ti| Seg::new(ti.text.clone(), 0)).collect();
-            let ok = flat_run(&client, &mut tsegs, "auto", &lang_c, false).is_ok();
+            let ok = flat_run(&client, &mut tsegs, "auto", &lang_c, false, &p.audio.translate_style).is_ok();
             for (ti, sg) in p.captions.titles.iter_mut().zip(tsegs) {
                 ti.tgt = if ok && !sg.tgt.trim().is_empty() { sg.tgt } else { String::new() };
             }

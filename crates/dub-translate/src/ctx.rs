@@ -44,6 +44,9 @@ pub struct CtxConfig {
     /// субтитров/титров — в режимах без субтитров это 10-20 лишних vision-вызовов Gemma (минуты на
     /// длинном видео) ради данных, которые никто не прочитает. false -> фаза 1 пропускается целиком.
     pub want_layout: bool,
+    /// Стилевая инструкция перевода (#112): доп-указание тона/регистра/лексики. Пусто = без стиля.
+    /// Вставляется в инструкционную часть TP-промпта ПЕРЕД форматом-контрактом (он остаётся приоритетным).
+    pub style: String,
 }
 
 /// run — единый проход. rewrite=Some(instr) -> творческий ре-дубляж; None -> точный перевод.
@@ -129,7 +132,7 @@ pub fn run(
 
     // Батч-перевод длинного скрипта (#82): чанки по бюджету + скользящий контекст + term-lock глоссарий.
     // Возвращает by_n = {глобальный_N -> перевод} — тот же контракт, что раньше давал единый вызов.
-    let by_n = translate_lines(llm, &line_texts, &budgets, &tgt, rewrite, &ctx, &mut log)?;
+    let by_n = translate_lines(llm, &line_texts, &budgets, &tgt, rewrite, &cfg.style, &ctx, &mut log)?;
 
     for (i, s) in segs.iter_mut().enumerate() {
         let t = by_n.get(&(i + 1)).cloned().unwrap_or_default();
@@ -212,6 +215,7 @@ fn translate_lines(
     budgets: &[Option<usize>],
     tgt: &str,
     rewrite: Option<&str>,
+    style: &str,
     ctx: &str,
     log: &mut impl FnMut(&str),
 ) -> Result<std::collections::HashMap<usize, String>, TranslateError> {
@@ -320,18 +324,21 @@ fn translate_lines(
         let budget_rule = " After each number, a parenthesis like (\u{2264}45) gives a soft character limit for that \
 line — stay within it: if it doesn't fit, drop filler words and repetitions, keep the meaning, invent nothing. \
 Do NOT copy the (\u{2264}NN) marker into your output.";
+        // Стиль (#112) — доп-инструкция в инструкционной части ПЕРЕД форматом-контрактом «Output ONLY 'N. …'»
+        // (он остаётся финальным и приоритетным, поэтому стиль не ломает разбор нумерованного ответа).
+        let style_c = crate::translate::style_clause(style);
         let tp = if let Some(instr) = rewrite {
             format!(
                 "You are a creative scriptwriter writing a BRAND-NEW voice-over script in {tgt} for this short video. \
 IGNORE the literal meaning of the source lines — they are ONLY a rhythm/length template. Write a completely NEW \
 script whose CONTENT follows this instruction: \"{instr}\". Every line must fit the instruction, NOT translate the \
-source. Keep the SAME number of lines and each line about the SAME LENGTH (it will be dubbed to fit the timing).{budget_rule} \
+source. Keep the SAME number of lines and each line about the SAME LENGTH (it will be dubbed to fit the timing).{budget_rule}{style_c} \
 Use the scene/audio context below for tone.{gloss_suffix}\n\n{ctx}{ctx_block}=== LINES (rhythm template) ===\n{numbered}\n\nOutput ONLY 'N. <line>' per line, nothing else."
             )
         } else {
             format!(
                 "Translate EACH numbered line into natural, spoken {tgt} for dubbing — keep the order and the \
-numbering, match tone/slang/intent.{budget_rule} Use ALL the context below (what the words alone don't convey):{gloss_suffix}\n\n\
+numbering, match tone/slang/intent.{budget_rule}{style_c} Use ALL the context below (what the words alone don't convey):{gloss_suffix}\n\n\
 {ctx}{ctx_block}=== LINES ===\n{numbered}\n\nOutput ONLY 'N. <translation>' per line, nothing else."
             )
         };

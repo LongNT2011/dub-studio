@@ -206,7 +206,7 @@ pub async fn remix_project(
                 Seg::new(s.src_text.clone(), spk)
             })
             .collect();
-        let r = flat_rewrite(&client, &mut segs, &instr, "auto", &p.tgt_lang, false);
+        let r = flat_rewrite(&client, &mut segs, &instr, "auto", &p.tgt_lang, false, &p.audio.translate_style);
         drop(srv);
         r.map_err(|e| format!("remix: {e}"))?;
 

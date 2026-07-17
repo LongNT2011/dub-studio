@@ -60,6 +60,11 @@ pub struct Audio {
     pub voice: Voice,
     #[serde(default)]
     pub rewrite: Option<String>,
+    /// Стилевая инструкция перевода (#112): доп-указание переводчику (тон/регистр/лексика), напр.
+    /// «formal», «gen-z slang». Пресеты живут на фронте — бэку приходит только активный текст.
+    /// Пусто = без стиля. Дополняет перевод (в отличие от rewrite, который ЗАМЕНЯЕТ содержимое).
+    #[serde(default)]
+    pub translate_style: String,
     /// Дополнительное усиление всей дорожки на монтаже, dB (0 = без изменений). Применяется на рендере.
     #[serde(default)]
     pub gain_db: f64,
@@ -97,6 +102,7 @@ impl Default for Audio {
             keep_music: true,
             voice: Voice::default(),
             rewrite: None,
+            translate_style: String::new(),
             gain_db: 0.0,
             voiceover_gain_db: default_voiceover_gain(),
             keep_original_track: false,

@@ -850,7 +850,7 @@ fn translate_taglines(
         Err(_) => return,
     };
     let mut segs: Vec<Seg> = tcard_rows.iter().map(|r| Seg::new(r.text.clone(), 0)).collect();
-    let ok = flat_run(&client, &mut segs, ctx.src_lang, &proj.tgt_lang, false).is_ok();
+    let ok = flat_run(&client, &mut segs, ctx.src_lang, &proj.tgt_lang, false, &proj.audio.translate_style).is_ok();
     drop(srv);
     if !ok {
         emit(progress, "ocr_detect", "таглайны: перевод не удался; только блюр");

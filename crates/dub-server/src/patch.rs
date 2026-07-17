@@ -253,6 +253,21 @@ fn op_rewrite(p: &mut Project, edit: &Value) -> PatchResult {
     Ok(())
 }
 
+/// translate_style — задать стилевую инструкцию перевода (#112): доп-указание тона/регистра/лексики
+/// («formal», «gen-z slang»). Дополняет перевод (в отличие от rewrite, который ЗАМЕНЯЕТ содержимое).
+/// Текст нормализуем: trim, переводы строк -> пробелы, кап ~500 символов (как inline-инструкция промпта,
+/// не абзац). Помечает все сегменты dirty тем же механизмом, что смена режима/rewrite: сам ре-перевод —
+/// GPU-стадия (analyze/vision), PATCH лишь фиксирует намерение (как op_translate). Пустой style снимает
+/// стиль (сохраняем ""). Стиль читает translate::stage из proj.audio.translate_style и вносит в sysmsg.
+fn op_translate_style(p: &mut Project, edit: &Value) -> PatchResult {
+    let raw = s(edit, "style").unwrap_or_default();
+    // схлопнуть любые переводы строк/табы в одиночные пробелы, затем trim; кап 500 символов по границам char.
+    let flat: String = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    p.audio.translate_style = flat.chars().take(500).collect();
+    mark_all_dirty(p);
+    Ok(())
+}
+
 /// recast — сменить режим/голос дубляжа. Порт api.recast: audio.voice.mode/name; все сегменты dirty
 /// (следующий /render перегенерит дубляж с новым голосом). Порт app.py op=="recast" (раунд 4).
 fn op_recast(p: &mut Project, edit: &Value) -> PatchResult {
@@ -667,6 +682,7 @@ pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
         "subs_burn" => op_subs_burn(p, edit),
         "subs_content" => op_subs_content(p, edit),
         "translate" => op_translate(p, edit),
+        "translate_style" => op_translate_style(p, edit),
         "rewrite" => op_rewrite(p, edit),
         "recast" => op_recast(p, edit),
         "regen" => op_regen(p, edit),
@@ -743,6 +759,22 @@ mod tests {
         let mut p = proj_with_seg();
         apply(&mut p, &json!({"op":"translate","lang":"en","mode":"funny"})).unwrap();
         assert_eq!(p.audio.rewrite.as_deref(), Some("make it a funny, playful dub"));
+    }
+
+    #[test]
+    fn translate_style_normalizes_and_marks_dirty() {
+        let mut p = proj_with_seg();
+        // переводы строк -> пробелы, обрезка краёв.
+        apply(&mut p, &json!({"op":"translate_style","style":"  formal,\n very polite  "})).unwrap();
+        assert_eq!(p.audio.translate_style, "formal, very polite");
+        assert!(p.segments[0].dirty);
+        // кап длины ~500 символов.
+        let long = "a".repeat(700);
+        apply(&mut p, &json!({"op":"translate_style","style":long})).unwrap();
+        assert_eq!(p.audio.translate_style.chars().count(), 500);
+        // пустой style снимает стиль.
+        apply(&mut p, &json!({"op":"translate_style","style":"  "})).unwrap();
+        assert_eq!(p.audio.translate_style, "");
     }
 
     #[test]
