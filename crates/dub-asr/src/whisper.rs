@@ -246,6 +246,18 @@ impl WhisperAsr {
             .arg("--device").arg(&self.device)
             .arg("--word_timestamps").arg("True")
             .arg("--beep_off");
+        // Анти-галлюцинации (ENGINES_FINDINGS §3, arxiv 2501.11378: VAD до декодера = 0.2% галлюцинаций
+        // против 21.3%; condition_on_previous_text тянет «Субтитры создавал…» через паузы; temp-fallback
+        // на no_speech = петли). Флаги подтверждены по --help нашего XXL r245.4.
+        let is_xxl_flags = self.bin.file_name().and_then(|s| s.to_str()).is_some_and(|n| n.to_ascii_lowercase().contains("xxl"));
+        if is_xxl_flags {
+            cmd.arg("--vad_filter").arg("True")
+                .arg("--vad_method").arg("silero_v5_fw")
+                .arg("--condition_on_previous_text").arg("False")
+                .arg("--beam_size").arg("1")
+                .arg("--temperature").arg("0")
+                .arg("--hallucination_silence_threshold").arg("2");
+        }
         // XXL-сборка: батч-инференс внутри движка (--batched, Silero-VAD окна ≤30с пачками; появился в
         // r239.1 — старый onefile r192 флага НЕ знает, ему не передаём). Главный рычаг скорости на GPU.
         let is_xxl = self
@@ -355,6 +367,16 @@ impl AsrEngine for WhisperAsr {
         let is_xxl = self.bin.file_name().and_then(|s| s.to_str()).is_some_and(|n| n.to_ascii_lowercase().contains("xxl"));
         if is_xxl {
             cmd.arg("--batched");
+            // QC коротких клипов (ENGINES_FINDINGS §3.2): VAD до декодера + без истории + temp 0 +
+            // жёстче no_speech — гул/тишина возвращают ПУСТО (= брак по qc_similarity), а не галлюцинацию.
+            cmd.arg("--vad_filter").arg("True")
+                .arg("--vad_method").arg("silero_v5_fw")
+                .arg("--condition_on_previous_text").arg("False")
+                .arg("--beam_size").arg("1")
+                .arg("--temperature").arg("0")
+                .arg("--no_speech_threshold").arg("0.5")
+                .arg("--word_timestamps").arg("True")
+                .arg("--hallucination_silence_threshold").arg("2");
         }
         let l = lang.trim();
         if !l.is_empty() && l != "auto" {

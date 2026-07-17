@@ -686,12 +686,20 @@ fn build_dub(
             let spk_key = s.speaker.clone().unwrap_or_else(|| "0".into());
             let alt = alt_refs.get(&spk_key);
             let tgt_chars = tgt.chars().filter(|c| c.is_alphanumeric()).count();
+            // КАП ТОКЕНОВ ПО ДЛИТЕЛЬНОСТИ (ENGINES_FINDINGS §1.1, issue #151): в движке НЕТ авто-капа —
+            // без него короткая фраза может уйти в 40с гула до max_new_tokens=2048. Кодек 25-75 ток/с
+            // (версии разнятся) — берём консервативные 75: cap = ceil(dur×75×1.5)+32, floor 64.
+            // Таргет-длительность = длительность оригинальной реплики (у дубля тот же слот).
+            let expected_dur = (s.end - s.start).max(0.6);
+            let tok_cap: u32 = (((expected_dur * 75.0 * 1.5).ceil() as u32) + 32).clamp(64, 2048);
             let mut attempt = 0usize;
             let mut retried = false;
             // Лучшая из ДЕФЕКТНЫХ попыток (по размаху) — на случай полного провала лестницы.
             let mut best_bad: Option<(Vec<f32>, i32, f64)> = None;
             let (samples, sr) = loop {
-                // Лестница: 0 — дефолт; 1-2 — temp-бамп; 3-4 — АЛЬТЕРНАТИВНЫЙ реф спикера (+temp).
+                // Лестница (ENGINES_FINDINGS §1.3/1.8: на КВАНТЕ temperature ВНИЗ 0.3→0.1, НЕ вверх;
+                // офиц. voice-clone примеры = 0.3): 0 — temp 0.3 + кап + RAS7; 1 — жёстче RAS (repeat=1),
+                // temp 0.2, seed; 2 — temp 0.1, top_p 0.9, seed; 3-4 — АЛЬТ-РЕФ спикера (0.3 / 0.15+RAS1).
                 let use_alt = attempt >= 3 && alt.is_some();
                 let (rw, rt): (&PathBuf, Option<&str>) = if use_alt {
                     let (p, t) = alt.unwrap();
@@ -699,15 +707,20 @@ fn build_dub(
                 } else {
                     (&ref_wav, ref_text.as_deref())
                 };
-                let opts = if attempt == 0 || attempt == 3 {
-                    String::new() // свежий реф пробуем сперва с дефолт-сэмплингом
-                } else {
-                    let temp = 0.9 + 0.3 * ((attempt % 3) as f64 - 1.0).max(0.0) + if attempt == 2 || attempt == 4 { 0.3 } else { 0.0 };
-                    format!(
-                        "{{\"temperature\":{:.2},\"seed\":{}}}",
-                        temp.clamp(0.9, 1.2),
-                        (fi as u64) * 1000 + attempt as u64
-                    )
+                let seed = (fi as u64) * 1000 + attempt as u64;
+                let opts = match attempt {
+                    0 | 3 => format!(
+                        "{{\"temperature\":0.30,\"top_p\":0.95,\"top_k\":50,\"max_new_tokens\":{tok_cap},\"ras_win_len\":7,\"return_audio_in_tokens\":true}}"
+                    ),
+                    1 => format!(
+                        "{{\"temperature\":0.20,\"top_p\":0.95,\"top_k\":50,\"max_new_tokens\":{tok_cap},\"ras_win_len\":7,\"ras_win_max_num_repeat\":1,\"return_audio_in_tokens\":true,\"seed\":{seed}}}"
+                    ),
+                    2 => format!(
+                        "{{\"temperature\":0.10,\"top_p\":0.90,\"top_k\":50,\"max_new_tokens\":{tok_cap},\"ras_win_len\":7,\"return_audio_in_tokens\":true,\"seed\":{seed}}}"
+                    ),
+                    _ => format!(
+                        "{{\"temperature\":0.15,\"top_p\":0.90,\"top_k\":50,\"max_new_tokens\":{tok_cap},\"ras_win_len\":7,\"ras_win_max_num_repeat\":1,\"return_audio_in_tokens\":true,\"seed\":{seed}}}"
+                    ),
                 };
                 let (samples, sr) = engine
                     .voice_clone(tgt, &rw.to_string_lossy(), rt, &opts)
@@ -800,15 +813,19 @@ fn build_dub(
                 let main_rt = reftext_of(s);
                 let alt = alt_refs.get(spk);
                 let tgt_chars = tgtq.chars().filter(|c| c.is_alphanumeric()).count();
-                // до 3 свежих попыток: альт-реф (если есть) → альт+temp → основной+temp с новым seed
+                // до 3 свежих попыток (низкая temperature по ENGINES_FINDINGS §1.3 + кап токенов §1.1):
+                // альт-реф 0.3 → альт-реф 0.15+RAS1 → основной 0.10 с новым seed
+                let e_dur = (s.end - s.start).max(0.6);
+                let cap: u32 = (((e_dur * 75.0 * 1.5).ceil() as u32) + 32).clamp(64, 2048);
+                let base = format!("\"top_k\":50,\"max_new_tokens\":{cap},\"ras_win_len\":7,\"return_audio_in_tokens\":true");
                 let mut fixed = false;
                 for (k, (rw, rt, opts)) in {
                     let mut plan: Vec<(&PathBuf, Option<&str>, String)> = Vec::new();
                     if let Some((ap, at_)) = alt {
-                        plan.push((ap, at_.as_deref(), String::new()));
-                        plan.push((ap, at_.as_deref(), format!("{{\"temperature\":1.10,\"seed\":{}}}", (*fi as u64) * 1000 + 77)));
+                        plan.push((ap, at_.as_deref(), format!("{{\"temperature\":0.30,\"top_p\":0.95,{base}}}")));
+                        plan.push((ap, at_.as_deref(), format!("{{\"temperature\":0.15,\"top_p\":0.90,\"ras_win_max_num_repeat\":1,{base},\"seed\":{}}}", (*fi as u64) * 1000 + 77)));
                     }
-                    plan.push((&main_rw, main_rt.as_deref(), format!("{{\"temperature\":1.20,\"seed\":{}}}", (*fi as u64) * 1000 + 88)));
+                    plan.push((&main_rw, main_rt.as_deref(), format!("{{\"temperature\":0.10,\"top_p\":0.90,{base},\"seed\":{}}}", (*fi as u64) * 1000 + 88)));
                     plan
                 }
                 .into_iter()
