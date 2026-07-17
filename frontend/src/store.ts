@@ -21,6 +21,8 @@ type State = {
   selTitle: number | null;           // selected title index — SHARED between the left titles list and the canvas overlay
   justAnalyzed: boolean;             // только что прошёл analyze -> редактор один раз авто-генерит дуб (чтобы сразу слушать)
   setJustAnalyzed: (b: boolean) => void;
+  audioOnly: boolean;                // вход без видео -> заголовок прогресса «Анализируем аудио», не «видео»
+  setAudioOnly: (b: boolean) => void;
   setStage: (s: Stage) => void;
   setPid: (p: string | null) => void;
   setProject: (p: Project | null) => void;
@@ -54,6 +56,8 @@ export const useStore = create<State>((set, get) => ({
   selTitle: null,
   justAnalyzed: false,
   setJustAnalyzed: (justAnalyzed) => set({ justAnalyzed }),
+  audioOnly: false,
+  setAudioOnly: (audioOnly) => set({ audioOnly }),
   setStage: (stage) => set({ stage }),
   setPid: (pid) => set({ pid }),
   setProject: (project) => set({ project }),

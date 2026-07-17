@@ -544,8 +544,11 @@ function DropZone() {
   // с уведомлением. «auto» и европейские оставляют быстрый Parakeet.
   function pickSrc(lang: string) {
     setSrc(lang);
-    if (lang !== "auto" && !PARAKEET_LANGS.has(lang)) {
+    // Parakeet знает только 25 европейских. Авто-переключаем на Whisper И показываем ноту ТОЛЬКО если
+    // текущий движок — Parakeet. У кого Whisper по умолчанию — переключать/предупреждать не о чем.
+    if (lang !== "auto" && !PARAKEET_LANGS.has(lang) && asrEngine === "parakeet") {
       api.setSelection("asr_engine", "whisper").catch(() => {});
+      setAsrEngine("whisper");
       setAsrNote(DUB_LANGS.find((l) => l.code === lang)?.name ?? lang);
     } else {
       setAsrNote(null);
@@ -575,6 +578,14 @@ function DropZone() {
   // список и даём открыть прошлый проект в один клик. Автообновление URL (?pid=) — чтобы перезагрузка держала.
   const [recent, setRecent] = useState<ProjectSummary[]>([]);
   useEffect(() => { api.listProjects().then((r) => setRecent(r.projects)).catch(() => {}); }, []);
+  // Удалить проект из «Недавних»: подтверждаем, оптимистично убираем из списка, реально стираем на бэке
+  // (DELETE /projects/<pid> -> rm -rf workspace/<pid>). Если бэк не смог — вернётся при следующей загрузке.
+  const deleteRecent = async (e: React.MouseEvent, pid: string, video: string) => {
+    e.stopPropagation();
+    if (!window.confirm(t("recent.deleteConfirm", { video }))) return;
+    setRecent((r) => r.filter((x) => x.pid !== pid));
+    try { await api.deleteProject(pid); } catch { api.listProjects().then((r) => setRecent(r.projects)).catch(() => {}); }
+  };
   const rtf = new Intl.RelativeTimeFormat((i18n.language as string) || "en", { numeric: "auto" });
   function fmtAgo(sec: number) {
     const min = (sec * 1000 - Date.now()) / 60000;                              // отрицательное = в прошлом
@@ -595,6 +606,7 @@ function DropZone() {
   async function run() {
     if (!file) return;
     s.setStage("analyzing");
+    s.setAudioOnly(audioOnly);               // «Анализируем аудио» вместо «видео» для аудио-входа
     s.setProgress("", "", null);             // fresh stepper for this run
     try {
       const { project_id } = await api.createProject(file, isAudioFile(file) ? null : subsFile);   // сабы — только для видео
@@ -661,21 +673,26 @@ function DropZone() {
               <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-2.5">{t("recent.title")}</div>
               <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1 -mr-1">
                 {recent.slice(0, 8).map((p) => (
-                  <button key={p.pid} onClick={() => openProject(p.pid)}
-                    className="w-full flex items-center gap-3 p-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)] hover:border-[#3a414c] transition-colors text-left">
-                    {p.audio_only
-                      ? <div className="w-16 h-10 shrink-0 rounded-md grid place-items-center bg-[var(--color-surface-2)] text-[var(--color-accent)]"><AudioLines size={16} /></div>
-                      : <img src={api.originalUrl(p.pid, Math.min(1, (p.duration || 3) / 3))} alt="" loading="lazy" className="w-16 h-10 shrink-0 rounded-md object-cover bg-black/40" />}
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[13px] font-medium truncate">{p.video}</div>
-                      <div className="mt-0.5 text-[11px] text-[var(--color-muted)] flex items-center gap-1.5">
-                        <span className="uppercase font-semibold text-[var(--color-accent-2)]">{p.tgt_lang}</span>
-                        <span>·</span><span className="truncate">{p.mode}</span>
-                        <span>·</span><span className="shrink-0">{fmtAgo(p.mtime)}</span>
-                        {p.done && <Check size={12} className="text-[var(--color-accent)] shrink-0" />}
+                  <div key={p.pid}
+                    className="group relative flex items-center rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] hover:bg-[var(--color-surface-2)] hover:border-[#3a414c] transition-colors">
+                    <button onClick={() => openProject(p.pid)}
+                      className="min-w-0 flex-1 flex items-center gap-3 p-1.5 text-left">
+                      {p.audio_only
+                        ? <div className="w-16 h-10 shrink-0 rounded-md grid place-items-center bg-[var(--color-surface-2)] text-[var(--color-accent)]"><AudioLines size={16} /></div>
+                        : <img src={api.originalUrl(p.pid, Math.min(1, (p.duration || 3) / 3))} alt="" loading="lazy" className="w-16 h-10 shrink-0 rounded-md object-cover bg-black/40" />}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[13px] font-medium truncate">{p.video}</div>
+                        <div className="mt-0.5 text-[11px] text-[var(--color-muted)] flex items-center gap-1.5">
+                          <span className="uppercase font-semibold text-[var(--color-accent-2)]">{p.tgt_lang}</span>
+                          <span>·</span><span className="truncate">{p.mode}</span>
+                          <span>·</span><span className="shrink-0">{fmtAgo(p.mtime)}</span>
+                          {p.done && <Check size={12} className="text-[var(--color-accent)] shrink-0" />}
+                        </div>
                       </div>
-                    </div>
-                  </button>
+                    </button>
+                    <button onClick={(e) => deleteRecent(e, p.pid, p.video)} title={t("recent.delete")}
+                      className="shrink-0 mr-1 p-1.5 rounded-md text-[var(--color-muted)] opacity-0 group-hover:opacity-100 hover:text-[#ef4444] hover:bg-white/5 transition"><Trash2 size={15} /></button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -847,7 +864,7 @@ function stageLabel(stage: string | undefined, t: (k: string) => string): string
 
 function AnalyzeProgress() {
   const { t } = useTranslation();
-  const { progress } = useStore();
+  const { progress, audioOnly } = useStore();
   const matched = ANALYZE_STEPS.findIndex((stp) => stp.stages.includes(progress.stage));
   // монотонно: неизвестная/незамапленная стадия (напр. промежуточный лог) НЕ гасит прогресс — держим
   // самый дальний достигнутый шаг. Компонент перемонтируется на каждый прогон, поэтому ref сбрасывается.
@@ -859,7 +876,7 @@ function AnalyzeProgress() {
   return (
     <div className="flex-1 grid place-items-center px-6">
       <div className="w-full max-w-sm">
-        <div className="text-center text-lg font-semibold">{t("analyze.title")}</div>
+        <div className="text-center text-lg font-semibold">{audioOnly ? t("analyze.titleAudio") : t("analyze.title")}</div>
         {dl && <div className="mt-1 text-center text-[12px] text-[var(--color-muted)]">{t("analyze.firstRunNote")}</div>}
         <div className="mt-6 space-y-2.5">
           {ANALYZE_STEPS.map((stp, i) => {
@@ -2370,6 +2387,7 @@ function BatchView() {
   const [items, setItems] = useState<BatchItem[]>(() => filesRef.current.map((f) => ({ name: f.name, status: "queued", pid: null, pct: 0 })));
   const [running, setRunning] = useState(false);
   const [doneN, setDoneN] = useState(0);
+  const [saving, setSaving] = useState(false);
 
   const eMode = audio;
   const eSubs = audio === "transcribe" ? "transcribe" : subs;
@@ -2404,6 +2422,19 @@ function BatchView() {
       setDoneN((n) => n + 1);
     }
     setRunning(false);
+  }
+
+  // Сохранить все готовые выходы в ОДНУ выбранную папку под ИСХОДНЫМИ именами (запрос юзера).
+  async function saveAll() {
+    const { dir } = await api.pickFolder();
+    if (!dir) return;
+    setSaving(true);
+    for (const it of items) {
+      if (it.status === "done" && it.pid) {
+        try { await api.saveOutput(it.pid, dir, it.name); } catch { /* пропускаем отдельный файл */ }
+      }
+    }
+    setSaving(false);
   }
 
   const icon = (s: BatchItem["status"]) =>
@@ -2448,6 +2479,12 @@ function BatchView() {
           className="mt-3 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-50 hover:brightness-105 transition">
           {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}{t("batch.start")}
         </button>
+        {doneN > 0 && (
+          <button onClick={saveAll} disabled={saving || running}
+            className="mt-2 w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-sm font-medium disabled:opacity-50 hover:bg-[var(--color-surface-2)] transition">
+            {saving ? <Loader2 size={15} className="animate-spin" /> : <FolderDown size={15} />}{t("batch.saveAll")}
+          </button>
+        )}
       </div>
     </main>
   );

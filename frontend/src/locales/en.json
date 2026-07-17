@@ -25,6 +25,7 @@
   },
   "analyze": {
     "title": "Analyzing your video",
+    "titleAudio": "Analyzing your audio",
     "download": "Downloading models",
     "firstRunNote": "First run: models download once (several GB) — fast after that",
     "separating": "Separating audio",
@@ -67,6 +68,7 @@
     "done": "done",
     "error": "error",
     "open_out": "Open",
+    "saveAll": "Save all to folder",
     "back": "Back",
     "add": "Add files"
   },
@@ -195,7 +197,9 @@
     "lagNotice": "Preview may lag — not a bug. Exact result in the export."
   },
   "recent": {
-    "title": "Recent projects"
+    "title": "Recent projects",
+    "delete": "Delete project",
+    "deleteConfirm": "Delete project «{{video}}»? Its files will be permanently erased."
   },
   "multilang": {
     "title": "Multiple languages",

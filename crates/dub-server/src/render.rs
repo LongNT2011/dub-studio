@@ -88,6 +88,9 @@ pub fn run(
     dub_captions::set_fonts_dir(&paths.fonts_dir);
     let wd = &paths.work_dir;
     std::fs::create_dir_all(wd).map_err(|e| e.to_string())?;
+    // Бенчмаркинг рендера: probe / dub_audio (сепарация+TTS+микс) / burn / mux -> bench.json.
+    let mut bench = crate::bench::Bench::start(wd, "render");
+    bench.stage("probe");
 
     // probe: длительность/размеры.
     let meta = media::probe(&paths.input)?;
@@ -114,6 +117,7 @@ pub fn run(
 
     // ── АУДИО ──────────────────────────────────────────────────────────────────
     // Готовим финальную аудио-дорожку new_audio: dub (клон) поверх инструментала, либо оригинал.
+    bench.stage("dub_audio");
     let new_audio: PathBuf = if is_dub {
         build_dub(proj, paths, total, keep_music, is_voiceover, regen_dub, progress)?
     } else {
@@ -140,6 +144,7 @@ pub fn run(
     let has_overlay = proj.subs.mode != "none"
         || !proj.captions.titles.is_empty()
         || !collect_blur_boxes(proj).is_empty();
+    bench.stage("burn");
     let captioned = if proj.subs.burn && has_overlay {
         emit(progress, "build", "сборка ASS (титры + дублированные субтитры)");
         let ass_path = wd.join("caps.ass");
@@ -168,6 +173,7 @@ pub fn run(
     };
 
     // ── MUX ────────────────────────────────────────────────────────────────────
+    bench.stage("mux");
     emit(progress, "mux", "муксирование видео + аудио");
     if is_dub || new_audio != paths.input {
         media::mux(&captioned, &new_audio, &paths.output)?;
@@ -177,6 +183,7 @@ pub fn run(
     }
 
     emit(progress, "done", &format!("готово -> {}", paths.output.display()));
+    bench.finish(|m| emit(progress, "bench", m));
     Ok(RenderResult { output: paths.output.clone() })
 }
 
@@ -208,6 +215,203 @@ pub fn dub_audio(
 /// Нижний предел приглушения оригинала в режиме voiceover (закадровый): -40 dB ≈ почти тихо.
 /// Само значение регулирует пользователь (proj.audio.voiceover_gain_db, дефолт -6 dB).
 const VOICEOVER_DUCK_MIN_DB: f64 = -40.0;
+
+/// Анти-артефактный ретрай синтеза фразы: до MAX_TTS_ATTEMPTS попыток; детект «гудения» — is_hum_artifact
+/// (in-memory по сэмплам voice_clone, ~мкс, без ffmpeg-субпроцесса). Если ПОДРЯД больше CONSECUTIVE_ABORT
+/// артефакт-фраз ИЛИ суммарно ретраев больше бюджета (по длине ролика) — стоп с ошибкой (стенд/рефы).
+/// Лестница: 1 — дефолт; 2-3 — temp-бамп (0.9/1.2); 4-5 — АЛЬТЕРНАТИВНЫЙ реф спикера (+temp).
+/// Смена рефа выбивает вырожденный гул там, где сэмплинг бессилен (QC-вывод: битые кучкуются
+/// по коротким фразам с конкретными рефами).
+const MAX_TTS_ATTEMPTS: usize = 5;
+const CONSECUTIVE_ABORT: usize = 8;
+
+/// Детект TTS-артефакта «гудение» по сэмплам фразы (in-memory, прямо из voice_clone). Речь на клипе >0.4с
+/// всегда имеет паузы (тихие кадры) и большой размах громкости; непрерывный гул — почти без пауз и с
+/// плоской огибающей. Покадровый RMS (окно 25мс): silent_frac (доля кадров тише peak−30дБ = паузы) и
+/// range_db (размах peak↔trough). Артефакт, если silent_frac < 5% И range_db < 14дБ. Эмпирика: 4 реальных
+/// гудящих фразы → тишина 0%, размах 3-11дБ; 90 нормальных → размах в среднем 53дБ (0 ложных). Быстрее и
+/// проще ffmpeg-субпроцесса: сэмплы уже в руках, один проход арифметики, ноль зависимостей.
+/// Детектор дефектов синтеза v2. Пороги подобраны ПО ДАННЫМ QC-прогона (69 битых / 80 чистых,
+/// ноль ложных на чистой выборке, 2026-07-17):
+/// - "runaway": клип длиннее max(6с, 0.4с×символ) — модель ушла в гул до токен-капа (факт: фраза
+///   2.5с → клип 40.7с; таких найдено 7+, часть с ПРАВИЛЬНЫМ началом — ASR-sim их не ловил);
+/// - "обрыв": ≥4 символов, а клип < 0.045с/симв (факт: «Погнали!» за 0.36с);
+/// - "тишина": пик покадрового RMS < 0.02 (минимум чистых 0.0213; провалы 0.014-0.0198 —
+///   СТАРЫЙ детектор их намеренно пропускал гейтом «peak<0.0056 = не судим»);
+/// - "гул": размах < 16дБ при почти нулевых паузах (уточнённый старый паттерн).
+/// None ≠ гарантия чистоты: финальную правду даёт ASR-верификация (QC-пасс после синтеза).
+fn synth_defect(samples: &[f32], sr: i32, tgt_chars: usize) -> Option<&'static str> {
+    if sr <= 0 || samples.is_empty() {
+        return None;
+    }
+    let srn = sr as usize;
+    let dur = samples.len() as f64 / srn as f64;
+    if tgt_chars >= 1 && dur > (tgt_chars as f64 * 0.4).max(6.0) {
+        return Some("runaway");
+    }
+    if tgt_chars >= 4 && dur < tgt_chars as f64 * 0.045 {
+        return Some("обрыв");
+    }
+    let w = srn / 40;
+    if w == 0 || samples.len() < w * 4 {
+        return None;
+    }
+    let frames = samples.len() / w;
+    let mut rms: Vec<f64> = Vec::with_capacity(frames);
+    for f in 0..frames {
+        let mut acc = 0.0f64;
+        for i in 0..w {
+            let v = samples[f * w + i] as f64;
+            acc += v * v;
+        }
+        rms.push((acc / w as f64).sqrt());
+    }
+    let peak = rms.iter().cloned().fold(0.0f64, f64::max);
+    if peak < 0.02 {
+        return Some("тишина");
+    }
+    let thr = peak * 0.0316;
+    let silent = rms.iter().filter(|&&r| r < thr).count() as f64 / frames as f64;
+    let trough = rms.iter().cloned().filter(|&r| r > 1e-9).fold(peak, f64::min);
+    let range = 20.0 * (peak / trough.max(1e-9)).log10();
+    if range < 16.0 && silent < 0.03 {
+        return Some("гул");
+    }
+    None
+}
+
+/// Похожесть ожидаемого перевода и услышанного ASR: нормализация (lowercase, ё→е, только буквы/цифры)
+/// + доля общих слов от максимума. Мягкая метрика: ловим «совсем не то/тишину», не орфографию.
+fn qc_similarity(expected: &str, heard: &str) -> f64 {
+    let norm = |s: &str| -> Vec<String> {
+        s.to_lowercase()
+            .replace('ё', "е")
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+            .collect::<String>()
+            .split_whitespace()
+            .map(|w| w.to_string())
+            .collect()
+    };
+    let a = norm(expected);
+    let b = norm(heard);
+    if a.is_empty() && b.is_empty() {
+        return 1.0;
+    }
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    let bs: std::collections::HashSet<&str> = b.iter().map(|s| s.as_str()).collect();
+    let hit = a.iter().filter(|w| bs.contains(w.as_str())).count();
+    hit as f64 / a.len().max(b.len()) as f64
+}
+
+/// Альтернативный identity-реф спикера — ВТОРАЯ по длине реплика (ступени 4-5 лестницы ретраев:
+/// смена рефа выбивает вырожденный гул там, где вариация сэмплинга бессильна). Спикер с одной
+/// репликой альтернативы не имеет (не входит в карту).
+fn build_alt_speaker_refs(
+    segs: &[(usize, &dub_core::Segment)],
+    vocals16: &Path,
+    wd: &Path,
+    ref_secs: f64,
+) -> std::collections::BTreeMap<String, (PathBuf, Option<String>)> {
+    let mut out = std::collections::BTreeMap::new();
+    let mut speakers: Vec<String> =
+        segs.iter().map(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into())).collect();
+    speakers.sort();
+    speakers.dedup();
+    for spk in speakers {
+        let mut mine: Vec<&dub_core::Segment> = segs
+            .iter()
+            .filter(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into()) == spk)
+            .map(|(_, s)| *s)
+            .collect();
+        if mine.len() < 2 {
+            continue;
+        }
+        mine.sort_by(|a, b| (b.end - b.start).partial_cmp(&(a.end - a.start)).unwrap_or(std::cmp::Ordering::Equal));
+        // Вторая из ВЛЕЗАЮЩИХ в ref_secs (точный src_text, см. фикс выбора main-рефа); фолбэк — вторая
+        // по длине вообще.
+        let fitting: Vec<&dub_core::Segment> = mine
+            .iter()
+            .copied()
+            .filter(|s| (s.end - s.start) <= ref_secs + 0.05 && (s.end - s.start) >= 2.5)
+            .collect();
+        let cand = if fitting.len() >= 2 { fitting[1] } else { mine[1] };
+        let ref_wav = wd.join(format!("ref_alt_spk{spk}.wav"));
+        if media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + ref_secs), 16_000).is_err() {
+            continue;
+        }
+        let t = cand.src_text.trim();
+        let txt = if !t.is_empty() && (cand.end - cand.start) <= ref_secs + 0.05 {
+            Some(t.to_string())
+        } else {
+            None
+        };
+        out.insert(spk, (ref_wav, txt));
+    }
+    out
+}
+
+/// Динамический размах фразы (дБ, peak↔trough покадрового RMS 25мс) — скалярный «скор чистоты» для
+/// выбора наименее плохой попытки, когда ВСЕ ретраи с артефактом: речь ~53дБ, гул 3-11дБ (та же
+/// эмпирика, что у is_hum_artifact). Невалидный/короткий клип -> 0.0 (хуже всех).
+fn hum_range_db(samples: &[f32], sr: i32) -> f64 {
+    if sr <= 0 {
+        return 0.0;
+    }
+    let sr = sr as usize;
+    let w = sr / 40;
+    if w == 0 || samples.len() < w * 4 {
+        return 0.0;
+    }
+    let frames = samples.len() / w;
+    let mut rms: Vec<f64> = Vec::with_capacity(frames);
+    for f in 0..frames {
+        let mut acc = 0.0f64;
+        for i in 0..w {
+            let v = samples[f * w + i] as f64;
+            acc += v * v;
+        }
+        rms.push((acc / w as f64).sqrt());
+    }
+    let peak = rms.iter().cloned().fold(0.0f64, f64::max);
+    let trough = rms.iter().cloned().filter(|&r| r > 1e-9).fold(peak, f64::min);
+    20.0 * (peak / trough.max(1e-9)).log10()
+}
+
+fn is_hum_artifact(samples: &[f32], sr: i32) -> bool {
+    if sr <= 0 {
+        return false;
+    }
+    let sr = sr as usize;
+    let w = sr / 40; // окно 25мс
+    if w == 0 || samples.len() < (sr * 2) / 5 {
+        return false; // < 0.4с — слишком коротко, чтобы судить о паузах
+    }
+    let frames = samples.len() / w;
+    if frames < 4 {
+        return false;
+    }
+    let mut rms: Vec<f64> = Vec::with_capacity(frames);
+    for f in 0..frames {
+        let mut acc = 0.0f64;
+        for i in 0..w {
+            let v = samples[f * w + i] as f64;
+            acc += v * v;
+        }
+        rms.push((acc / w as f64).sqrt());
+    }
+    let peak = rms.iter().cloned().fold(0.0f64, f64::max);
+    if peak < 0.0056 {
+        return false; // почти тишина (≈−45 dBFS) — это не «гул», не флагаем
+    }
+    let thr = peak * 0.0316; // peak−30дБ = peak·10^(-30/20)
+    let silent = rms.iter().filter(|&&r| r < thr).count() as f64 / frames as f64;
+    let trough = rms.iter().cloned().filter(|&r| r > 1e-9).fold(peak, f64::min);
+    let range_db = 20.0 * (peak / trough.max(1e-9)).log10();
+    silent < 0.05 && range_db < 14.0
+}
 
 /// Полный аудио-конвейер дубляжа -> путь к new_audio. Порт _build_dub/_regen_dub (TTS+fit+timeline+mix).
 fn build_dub(
@@ -269,8 +473,10 @@ fn build_dub(
         (audio_hq.clone(), None)
     };
 
-    // vocals16 -> mono 16k (референсы клона).
-    let vocals16 = wd.join("vocals16.wav");
+    // ref_vocals16 -> mono 16k (референсы клона). ОТДЕЛЬНОЕ имя, НЕ vocals16.wav: analyze.rs пишет сырой
+    // vocals16.wav для ASR/диаризации; тут пост-BSRoformer вокал — затирание того же файла давало ложный
+    // extract-cache-hit при ре-analyze (ревью G, analyze.rs:461) → в ASR шёл очищенный звук.
+    let vocals16 = wd.join("ref_vocals16.wav");
     media::to_16k_mono(&vocals, &vocals16)?;
 
     // 3) клон-референс. voice.mode="voice" -> реф из пака/записи (voices/<name>.wav|mp3) НА КАЖДОГО спикера.
@@ -359,6 +565,38 @@ fn build_dub(
         }
     };
 
+    // Per-segment ЭМОЦ-реф (BORROWINGS #2 «локальный эмоц-реф» / идея «скользящее окно для голоса»):
+    // клон наследует крик/шёпот/плач оригинала В ЭТОТ момент, если реф взять из САМОГО сегмента, а не из
+    // одного ровного identity-клипа на весь фильм. Гейт: (1) clone-режим (пак — фикс-голос юзера, эмоцию
+    // источника не переносим); (2) реплика ЧИСТАЯ (нет оверлапа чужого спикера -> в реф не попадёт чужой
+    // голос); (3) длина ≥REF_MIN_AFTER_TRIM (Higgs нужен минимум тембра). Иначе -> стабильный identity-реф
+    // спикера (ref_of). Файл — свой на сегмент (по id), не конфликтует с seg_*.wav дубляжа. ref_text для
+    // эмоц-рефа = src_text ЭТОГО же сегмента (совпадает с аудио по построению, перетранскрипция не нужна).
+    // Порт коротких/1-спикер путей неизменен: при паке и на грязных/коротких репликах ведём себя как раньше.
+    // Многосегментный клон-ролик = есть per-фразовая вариация эмоции, которую стоит переносить. Тривиальный
+    // 1-сегментный/очень короткий ролик -> ПАРИТЕТ: identity-реф как раньше (эмоц-реф не включаем).
+    let emo_enabled = EMO_VOICE_REF && !use_pack && segs.len() > 1;
+    let emo_ref_of = |s: &dub_core::Segment, sid: &str| -> Option<PathBuf> {
+        if !emo_enabled {
+            return None; // пак-голос или 1-сегментный ролик -> паритет (identity-реф)
+        }
+        let key = s.speaker.as_deref().unwrap_or("0");
+        if (s.end - s.start) < REF_MIN_AFTER_TRIM {
+            return None; // слишком коротко для отдельного рефа
+        }
+        if !seg_is_clean(s, key, &segs) {
+            return None; // оверлап чужого спикера -> не чистый эмоц-реф
+        }
+        let out = wd.join(format!("emoref_{sid}.wav"));
+        // кап длины сверху ref_secs (не раздувать prefill-граф Higgs), как для identity-рефа.
+        let cap = paths.ref_secs.min(REF_IDEAL_HI).max(REF_MIN_AFTER_TRIM);
+        let end = s.end.min(s.start + cap);
+        match media::trim(&vocals16, &out, s.start, end.max(s.start + 0.05), 16_000) {
+            Ok(()) => Some(out),
+            Err(_) => None, // сбой обрезки -> тихо на identity-реф
+        }
+    };
+
     // 4) TTS каждый сегмент через Higgs (audiocpp). Кэш: seg_XXX.wav; не-dirty переиспользуются.
     emit(progress, "tts", &format!("синтез {} сегментов (Higgs clone)", segs.len()));
     let engine = AudiocppEngine::load(&paths.higgs_dll)
@@ -378,6 +616,20 @@ fn build_dub(
     let mut placed: Vec<(f64, PathBuf)> = Vec::with_capacity(segs.len());
     let mut cursor = 0.0f64;
     let n_all = proj.segments.len();
+    // Анти-артефактные счётчики на весь ролик: consec — проблемные фразы ПОДРЯД (сброс на чистой);
+    // retry_budget — суммарный лимит ретраев по длине ролика (лестница из 5 попыток длиннее старой).
+    let mut consec = 0usize;
+    let mut total_retries = 0usize;
+    let retry_budget = ((total / 10.0).ceil() as usize).max(20);
+    // Альтернативные рефы спикеров (вторая по длине чистая реплика) — ступени 4-5 лестницы ретраев.
+    let alt_refs = if use_pack {
+        std::collections::BTreeMap::new()
+    } else {
+        build_alt_speaker_refs(&segs, &vocals16, wd, paths.ref_secs)
+    };
+    // QC-список синтезированных в этом прогоне фраз: (fi, индекс в placed, raw-wav, tgt-текст, спикер,
+    // room слота, путь fit-файла) — после цикла сверяем транскрипцией и пересинтезируем несовпавшие.
+    let mut qc_list: Vec<(usize, usize, PathBuf, String, String, f64, PathBuf)> = Vec::new();
     for &(fi, s) in segs.iter() {
         // Кэш-файл сегмента — ПО ЕГО ID, не по индексу fi. Кэш переиспользуется между рендерами (не-dirty
         // сегменты не ре-синтезируются). При индекс-имени удаление/перестановка сегмента сдвигает индексы —
@@ -398,7 +650,6 @@ fn build_dub(
             continue;
         }
         let tgt = s.tgt_text.trim();
-        let ref_wav = ref_of(s);
         // Синтез ТОЛЬКО если сегмент dirty (правился текст/спикер/голос) ИЛИ нет кэша. Реф-клипы
         // пересобираются каждый рендер, поэтому mtime-сравнение с рефом («stale_ref») ошибочно
         // помечало ВЕСЬ кэш устаревшим на каждом рендере → экспорт ре-роллил уже одобренную озвучку
@@ -406,21 +657,197 @@ fn build_dub(
         // dirty-флага достаточно: не-dirty сегменты переиспользуют свой seg_XXX.wav между рендерами.
         let need_synth = (regen_dub && s.dirty) || !raw.is_file();
         if need_synth {
-            let ref_text = reftext_of(s); // авто-расшифровка рефа -> качество клона (как Higgs)
-            let (samples, sr) = engine
-                .voice_clone(tgt, &ref_wav.to_string_lossy(), ref_text.as_deref(), "")
-                .map_err(|e| format!("Higgs clone seg{fi}: {e}"))?;
+            // Реф: сначала пробуем per-segment ЭМОЦ-реф (обрезок vocals16 самой этой чистой реплики ≥2.5с)
+            // — клон наследует эмоцию оригинала в этот момент. Не подошёл (грязная/короткая реплика/пак) ->
+            // стабильный identity-реф спикера. ref_text эмоц-рефа = src_text ЭТОГО сегмента (совпадает с
+            // аудио по построению); для identity-рефа — заранее посчитанный reftext_of. Считаем ТОЛЬКО при
+            // синтезе (не тратить ffmpeg-обрезку на закэшированные не-dirty сегменты).
+            let emo_ref = emo_ref_of(s, &sid);
+            let (ref_wav, ref_text): (PathBuf, Option<String>) = match &emo_ref {
+                Some(er) => {
+                    // ref_text ТОЛЬКО если эмоц-аудио НЕ обрезано капом (иначе текст описывает больше,
+                    // чем в клипе → рассинхрон клона; как exact_cover у identity-пути, ревью-находка C).
+                    // Обрезано → None: Higgs клонирует без транскрипта рефа (хуже мисматча).
+                    let cap = paths.ref_secs.min(REF_IDEAL_HI).max(REF_MIN_AFTER_TRIM);
+                    let capped = (s.end - s.start) > cap + 0.05;
+                    let t = s.src_text.trim();
+                    (er.clone(), if capped || t.is_empty() { None } else { Some(t.to_string()) })
+                }
+                None => (ref_of(s), reftext_of(s)),
+            };
+            // Анти-артефактный ретрай: иногда Higgs выдаёт «гудение» (непрерывный гул без речи). Детект
+            // in-memory (is_hum_artifact) по сэмплам; перегенерируем — синтез стохастичен, повтор обычно
+            // даёт валидный дубль. Вариативность ретрая (BORROWINGS #17 + ревью-находка D): у Higgs
+            // подтверждён рычаг сэмплинга `temperature` (PROSODY_FINDINGS §6.1); поле `seed` НЕ подтверждено
+            // (DLL прекомпилена, C++ нет). Если варьировать ТОЛЬКО seed и DLL его игнорит — все 3 попытки
+            // битово идентичны → тот же гул → жёсткий abort. Поэтому на ПОВТОРНОЙ попытке бампаем
+            // temperature (0.9→1.2) — выше рандом сэмплинга → выход из вырожденного гула; seed добавляем
+            // бонусом. Первая попытка — пустой opts = дефолт движка (питон-паритет).
+            let spk_key = s.speaker.clone().unwrap_or_else(|| "0".into());
+            let alt = alt_refs.get(&spk_key);
+            let tgt_chars = tgt.chars().filter(|c| c.is_alphanumeric()).count();
+            let mut attempt = 0usize;
+            let mut retried = false;
+            // Лучшая из ДЕФЕКТНЫХ попыток (по размаху) — на случай полного провала лестницы.
+            let mut best_bad: Option<(Vec<f32>, i32, f64)> = None;
+            let (samples, sr) = loop {
+                // Лестница: 0 — дефолт; 1-2 — temp-бамп; 3-4 — АЛЬТЕРНАТИВНЫЙ реф спикера (+temp).
+                let use_alt = attempt >= 3 && alt.is_some();
+                let (rw, rt): (&PathBuf, Option<&str>) = if use_alt {
+                    let (p, t) = alt.unwrap();
+                    (p, t.as_deref())
+                } else {
+                    (&ref_wav, ref_text.as_deref())
+                };
+                let opts = if attempt == 0 || attempt == 3 {
+                    String::new() // свежий реф пробуем сперва с дефолт-сэмплингом
+                } else {
+                    let temp = 0.9 + 0.3 * ((attempt % 3) as f64 - 1.0).max(0.0) + if attempt == 2 || attempt == 4 { 0.3 } else { 0.0 };
+                    format!(
+                        "{{\"temperature\":{:.2},\"seed\":{}}}",
+                        temp.clamp(0.9, 1.2),
+                        (fi as u64) * 1000 + attempt as u64
+                    )
+                };
+                let (samples, sr) = engine
+                    .voice_clone(tgt, &rw.to_string_lossy(), rt, &opts)
+                    .map_err(|e| format!("Higgs clone seg{fi}: {e}"))?;
+                attempt += 1;
+                match synth_defect(&samples, sr, tgt_chars) {
+                    None => break (samples, sr), // дефектов не видно — берём
+                    Some(kind) => {
+                        let rng = hum_range_db(&samples, sr);
+                        if best_bad.as_ref().map_or(true, |(_, _, b)| rng > *b) {
+                            best_bad = Some((samples, sr, rng));
+                        }
+                        if attempt >= MAX_TTS_ATTEMPTS {
+                            let (sm, r, rng) = best_bad.take().unwrap();
+                            emit(progress, "tts", &format!(
+                                "⚠ сегмент {fi}: все {MAX_TTS_ATTEMPTS} попыток с дефектом ({kind}) — взята наименее плохая (размах {rng:.0} дБ)"
+                            ));
+                            break (sm, r);
+                        }
+                        retried = true;
+                        total_retries += 1;
+                        let via = if attempt >= 3 { "альт-реф" } else { "temp-бамп" };
+                        emit(progress, "tts", &format!("сегмент {fi}: дефект синтеза ({kind}), регенерация ({via} {}/{})", attempt + 1, MAX_TTS_ATTEMPTS));
+                    }
+                }
+            };
             let wav = AudiocppEngine::encode_wav(&samples, sr, 1);
             std::fs::write(&raw, &wav).map_err(|e| format!("запись seg{fi}: {e}"))?;
+            // Много ретраев подряд/суммарно = систем. проблема (стенд/VRAM или реф-клипы) → стоп с ошибкой.
+            if retried {
+                consec += 1;
+                if consec > CONSECUTIVE_ABORT || total_retries > retry_budget {
+                    return Err(format!(
+                        "TTS: слишком много артефактов-гудения (подряд {consec}, всего ретраев {total_retries}) — регенерация не помогает. Вероятно проблема со стендом (модель/VRAM) или с реф-клипами голосов. Остановлено на сегменте {fi}."
+                    ));
+                }
+            } else {
+                consec = 0; // чистая фраза сбрасывает серию
+            }
         }
         // слот: от текущего onset до старта СЛЕДУЮЩЕГО сегмента ПО ИНДЕКСУ (fi+1) полного списка /
         // конца видео (питон nxt = segs[i+1].start if i+1<len else total).
         let at = s.start.max(cursor);
         let nxt = if fi + 1 < n_all { proj.segments[fi + 1].start } else { total };
         let room = (nxt - at).max(0.3);
-        let fit = fit_to_slot(&raw, room, &wd.join(format!("seg_{:03}_fit.wav", fi)), paths.max_stretch)?;
+        let fitp = wd.join(format!("seg_{:03}_fit.wav", fi));
+        let fit = fit_to_slot(&raw, room, &fitp, paths.max_stretch)?;
         cursor = at + media::duration(&fit)?;
         placed.push((at, fit));
+        // В QC — только реально синтезированное в этом прогоне (кэш уже проверялся в своём прогоне).
+        if need_synth && !s.tgt_text.trim().is_empty() {
+            qc_list.push((
+                fi,
+                placed.len() - 1,
+                raw.clone(),
+                s.tgt_text.trim().to_string(),
+                s.speaker.clone().unwrap_or_else(|| "0".into()),
+                room,
+                fitp,
+            ));
+        }
+    }
+
+    // ── QC: ASR-верификация синтеза (идея юзера: «фраза не транскрибируется в ожидаемый текст —
+    // значит артефакт»). Пакетная транскрипция всех свежесинтезированных фраз (Whisper: ОДИН сабпроцесс
+    // на весь список; Parakeet: in-process цикл) → несовпавшие пересинтез (temp/альт-реф) → повторная
+    // проверка. Ловит ВСЁ, что акустический префильтр не видит: не-тот-текст, шипение, скрип.
+    if !qc_list.is_empty() {
+        emit(progress, "tts", &format!("QC: сверка {} фраз транскрипцией", qc_list.len()));
+        let mut qc_asr = crate::models::build_engine(&paths.asr);
+        let files: Vec<PathBuf> = qc_list.iter().map(|q| q.2.clone()).collect();
+        let heard = qc_asr.transcribe_many(&files, &proj.tgt_lang);
+        let mut bad_idx: Vec<usize> = Vec::new();
+        for (i, q) in qc_list.iter().enumerate() {
+            let chars = q.3.chars().filter(|c| c.is_alphanumeric()).count();
+            if chars < 4 {
+                continue; // междометия ASR путает законно
+            }
+            let h = heard.get(i).and_then(|x| x.as_deref()).unwrap_or("");
+            if qc_similarity(&q.3, h) < 0.35 {
+                bad_idx.push(i);
+            }
+        }
+        if !bad_idx.is_empty() {
+            emit(progress, "tts", &format!("QC: {} фраз не совпали с переводом — пересинтез", bad_idx.len()));
+            for &i in &bad_idx {
+                let (fi, pidx, raw, tgtq, spk, room, fitp) = &qc_list[i];
+                let s = &proj.segments[*fi];
+                let main_rw = ref_of(s);
+                let main_rt = reftext_of(s);
+                let alt = alt_refs.get(spk);
+                let tgt_chars = tgtq.chars().filter(|c| c.is_alphanumeric()).count();
+                // до 3 свежих попыток: альт-реф (если есть) → альт+temp → основной+temp с новым seed
+                let mut fixed = false;
+                for (k, (rw, rt, opts)) in {
+                    let mut plan: Vec<(&PathBuf, Option<&str>, String)> = Vec::new();
+                    if let Some((ap, at_)) = alt {
+                        plan.push((ap, at_.as_deref(), String::new()));
+                        plan.push((ap, at_.as_deref(), format!("{{\"temperature\":1.10,\"seed\":{}}}", (*fi as u64) * 1000 + 77)));
+                    }
+                    plan.push((&main_rw, main_rt.as_deref(), format!("{{\"temperature\":1.20,\"seed\":{}}}", (*fi as u64) * 1000 + 88)));
+                    plan
+                }
+                .into_iter()
+                .enumerate()
+                {
+                    let Ok((smp, r)) = engine.voice_clone(tgtq, &rw.to_string_lossy(), rt, &opts) else { continue };
+                    if synth_defect(&smp, r, tgt_chars).is_some() {
+                        continue;
+                    }
+                    let wav = AudiocppEngine::encode_wav(&smp, r, 1);
+                    if std::fs::write(raw, &wav).is_ok() {
+                        // пере-fit в тот же слот и подмена в placed (позиция at не меняется)
+                        if let Ok(nf) = fit_to_slot(raw, *room, fitp, paths.max_stretch) {
+                            placed[*pidx].1 = nf;
+                            fixed = true;
+                            emit(progress, "tts", &format!("QC: сегмент {fi} пересинтезирован (попытка {})", k + 1));
+                            break;
+                        }
+                    }
+                }
+                if !fixed {
+                    emit(progress, "tts", &format!("⚠ QC: сегмент {fi} («{}») не удалось подтвердить — проверь фразу вручную", tgtq.chars().take(40).collect::<String>()));
+                }
+            }
+            // финальная сверка пересинтезированных — честный отчёт в журнал
+            let files2: Vec<PathBuf> = bad_idx.iter().map(|&i| qc_list[i].2.clone()).collect();
+            let heard2 = qc_asr.transcribe_many(&files2, &proj.tgt_lang);
+            let mut still = 0usize;
+            for (j, &i) in bad_idx.iter().enumerate() {
+                let h = heard2.get(j).and_then(|x| x.as_deref()).unwrap_or("");
+                if qc_similarity(&qc_list[i].3, h) < 0.35 {
+                    still += 1;
+                    emit(progress, "tts", &format!("⚠ QC: сегмент {} всё ещё не совпадает — отмечен", qc_list[i].0));
+                }
+            }
+            emit(progress, "tts", &format!("QC итог: исправлено {}/{}, осталось помеченных {}", bad_idx.len() - still, bad_idx.len(), still));
+        } else {
+            emit(progress, "tts", "QC: все фразы подтверждены транскрипцией ✓");
+        }
     }
 
     // 5) timeline -> dub_vocals.wav.
@@ -494,12 +921,123 @@ fn build_dub(
     }
 }
 
-/// Референс клона на КАЖДОГО спикера: {speaker -> ref_spk{N}.wav} из его длиннейшей реплики (<=12с).
-/// Порт voices.resolve clone-ветки. Спикер None -> ключ "0" (моно-ролик = один реф).
+/// Референс клона на КАЖДОГО спикера: {speaker -> ref_spk{N}.wav}.
+/// Порт voices.resolve clone-ветки, УЛУЧШЕННЫЙ (BORROWINGS #2): вместо «абсолютно длиннейшей реплики»
+/// (часто крик/оверлап/шумная первая) выбираем СТАБИЛЬНЫЙ identity-реф — чистая реплика 7-12с, ±1с
+/// внутренняя обрезка полей, дроп шумной первой реплики у говорливого спикера. Это фолбэк-реф спикера,
+/// поверх которого работает per-segment эмоц-реф (emo_ref_of). Спикер None -> ключ "0" (моно-ролик).
 type SpkRefs = (
     std::collections::BTreeMap<String, PathBuf>,
     std::collections::BTreeMap<String, String>,
 );
+
+/// Идеальная длина identity-рефа спикера: 7-12с — модель клонирует стабильнее, чем на очень коротком
+/// (мало тембра) или очень длинном (крик/оверлап, раздувает prefill-граф Higgs). Верх капится ref_secs.
+const REF_IDEAL_LO: f64 = 7.0;
+const REF_IDEAL_HI: f64 = 12.0;
+/// ±1с внутренняя обрезка полей реф-клипа: края реплики часто с придыханием/захватом соседней речи.
+/// Применяем только если после обрезки остаётся достаточно (≥ ~2.5с) — иначе берём клип как есть.
+const REF_EDGE_TRIM: f64 = 1.0;
+const REF_MIN_AFTER_TRIM: f64 = 2.5;
+/// Порог «говорливого» спикера: при >4 репликах ПЕРВАЯ (часто шумный вход/бэкграунд) исключается из
+/// кандидатов. У немногословного спикера первую не трогаем — иначе можно остаться без рефа.
+const REF_DROP_FIRST_ABOVE: usize = 4;
+/// Гейт подсистемы voice-ref+эмоция (#81/#88). При false рендер идёт СТАРЫМ путём (identity-реф =
+/// длиннейшая реплика спикера, без per-segment эмоц-рефа) = питон-паритет. Ревью-рой подтвердил 5
+/// паритет-брешей при live-включении без гейта → держим OFF до E2E-валидации на реальном длинном
+/// контенте + probe DLL (temperature/seed). Включить = сменить на true после валидации.
+const EMO_VOICE_REF: bool = false;
+
+/// Реплика спикера «чистая», если НЕ перекрывается по времени репликой ДРУГОГО спикера (BORROWINGS #2
+/// `_adjacent_to_other_speaker`): пересечение = захват чужого голоса в реф -> грязный тембр/эмоция.
+/// Реплики того же спикера не считаются загрязнением. `all` — весь транскрипт (индекс+сегмент).
+fn seg_is_clean(s: &dub_core::Segment, spk: &str, all: &[(usize, &dub_core::Segment)]) -> bool {
+    !all.iter().any(|(_, o)| {
+        let ospk = o.speaker.clone().unwrap_or_else(|| "0".into());
+        ospk != spk && o.start < s.end && o.end > s.start
+    })
+}
+
+/// Выбранное окно identity-рефа спикера (координаты vocals16, с ±1с обрезкой и капом ref_secs).
+struct RefWindow {
+    start: f64,
+    end: f64,
+    /// src_text выбранной реплики.
+    src_text: String,
+    /// true = окно = вся реплика (нет ни ±1с обрезки, ни капа) -> src_text совпадает с аудио.
+    exact_cover: bool,
+}
+
+/// Выбрать окно identity-рефа спикера из его реплик по BORROWINGS #2. None — у спикера нет реплик.
+fn pick_ref_window(
+    spk: &str,
+    segs: &[(usize, &dub_core::Segment)],
+    ref_secs: f64,
+) -> Option<RefWindow> {
+    // реплики спикера в порядке транскрипта (для дропа первой).
+    let mine: Vec<&dub_core::Segment> = segs
+        .iter()
+        .filter(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into()) == spk)
+        .map(|(_, s)| *s)
+        .collect();
+    if mine.is_empty() {
+        return None;
+    }
+    // дроп шумной первой реплики у говорливого спикера (но всегда оставляем хоть одного кандидата).
+    let pool: Vec<&dub_core::Segment> = if mine.len() > REF_DROP_FIRST_ABOVE {
+        mine[1..].to_vec()
+    } else {
+        mine.clone()
+    };
+    // «полезность» кандидата (BORROWINGS #2 — НЕ «абсолютно длиннейшая», она часто крик/оверлап):
+    //   1) чистота (нет оверлапа чужого спикера) — важнее всего;
+    //   2) попадание В идеальную полосу 7-12с — предпочесть спокойный клип нужной длины;
+    //   3) внутри полосы — длиннее лучше; ВНЕ полосы (все короче 7с) — тоже длиннее (максимум тембра),
+    //      но такой кандидат всегда проигрывает любому in-band.
+    // Ключ сортировки строим так, чтобы max_by брал лучший: (clean, in_band, dur_key).
+    let score = |s: &dub_core::Segment| -> (bool, bool, f64) {
+        let dur = (s.end - s.start).max(0.0);
+        let clean = seg_is_clean(s, spk, segs);
+        let in_band = dur >= REF_IDEAL_LO && dur <= REF_IDEAL_HI;
+        // в полосе — ближе к верху полосы (больше тембра, но без «крик/оверлап» сверхдлинных); вне
+        // полосы — просто длиннее. Отрицательное расстояние до REF_IDEAL_HI даёт «ближе к 12с = лучше».
+        let dur_key = if in_band { -(REF_IDEAL_HI - dur) } else { dur };
+        (clean, in_band, dur_key)
+    };
+    let best = pool
+        .iter()
+        .copied()
+        .max_by(|a, b| {
+            let (ca, ia, da) = score(a);
+            let (cb, ib, db) = score(b);
+            (ca, ia)
+                .cmp(&(cb, ib))
+                .then(da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal))
+        })?;
+    // окно = отрезок реплики. Идеал: до REF_IDEAL_HI (капается ref_secs), с ±1с обрезкой полей когда
+    // после неё остаётся ≥REF_MIN_AFTER_TRIM. Короткую реплику берём целиком (парити коротких).
+    let cap = ref_secs.min(REF_IDEAL_HI).max(REF_MIN_AFTER_TRIM);
+    let dur = (best.end - best.start).max(0.0);
+    let (mut a, mut b) = (best.start, best.end);
+    let mut trimmed = false;
+    if dur - 2.0 * REF_EDGE_TRIM >= REF_MIN_AFTER_TRIM {
+        a += REF_EDGE_TRIM;
+        b -= REF_EDGE_TRIM;
+        trimmed = true;
+    }
+    // кап длины сверху (не раздувать prefill-граф Higgs), обрезаем хвост.
+    let mut capped = false;
+    if b - a > cap {
+        b = a + cap;
+        capped = true;
+    }
+    Some(RefWindow {
+        start: a,
+        end: b,
+        src_text: best.src_text.trim().to_string(),
+        exact_cover: !trimmed && !capped,
+    })
+}
 
 fn build_speaker_refs(
     segs: &[(usize, &dub_core::Segment)],
@@ -515,21 +1053,45 @@ fn build_speaker_refs(
     speakers.sort();
     speakers.dedup();
     for spk in speakers {
-        let cand = segs
-            .iter()
-            .filter(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into()) == spk)
-            .max_by(|(_, a), (_, b)| (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap())
-            .map(|(_, s)| *s);
-        let Some(cand) = cand else { continue };
-        let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
-        media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + ref_secs), 16_000)?;
-        refs.insert(spk.clone(), ref_wav);
-        // ref_text = src_text сегмента, НО только если реф НЕ обрезан (сегмент ≤ ref_secs). Если юзер
-        // уменьшил ref_secs и реф стал короче сегмента, полный src_text описывает БОЛЬШЕ, чем в обрезанном
-        // аудио -> рассинхрон клона. Такие оставляем БЕЗ текста -> ПЕРЕтранскрибируем обрезанный клип ниже.
-        let t = cand.src_text.trim();
-        if !t.is_empty() && (cand.end - cand.start) <= ref_secs + 0.05 {
-            texts.insert(spk, t.to_string());
+        if EMO_VOICE_REF {
+            // НОВЫЙ выбор (#81): окно 7-12с, ±1с обрезка, дроп первой реплики. ТОЛЬКО под флагом.
+            let Some(pick) = pick_ref_window(&spk, segs, ref_secs) else { continue };
+            let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
+            media::trim(vocals16, &ref_wav, pick.start, pick.end.max(pick.start + 0.05), 16_000)?;
+            refs.insert(spk.clone(), ref_wav);
+            // ref_text только если окно = вся реплика (иначе перетранскрипция в fill_ref_texts).
+            if pick.exact_cover && !pick.src_text.is_empty() {
+                texts.insert(spk, pick.src_text);
+            }
+        } else {
+            // Реф спикера: ДЛИННЕЙШАЯ ИЗ ВЛЕЗАЮЩИХ в ref_secs реплика (аудио целиком + src_text ТОЧНЫЙ,
+            // без перетранскрипции). Фолбэк — абсолютно длиннейшая (как в питоне), только если ни одна
+            // не влезает. QC-факт (прогон 2026-07-17): у спикера с рефом 14.4с > cap 12с (обрезка →
+            // ASR-перетранскрипт) битых фраз 47%, у спикеров с влезающими рефами — 4-7%.
+            let mine: Vec<&dub_core::Segment> = segs
+                .iter()
+                .filter(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into()) == spk)
+                .map(|(_, s)| *s)
+                .collect();
+            let fitting = mine
+                .iter()
+                .copied()
+                .filter(|s| (s.end - s.start) <= ref_secs + 0.05 && (s.end - s.start) >= 2.5)
+                .max_by(|a, b| (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap_or(std::cmp::Ordering::Equal));
+            let cand = fitting.or_else(|| {
+                mine.iter().copied().max_by(|a, b| {
+                    (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap_or(std::cmp::Ordering::Equal)
+                })
+            });
+            let Some(cand) = cand else { continue };
+            let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
+            media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + ref_secs), 16_000)?;
+            refs.insert(spk.clone(), ref_wav);
+            // ref_text = src_text ТОЛЬКО если реф не обрезан капом (иначе текст описывает больше аудио).
+            let t = cand.src_text.trim();
+            if !t.is_empty() && (cand.end - cand.start) <= ref_secs + 0.05 {
+                texts.insert(spk, t.to_string());
+            }
         }
     }
     Ok((refs, texts))
@@ -970,16 +1532,14 @@ mod tests {
     }
 
     fn seg(id: &str, start: f64, end: f64, tgt: &str) -> Segment {
+        // ..Default::default() для полей вне интереса теста (id/тайминги/tgt) — устойчиво к добавлению
+        // новых полей Segment смежными подсистемами (напр. ckpt чекпоинтинга).
         Segment {
             id: id.into(),
             start,
             end,
-            speaker: None,
-            src_text: String::new(),
             tgt_text: tgt.into(),
-            voice: None,
-            dirty: false,
-            extra: Default::default(),
+            ..Default::default()
         }
     }
 

@@ -25,6 +25,7 @@
   },
   "analyze": {
     "title": "Analyse de votre vidéo",
+    "titleAudio": "Analyse de votre audio",
     "download": "Téléchargement des modèles",
     "firstRunNote": "Premier lancement : modèles téléchargés une fois (plusieurs Go) — rapide ensuite",
     "separating": "Séparation de l'audio",
@@ -166,7 +167,9 @@
     "lagNotice": "L'aperçu peut être différé — ce n'est pas un bug. Résultat exact à l'export."
   },
   "recent": {
-    "title": "Projets récents"
+    "title": "Projets récents",
+    "delete": "Supprimer le projet",
+    "deleteConfirm": "Supprimer le projet «{{video}}» ? Ses fichiers seront effacés définitivement."
   },
   "multilang": {
     "title": "Plusieurs langues",
@@ -341,6 +344,7 @@
     "done": "terminé",
     "error": "erreur",
     "open_out": "Ouvrir",
+    "saveAll": "Tout enregistrer dans un dossier",
     "back": "Retour",
     "add": "Ajouter des fichiers"
   },

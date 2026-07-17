@@ -25,6 +25,7 @@
   },
   "analyze": {
     "title": "正在分析视频",
+    "titleAudio": "正在分析音频",
     "download": "下载模型",
     "firstRunNote": "首次运行：模型只下载一次（数 GB），之后会很快",
     "separating": "分离音频",
@@ -166,7 +167,9 @@
     "lagNotice": "预览可能有延迟——这不是错误。导出即为最终效果。"
   },
   "recent": {
-    "title": "最近的项目"
+    "title": "最近的项目",
+    "delete": "删除项目",
+    "deleteConfirm": "删除项目「{{video}}」？其文件将被永久删除。"
   },
   "multilang": {
     "title": "多种语言",
@@ -341,6 +344,7 @@
     "done": "完成",
     "error": "错误",
     "open_out": "打开",
+    "saveAll": "全部保存到文件夹",
     "back": "返回",
     "add": "添加文件"
   },

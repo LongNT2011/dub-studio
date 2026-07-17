@@ -36,3 +36,5 @@ desktop/src-tauri/gen/
 # Tauri bundle staging — генерируется перед `npx tauri build` (dub-server.exe, frontend/dist,
 # fonts, bundled VC++/OCR); см. desktop/src-tauri/STAGING.md. Артефакт сборки, не коммитим.
 desktop/src-tauri/staging/
+target2/
+scratchpad/

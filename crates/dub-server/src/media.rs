@@ -290,3 +290,57 @@ pub fn trim(src: &Path, dst: &Path, start: f64, end: f64, sr: u32) -> Result<(),
         OsStr::new("-ar"), OsStr::new(&ar), dst.as_os_str(),
     ])
 }
+
+// ─── Оконная нарезка для полнометражного пайплайна (#79) ──────────────────────────────────────────
+// Новые хелперы (не трогают существующие): вырезать ОДНО окно вокала в отдельный WAV (RAM O(окна)),
+// либо нарезать весь вокал segment-muxer'ом одним проходом. `-reset_timestamps 1` даёт локальный t=0 в
+// каждом окне (чистый клип для BSRoformer/Sortformer/ASR) — обратный сдвиг window_offset делает
+// вызывающий при сшивке диаризации/ASR (dub_asr::Window::offset). Хардненные флаги для длинных входов
+// (BORROWINGS #19): +discardcorrupt / avoid_negative_ts / max_muxing_queue_size — против timestamp-drift
+// и 'Too many packets buffered' на часовых файлах.
+
+/// Вырезать окно [start,end) вокала в отдельный WAV @ sr Гц (mono). Локальный t=0 (accurate seek:
+/// -ss ПОСЛЕ -i для точного реза по сэмплу). Для стадийной обработки одного окна — RAM O(окна).
+// allow(dead_code): вызывается оркестратором оконного пайплайна (интеграция #79 идёт отдельно).
+#[allow(dead_code)]
+pub fn slice_window(src: &Path, dst: &Path, start: f64, end: f64, sr: u32) -> Result<(), String> {
+    let ss = format!("{:.3}", start);
+    let to = format!("{:.3}", end);
+    let ar = sr.to_string();
+    run_ff(&[
+        OsStr::new("-y"),
+        OsStr::new("-fflags"), OsStr::new("+discardcorrupt"),
+        OsStr::new("-i"), src.as_os_str(),
+        // accurate seek внутри уже открытого потока (после -i) — точная граница окна
+        OsStr::new("-ss"), OsStr::new(&ss), OsStr::new("-to"), OsStr::new(&to),
+        OsStr::new("-ac"), OsStr::new("1"), OsStr::new("-ar"), OsStr::new(&ar),
+        OsStr::new("-avoid_negative_ts"), OsStr::new("make_zero"),
+        OsStr::new("-c:a"), OsStr::new("pcm_s16le"),
+        dst.as_os_str(),
+    ])
+}
+
+/// Нарезать весь вокал на окна фикс. длины `win_sec` segment-muxer'ом за ОДИН проход (RAM O(окна),
+/// не O(файла)). Файлы пишутся по шаблону `pattern` с `%03d` (например `win_%03d.wav`).
+/// `-reset_timestamps 1` -> каждый сегмент стартует с t=0; window_offset = idx*win_sec прибавляет
+/// вызывающий при ре-базинге. Дешёвый фолбэк к min-cut нарезке, когда важна только RAM-локальность.
+// allow(dead_code): вызывается оркестратором оконного пайплайна (интеграция #79 идёт отдельно).
+#[allow(dead_code)]
+pub fn segment_wav(src: &Path, out_dir: &Path, pattern: &str, win_sec: f64, sr: u32) -> Result<(), String> {
+    std::fs::create_dir_all(out_dir).map_err(|e| format!("mkdir {}: {e}", out_dir.display()))?;
+    let seg_time = format!("{:.3}", win_sec.max(0.1));
+    let ar = sr.to_string();
+    let out_tpl = out_dir.join(pattern);
+    run_ff(&[
+        OsStr::new("-y"),
+        OsStr::new("-fflags"), OsStr::new("+discardcorrupt"),
+        OsStr::new("-i"), src.as_os_str(),
+        OsStr::new("-ac"), OsStr::new("1"), OsStr::new("-ar"), OsStr::new(&ar),
+        OsStr::new("-c:a"), OsStr::new("pcm_s16le"),
+        OsStr::new("-f"), OsStr::new("segment"),
+        OsStr::new("-segment_time"), OsStr::new(&seg_time),
+        OsStr::new("-reset_timestamps"), OsStr::new("1"),
+        OsStr::new("-max_muxing_queue_size"), OsStr::new("2048"),
+        out_tpl.as_os_str(),
+    ])
+}

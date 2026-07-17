@@ -9,12 +9,21 @@ mod ass;
 mod burn;
 mod font;
 mod look;
+mod timing_qc;
 mod types;
 
 pub use burn::{burn, burn_frame};
 pub use look::lum;
 pub use look::{DEFAULT_PRESET, DEFAULT_TEMPLATE, FRESH_DEFAULT, FONT_NAME};
 pub use types::{BlurBox, Sub, SubStyle, Title};
+
+// Индустриальные правила субтитров (#86) — опциональный timing-QC пасс (RulesProfile/CalcLength/
+// балансный перенос/нормализаторы длительности). Чистые pure-fn, движки не трогают.
+pub use timing_qc::{
+    balanced_wrap, bridge_gaps, chars_per_second, clamp_durations, merge_short_lines, normalize,
+    optimal_display_ms, violates_cps, CalcAll, CalcArabic, CalcCjk, CalcKind, CalcLength,
+    NormalizeOpts, RulesProfile, TimingSeg, DEFAULT_PROFILE, PROFILES,
+};
 
 use std::path::Path;
 

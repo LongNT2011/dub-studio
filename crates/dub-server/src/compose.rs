@@ -948,6 +948,8 @@ mod tests {
             models_root: p.clone(),
             caption_fps: 4,
             import_subs: None,
+            bsroformer_cli: p.clone(),
+            bsroformer_model: p,
         }
     }
 
