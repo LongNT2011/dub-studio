@@ -585,6 +585,13 @@ function DropZone() {
   const [detectText, setDetectText] = useState(false);                          // OCR-детекция вшитого текста (блюр/локализация титров). Дорогая на 4K -> ПО УМОЛЧАНИЮ ВЫКЛ (юзеры жаловались, что дубляж без сабов всё равно сканирует кадры); кто хочет блюр вшитых субтитров — включает галочкой.
   const [funnyOn, setFunnyOn] = useState(false);
   const [funny, setFunny] = useState("");                                       // Gemma rewrite instruction (тема ремикса)
+  // Громкость оригинала под переводом (voiceover), стартовый выбор -> применяется ко всем создаваемым проектам.
+  // Хранится в localStorage как глобальный дефолт для будущих запусков (фолбэк -12 dB, broadcast-практика).
+  const [voGain, setVoGain] = useState<number>(() => {
+    const v = parseFloat(localStorage.getItem("dub-vo-gain") ?? "");
+    return Number.isFinite(v) ? v : -12;
+  });
+  const setVoGainSaved = (v: number) => { setVoGain(v); localStorage.setItem("dub-vo-gain", String(v)); };
   const [preview, setPreview] = useState<string | null>(null);                  // objectURL превью выбранного видео (первый кадр)
   const audioOnly = !!file && isAudioFile(file);                                // вход без видео -> режим «только аудио»
   useEffect(() => {                                                             // создаём/освобождаем objectURL под выбранный файл
@@ -661,6 +668,7 @@ function DropZone() {
       const eBurn = audioOnly ? false : audio === "transcribe" ? true : burn;
       const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
+      if (audio === "voiceover") await api.patch(project_id, { op: "voiceover_gain", gain_db: voGain });   // громкость оригинала со старта -> рендер ниже подхватит
       s.setProject(await api.getProject(project_id));
       // Озвучку готовим ЗДЕСЬ, на экране загрузки (не собирая видео — кадры даёт per-frame preview),
       // чтобы редактор открылся с готовым дубом (плей сразу играет). Иначе рендер блокировал бы превью
@@ -834,6 +842,18 @@ function DropZone() {
             <textarea value={funny} onChange={(e) => setFunny(e.target.value)} rows={2} placeholder={t("remix.placeholder")}
               className="mt-1.5 w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-2 text-[12px] focus:border-[var(--color-accent)] focus:outline-none resize-none" />
           )}
+          {/* ЗАКАДРОВЫЙ: громкость оригинала под переводом — глобальный дефолт, применяется ко всем создаваемым проектам */}
+          {audio === "voiceover" && (
+            <div className="mt-2">
+              <div className="flex items-center justify-between text-[11px] mb-1">
+                <span className="text-[var(--color-muted)]">{t("comp.origGain")}</span>
+                <span className="mono text-[11px] text-[var(--color-text)]">{voGain.toFixed(1)} dB</span>
+              </div>
+              <input type="range" min={-24} max={0} step={0.5} value={voGain}
+                onChange={(e) => setVoGainSaved(parseFloat(e.target.value))}
+                className="w-full accent-[var(--color-accent)]" />
+            </div>
+          )}
           {/* СУБТИТРЫ (независимо от аудио) */}
           {audio !== "transcribe" && !audioOnly && (
             <>
@@ -873,7 +893,7 @@ function DropZone() {
       <input ref={inputRef} type="file" accept={MEDIA_ACCEPT} className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f); }} />
       <input ref={batchRef} type="file" multiple accept={MEDIA_ACCEPT} className="hidden"
-        onChange={(e) => { const fs = [...(e.target.files || [])]; if (fs.length) { batchState.files = fs; batchState.tgt = tgt; batchState.src = src; batchState.audio = audio; batchState.subs = subs; batchState.burn = burn; batchState.detectText = detectText; batchState.funnyOn = funnyOn; batchState.funny = funny; s.setStage("batch"); } }} />
+        onChange={(e) => { const fs = [...(e.target.files || [])]; if (fs.length) { batchState.files = fs; batchState.tgt = tgt; batchState.src = src; batchState.audio = audio; batchState.subs = subs; batchState.burn = burn; batchState.detectText = detectText; batchState.funnyOn = funnyOn; batchState.funny = funny; batchState.voGain = voGain; s.setStage("batch"); } }} />
     </div>
   );
 }
@@ -1897,9 +1917,9 @@ function Editor() {
               <div className="mt-3">
                 <div className="flex items-center justify-between text-[11px] mb-1">
                   <span className="text-[var(--color-muted)]">{t("voice.origGain")}</span>
-                  <span className="mono text-[11px] text-[var(--color-text)]">{(voGainDraft ?? p.audio.voiceover_gain_db ?? -6).toFixed(1)} dB</span>
+                  <span className="mono text-[11px] text-[var(--color-text)]">{(voGainDraft ?? p.audio.voiceover_gain_db ?? -12).toFixed(1)} dB</span>
                 </div>
-                <input type="range" min={-24} max={0} step={0.5} value={voGainDraft ?? p.audio.voiceover_gain_db ?? -6}
+                <input type="range" min={-24} max={0} step={0.5} value={voGainDraft ?? p.audio.voiceover_gain_db ?? -12}
                   onChange={(e) => setVoGainDraft(parseFloat(e.target.value))}
                   onPointerUp={async () => { if (voGainDraft != null) { await doVoiceoverGain(voGainDraft); setVoGainDraft(null); } }}
                   className="w-full accent-[var(--color-accent)]" />
@@ -2432,8 +2452,8 @@ function FirstRun() {
 }
 
 // Пакетная обработка: DropZone кладёт выбранные файлы + настройки сюда, BatchView читает (без раздувания стора).
-const batchState: { files: File[]; tgt: string; src: string; audio: string; subs: string; burn: boolean; detectText: boolean; funnyOn: boolean; funny: string } =
-  { files: [], tgt: "ru", src: "auto", audio: "dub", subs: "translate", burn: true, detectText: false, funnyOn: false, funny: "" };
+const batchState: { files: File[]; tgt: string; src: string; audio: string; subs: string; burn: boolean; detectText: boolean; funnyOn: boolean; funny: string; voGain: number } =
+  { files: [], tgt: "ru", src: "auto", audio: "dub", subs: "translate", burn: true, detectText: false, funnyOn: false, funny: "", voGain: -12 };
 
 type BatchItem = { name: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string; detail?: string };
 
@@ -2443,7 +2463,7 @@ function BatchView() {
   const { t } = useTranslation();
   const setStage = useStore((s) => s.setStage);
   const filesRef = useRef<File[]>(batchState.files);
-  const { tgt, src, audio, subs, burn, detectText, funnyOn, funny } = batchState;
+  const { tgt, src, audio, subs, burn, detectText, funnyOn, funny, voGain } = batchState;
   const [items, setItems] = useState<BatchItem[]>(() => filesRef.current.map((f) => ({ name: f.name, status: "queued", pid: null, pct: 0 })));
   const [running, setRunning] = useState(false);
   const [doneN, setDoneN] = useState(0);
@@ -2470,6 +2490,7 @@ function BatchView() {
         const fBurn = ao ? false : audio === "transcribe" ? true : burn;
         const { job_id } = await api.analyze(project_id, tgt, eMode, src, fSubs, eRewrite, fBurn, ao ? false : detectText);
         await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); });
+        if (audio === "voiceover") await api.patch(project_id, { op: "voiceover_gain", gain_db: voGain });   // громкость оригинала со старта -> общий для всех проектов батча
         if (doRender) {
           upd({ status: "rendering", pct: 0 });
           const r = await api.render(project_id);

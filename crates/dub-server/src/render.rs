@@ -560,6 +560,10 @@ fn build_dub(
     // QC-список синтезированных в этом прогоне фраз: (fi, индекс в placed, raw-wav, tgt-текст, спикер,
     // room слота, путь fit-файла) — после цикла сверяем транскрипцией и пересинтезируем несовпавшие.
     let mut qc_list: Vec<(usize, usize, PathBuf, String, String, f64, PathBuf)> = Vec::new();
+    // Телеметрия укладки (#107): сколько сегментов пришлось растягивать выше капа (rate>1.25) и общий
+    // счётчик уложенных — для итоговой доли «слишком быстрого текста».
+    let mut fit_total = 0usize;
+    let mut fit_over_cap = 0usize;
     for &(fi, s) in segs.iter() {
         // Кэш-файл сегмента — ПО ЕГО ID, не по индексу fi. Кэш переиспользуется между рендерами (не-dirty
         // сегменты не ре-синтезируются). При индекс-имени удаление/перестановка сегмента сдвигает индексы —
@@ -714,6 +718,18 @@ fn build_dub(
         let nxt = if fi + 1 < n_all { proj.segments[fi + 1].start } else { total };
         let room = (nxt - at).max(0.3);
         let fitp = wd.join(format!("seg_{:03}_fit.wav", fi));
+        // Телеметрия укладки (#107): needed — во сколько раз дубль длиннее слота (что потребовалось бы,
+        // чтобы уложить БЕЗ капа). needed>1.25 -> кап atempo сработал, текст пойдёт быстрее нормы.
+        let raw_dur = media::duration(&raw).unwrap_or(0.0);
+        let needed = if room > 0.05 { raw_dur / room } else { 1.0 };
+        fit_total += 1;
+        if needed > 1.25 {
+            fit_over_cap += 1;
+            let cap = if room < 1.5 { paths.max_stretch.max(1.30) } else { paths.max_stretch };
+            emit(progress, "mix", &format!(
+                "сегмент {fi}: нужно растянуть x{needed:.2} (слот {room:.2}с), кап x{cap:.2} — текст быстрее нормы"
+            ));
+        }
         let fit = fit_to_slot(&raw, room, &fitp, paths.max_stretch)?;
         cursor = at + media::duration(&fit)?;
         placed.push((at, fit));
@@ -731,6 +747,13 @@ fn build_dub(
                 fitp,
             ));
         }
+    }
+    // Итоговая доля «слишком быстрого текста» (#107): сколько сегментов не влезли в кап растяжения.
+    if fit_total > 0 {
+        let frac = 100.0 * fit_over_cap as f64 / fit_total as f64;
+        emit(progress, "mix", &format!(
+            "укладка: {fit_over_cap}/{fit_total} сегментов растянуты выше x1.25 ({frac:.0}%)"
+        ));
     }
 
     // ── QC: ASR-верификация синтеза (идея юзера: «фраза не транскрибируется в ожидаемый текст —
@@ -837,14 +860,23 @@ fn build_dub(
     emit(progress, "mix", "укладка дубляжа на таймлайн");
     let dub = wd.join("dub_vocals.wav");
     timeline(&placed, total, &dub)?;
+    // Речевые блоки для дакинга (#106) — из ФАКТИЧЕСКИ уложенных сегментов (onset + длит. fit-файла),
+    // а не сырых proj.segments: то, что реально легло в таймлайн (с учётом cursor-сдвига и atempo).
+    let mut speech_blocks = build_speech_blocks(&placed);
     // HARD-гарантия: дубляж не длиннее видео (tempo-fit всей дорожки, если переполз).
     let mut dub = dub;
     let dub_dur = media::duration(&dub)?;
     if dub_dur > total + 0.15 {
         let fit = wd.join("dub_fit.wav");
-        media::time_stretch(&dub, &fit, dub_dur / total)?;
-        emit(progress, "mix", &format!("tempo-fit всей дорожки x{:.2}", dub_dur / total));
+        let sf = dub_dur / total;
+        media::time_stretch(&dub, &fit, sf)?;
+        emit(progress, "mix", &format!("tempo-fit всей дорожки x{:.2}", sf));
         dub = fit;
+        // огибающая дакинга едет вместе с дорожкой: границы блоков делим на тот же фактор.
+        for b in &mut speech_blocks {
+            b.start /= sf;
+            b.end /= sf;
+        }
     }
 
     // 6) свести дорожку.
@@ -870,15 +902,18 @@ fn build_dub(
         media::mix(&dub, &bed, &new_audio)?;
         new_audio
     } else if let Some(inst) = instrumental {
-        // Сайдчейн-дакинг (проф. практика дубляжа): фон приседает ТОЛЬКО под фразами (компрессор по
-        // ключу-голосу), в паузах — ровно 1:1. Требование юзера: «дубляж громче фона, но фон не
-        // гробить» — статичный рез (-3/-7 дБ) убивал атмосферу, а без дакинга речь тонула (замер:
-        // фон -17.1 LUFS ≈ уровню голоса). Сбой фильтра -> честный fallback на прямой mix.
-        emit(progress, "mix", "сведение: инструментал + дубль-вокал (сайдчейн-дакинг под фразами)");
+        // Детерминированный дакинг (#106): фон приглушается −12 дБ по кусочно-линейной ОГИБАЮЩЕЙ,
+        // построенной из точных таймингов речевых блоков — компрессор (sidechaincompress) реагировал на
+        // мгновенную амплитуду TTS и давал «качели» на микропаузах внутри фраз. Требование юзера:
+        // «дубляж громче фона, но фон не гробить». Каскад фолбэков: огибающая -> sidechain -> прямой mix.
+        emit(progress, "mix", &format!("сведение: инструментал + дубль-вокал (дакинг-огибающая, {} блоков)", speech_blocks.len()));
         let new_audio = wd.join("new_audio.m4a");
-        if media::mix_ducked(&dub, &inst, &new_audio).is_err() {
-            emit(progress, "mix", "sidechain недоступен -> прямой mix");
-            media::mix(&dub, &inst, &new_audio)?;
+        if media::mix_env(&dub, &inst, &speech_blocks, &new_audio).is_err() {
+            emit(progress, "mix", "огибающая недоступна -> сайдчейн-дакинг");
+            if media::mix_ducked(&dub, &inst, &new_audio).is_err() {
+                emit(progress, "mix", "sidechain недоступен -> прямой mix");
+                media::mix(&dub, &inst, &new_audio)?;
+            }
         }
         new_audio
     } else {
@@ -1209,14 +1244,41 @@ fn build_speaker_refs(
     Ok((refs, texts, alts))
 }
 
+/// Пауза между речевыми блоками, короче которой блоки СЛИВАЮТСЯ (музыку в коротких паузах не поднимаем).
+const DUCK_BLOCK_GAP: f64 = 1.6;
+
+/// Слить уложенные сегменты в речевые блоки для дакинг-огибающей (#106). Границы — по ФАКТУ: onset +
+/// длительность fit-файла (то, что реально легло в таймлайн). Сортируем по onset, объединяем в один блок,
+/// если пауза между концом предыдущего и стартом следующего < DUCK_BLOCK_GAP. Сбой чтения длительности —
+/// пропускаем сегмент (лучше меньше блоков, чем падение микса).
+fn build_speech_blocks(placed: &[(f64, PathBuf)]) -> Vec<media::SpeechBlock> {
+    let mut spans: Vec<(f64, f64)> = placed
+        .iter()
+        .filter_map(|(at, p)| media::duration(p).ok().map(|d| (*at, at + d)))
+        .collect();
+    spans.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut blocks: Vec<media::SpeechBlock> = Vec::new();
+    for (s, e) in spans {
+        match blocks.last_mut() {
+            Some(b) if s - b.end < DUCK_BLOCK_GAP => b.end = b.end.max(e),
+            _ => blocks.push(media::SpeechBlock { start: s, end: e }),
+        }
+    }
+    blocks
+}
+
 /// Ускорить дубль под target_dur, если он длиннее (никогда не замедлять). Порт assemble.fit_to_slot.
+/// Кап растяжения — max_stretch, но на КОРОТКИХ слотах (<1.5с вставки) допускаем чуть больше (1.30): там
+/// экономия десятой доли секунды слышна как обрыв, а лёгкий пере-ускор незаметен.
 fn fit_to_slot(seg_wav: &Path, target_dur: f64, work_path: &Path, max_stretch: f64) -> Result<PathBuf, String> {
     let actual = media::duration(seg_wav)?;
     if target_dur <= 0.05 || actual <= 0.05 {
         return Ok(seg_wav.to_path_buf());
     }
+    // Короткий слот -> кап 1.30 (десятая доли секунды слышна как обрыв); иначе общий max_stretch (1.25).
+    let cap = if target_dur < 1.5 { max_stretch.max(1.30) } else { max_stretch };
     let mut factor = actual / target_dur;
-    factor = factor.min(max_stretch).max(1.0);
+    factor = factor.min(cap).max(1.0);
     if factor <= 1.02 {
         return Ok(seg_wav.to_path_buf());
     }

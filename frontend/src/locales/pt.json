@@ -375,6 +375,7 @@
     "audioNone": "Original (sem dublagem)",
     "audioDub": "Dublagem",
     "audioVoiceover": "Locução",
+    "origGain": "Original sob a tradução",
     "subsLabel": "Legendas",
     "subsNone": "Sem legendas",
     "subsOriginal": "Original",

@@ -252,6 +252,75 @@ pub fn mix_ducked(voice: &Path, music: &Path, out: &Path) -> Result<(), String> 
     ])
 }
 
+/// Речевой блок на таймлайне [start,end] — слитые по паузе <1.6с реплики дубляжа. Границы берутся из
+/// ФАКТИЧЕСКИ уложенных сегментов (onset + длительность fit-файла), а не из сырых proj.segments.
+#[derive(Clone, Copy, Debug)]
+pub struct SpeechBlock {
+    pub start: f64,
+    pub end: f64,
+}
+
+// Параметры детерминированной огибающей дакинга (проф.практика Premiere Auto-Ducking / Descript):
+const DUCK_GAIN: f64 = 0.25; // −12 дБ под речью
+const DUCK_PREROLL: f64 = 0.08; // fade-down стартует за 0.08с ДО блока
+const DUCK_FADE_DOWN: f64 = 0.10; // длина спуска
+const DUCK_HOLD: f64 = 0.30; // держим приглушение 0.30с ПОСЛЕ конца блока
+const DUCK_FADE_UP: f64 = 0.40; // длина подъёма
+
+/// Собрать выражение gain(t) для ffmpeg-фильтра `volume` из речевых блоков: 1.0 вне блоков, DUCK_GAIN
+/// внутри, линейные фейды на краях (down за DUCK_PREROLL до start, up через DUCK_HOLD после end).
+/// Детерминированно и с точными dB — компрессор (sidechaincompress) реагировал на мгновенную амплитуду
+/// TTS и давал «качели» на микропаузах; здесь огибающая задана таймингами, а не сигналом.
+/// Форма: gain(t) = 1 − (1−g)·Σ trap_i(t), где trap_i — трапеция блока i (clip(min(рампа-вниз,
+/// рампа-вверх),0,1)). Блоки разведены паузой ≥1.6с > preroll+fade+hold+fade — трапеции не пересекаются,
+/// сумма ≤ 1. Длина выражения O(N) по блокам (вложенные if давали O(2^N) — дубль prev в обеих ветках).
+fn duck_volume_expr(blocks: &[SpeechBlock]) -> String {
+    let g = DUCK_GAIN;
+    if blocks.is_empty() {
+        return "1".into();
+    }
+    // Трапеция блока: (t-ds)/fd растёт 0->1 на спуске, (ue-t)/fu убывает 1->0 на подъёме; между ними
+    // обе ≥1 -> clip даёт полку 1 (полное приглушение). Вне [ds,ue] одна из рамп ≤0 -> clip даёт 0.
+    let traps: Vec<String> = blocks
+        .iter()
+        .map(|b| {
+            let ds = (b.start - DUCK_PREROLL).max(0.0); // старт спуска
+            let us = b.end + DUCK_HOLD; // старт подъёма (после hold)
+            let ue = us + DUCK_FADE_UP; // конец подъёма = снова 1.0
+            format!(
+                "clip(min((t-{ds:.3})/{fd:.3},({ue:.3}-t)/{fu:.3}),0,1)",
+                fd = DUCK_FADE_DOWN,
+                fu = DUCK_FADE_UP
+            )
+        })
+        .collect();
+    format!("1-{d:.4}*({sum})", d = 1.0 - g, sum = traps.join("+"))
+}
+
+/// Сведение диалог+фон с ДЕТЕРМИНИРОВАННОЙ ОГИБАЮЩЕЙ дакинга (#106). Фон приглушается по кусочно-линейной
+/// огибающей громкости, построенной из ТОЧНЫХ таймингов речевых блоков (а не по мгновенной амплитуде
+/// TTS, как sidechaincompress — тот давал «качели» на микропаузах внутри фраз). volume с выражением от t
+/// (eval=frame). На длинных видео сотни блоков -> выражение большое: filtergraph пишем в файл через
+/// `-filter_complex_script` (лимит CreateProcess 32767, паттерн из dub-captions/burn.rs). Порядок как в
+/// mix: голос полным уровнем + фон по огибающей, amix normalize=0. Пусто блоков -> фон ровно 1.0.
+pub fn mix_env(voice: &Path, music: &Path, blocks: &[SpeechBlock], out: &Path) -> Result<(), String> {
+    let vol = duck_volume_expr(blocks);
+    let fc = format!(
+        "[0:a]aformat=channel_layouts=stereo[v];\
+         [1:a]aformat=channel_layouts=stereo,volume='{vol}':eval=frame[bg];\
+         [v][bg]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a]"
+    );
+    // Граф — в файл: выражение огибающей на сотнях блоков раздувает cmdline за лимит CreateProcess.
+    let script = out.with_extension("envfilter");
+    std::fs::write(&script, &fc).map_err(|e| format!("env filter-скрипт: {e}"))?;
+    run_ff(&[
+        OsStr::new("-y"), OsStr::new("-i"), voice.as_os_str(), OsStr::new("-i"), music.as_os_str(),
+        OsStr::new("-filter_complex_script"), script.as_os_str(),
+        OsStr::new("-map"), OsStr::new("[a]"),
+        OsStr::new("-c:a"), OsStr::new("aac"), OsStr::new("-b:a"), OsStr::new("192k"), out.as_os_str(),
+    ])
+}
+
 /// Финальная нормализация программы по EBU R128 (ffmpeg loudnorm): интегральная громкость к I LUFS
 /// + true-peak лимитер к TP dBTP. Решение юзера (best-practice, НЕ питон): ставится последним шагом на
 /// смиксованную дорожку — держит целевую громкость соцсетей и ловит пики (пофразного клэмпа поэтому нет).
@@ -360,4 +429,72 @@ pub fn segment_wav(src: &Path, out_dir: &Path, pattern: &str, win_sec: f64, sr: 
         OsStr::new("-max_muxing_queue_size"), OsStr::new("2048"),
         out_tpl.as_os_str(),
     ])
+}
+
+#[cfg(test)]
+mod env_tests {
+    use super::*;
+
+    /// Референс-огибающая: та же кусочно-линейная функция, что генерит duck_volume_expr, но на Rust —
+    /// проверяем ключевые точки (вне блока 1.0, в центре блока DUCK_GAIN, середины фейдов).
+    fn gain_at(t: f64, blocks: &[SpeechBlock]) -> f64 {
+        let g = DUCK_GAIN;
+        for b in blocks {
+            let ds = (b.start - DUCK_PREROLL).max(0.0);
+            let de = ds + DUCK_FADE_DOWN;
+            let us = b.end + DUCK_HOLD;
+            let ue = us + DUCK_FADE_UP;
+            if t >= ds && t < ue {
+                return if t < de {
+                    1.0 - (1.0 - g) * (t - ds) / DUCK_FADE_DOWN
+                } else if t < us {
+                    g
+                } else {
+                    g + (1.0 - g) * (t - us) / DUCK_FADE_UP
+                };
+            }
+        }
+        1.0
+    }
+
+    #[test]
+    fn envelope_key_points() {
+        let blocks = [SpeechBlock { start: 5.0, end: 8.0 }, SpeechBlock { start: 20.0, end: 22.0 }];
+        // вне любого блока -> 1.0
+        assert!((gain_at(0.0, &blocks) - 1.0).abs() < 1e-9);
+        assert!((gain_at(15.0, &blocks) - 1.0).abs() < 1e-9);
+        // центр блока -> полное приглушение
+        assert!((gain_at(6.5, &blocks) - DUCK_GAIN).abs() < 1e-9);
+        // до начала спуска (за preroll) ещё 1.0
+        assert!((gain_at(5.0 - DUCK_PREROLL - 0.01, &blocks) - 1.0).abs() < 1e-9);
+        // середина fade-down: между 1.0 и g
+        let mid_down = gain_at(5.0 - DUCK_PREROLL + DUCK_FADE_DOWN / 2.0, &blocks);
+        assert!(mid_down < 1.0 && mid_down > DUCK_GAIN);
+        // hold после конца блока ещё приглушено
+        assert!((gain_at(8.0 + DUCK_HOLD - 0.01, &blocks) - DUCK_GAIN).abs() < 1e-9);
+    }
+
+    #[test]
+    fn empty_blocks_is_flat_one() {
+        assert_eq!(duck_volume_expr(&[]), "1");
+    }
+
+    #[test]
+    fn expr_mentions_each_block_boundaries() {
+        let blocks = [SpeechBlock { start: 1.0, end: 2.0 }];
+        let e = duck_volume_expr(&blocks);
+        // спуск стартует за preroll (0.920), глубина 1-g (0.7500) присутствует
+        assert!(e.contains("0.920"), "{e}");
+        assert!(e.contains("0.7500"), "{e}");
+    }
+
+    #[test]
+    fn expr_length_linear_in_blocks() {
+        // Длина выражения растёт линейно по блокам (вложенные if давали O(2^N) и взрывали память).
+        let blocks: Vec<SpeechBlock> = (0..300)
+            .map(|i| SpeechBlock { start: i as f64 * 10.0, end: i as f64 * 10.0 + 5.0 })
+            .collect();
+        let e = duck_volume_expr(&blocks);
+        assert!(e.len() < 60 * 300 + 64, "len={}", e.len());
+    }
 }

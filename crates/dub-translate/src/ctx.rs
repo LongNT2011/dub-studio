@@ -110,6 +110,11 @@ pub fn run(
     let mut line_texts: Vec<String> = segs.iter().map(|s| s.text.trim().to_string()).collect();
     line_texts.extend(title_texts.iter().cloned());
 
+    // Бюджет символов на строку (#107): 14 симв/сек × длительность сегмента — мягкий лимит для укладки
+    // перевода в тайминг слота. У тайтлов длительности нет (None -> без лимита в промпте).
+    let mut budgets: Vec<Option<usize>> = segs.iter().map(|s| char_budget(s.end - s.start)).collect();
+    budgets.extend(std::iter::repeat(None).take(title_texts.len()));
+
     let mut ctx = String::new();
     if let Some(sc) = extra["scene_context"].as_str() {
         if !sc.is_empty() {
@@ -124,7 +129,7 @@ pub fn run(
 
     // Батч-перевод длинного скрипта (#82): чанки по бюджету + скользящий контекст + term-lock глоссарий.
     // Возвращает by_n = {глобальный_N -> перевод} — тот же контракт, что раньше давал единый вызов.
-    let by_n = translate_lines(llm, &line_texts, &tgt, rewrite, &ctx, &mut log)?;
+    let by_n = translate_lines(llm, &line_texts, &budgets, &tgt, rewrite, &ctx, &mut log)?;
 
     for (i, s) in segs.iter_mut().enumerate() {
         let t = by_n.get(&(i + 1)).cloned().unwrap_or_default();
@@ -181,11 +186,30 @@ fn chunk_bounds(line_texts: &[String]) -> Vec<(usize, usize)> {
     bounds
 }
 
+/// Плотность речи для бюджета длины (#107): ~14 символов/сек комфортной дикции. Бюджет строки =
+/// round(14 × длительность_сек); длительность ≤0 (нет таймингов) -> None (без лимита).
+const CHARS_PER_SEC: f64 = 14.0;
+pub(crate) fn char_budget(dur: f64) -> Option<usize> {
+    if dur > 0.0 {
+        Some((dur * CHARS_PER_SEC).round().max(1.0) as usize)
+    } else {
+        None
+    }
+}
+
+/// Вычистить маркер лимита «(≤NN)» (или «(<=NN)»), если модель протащила его в перевод. Только ведущий
+/// маркер + окружающие пробелы — цифры/скобки в самом переводе не трогаем.
+pub(crate) fn strip_budget_marker(s: &str) -> String {
+    let re = Regex::new(r"^\s*\((?:\u{2264}|<=)\s*\d+\)\s*").unwrap();
+    re.replace(s, "").into_owned()
+}
+
 /// Перевести все строки чанками со скользящим контекстом и глоссарием (term-lock).
 /// Ключи результата — ГЛОБАЛЬНЫЕ номера строк 1..line_texts.len() (как by_n у старого единого вызова).
 fn translate_lines(
     llm: &ChatClient,
     line_texts: &[String],
+    budgets: &[Option<usize>],
     tgt: &str,
     rewrite: Option<&str>,
     ctx: &str,
@@ -253,10 +277,15 @@ fn translate_lines(
             continue;
         }
         // локально-нумерованный блок 1..clen для этого чанка (маленькие номера надёжнее больших).
+        // После номера — мягкий лимит символов «(≤NN)» из бюджета строки (#107); у строк без бюджета
+        // (тайтлы) лимита нет. Лимит вычищается из ответа защитно (strip_budget_marker).
         let numbered = line_texts[start..end]
             .iter()
             .enumerate()
-            .map(|(k, t)| format!("{}. {}", k + 1, t))
+            .map(|(k, t)| match budgets.get(start + k).copied().flatten() {
+                Some(lim) => format!("{}. (\u{2264}{lim}) {t}", k + 1),
+                None => format!("{}. {t}", k + 1),
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -286,18 +315,23 @@ fn translate_lines(
         // TP — ДОСЛОВНО как в старом едином вызове (rewrite -> творческий; иначе точный перевод), плюс
         // суффикс глоссария и блок скользящего контекста. При одном чанке (короткий скрипт) блоки пусты =>
         // промпт совпадает со старым по формулировке.
+        // Мягкий бюджет длины (#107): если после номера в скобках стоит «(≤NN)» — уложиться в NN символов;
+        // при нехватке места убирать вводные слова и дубли, НЕ выдумывать факты. Скобку в ответ не писать.
+        let budget_rule = " After each number, a parenthesis like (\u{2264}45) gives a soft character limit for that \
+line — stay within it: if it doesn't fit, drop filler words and repetitions, keep the meaning, invent nothing. \
+Do NOT copy the (\u{2264}NN) marker into your output.";
         let tp = if let Some(instr) = rewrite {
             format!(
                 "You are a creative scriptwriter writing a BRAND-NEW voice-over script in {tgt} for this short video. \
 IGNORE the literal meaning of the source lines — they are ONLY a rhythm/length template. Write a completely NEW \
 script whose CONTENT follows this instruction: \"{instr}\". Every line must fit the instruction, NOT translate the \
-source. Keep the SAME number of lines and each line about the SAME LENGTH (it will be dubbed to fit the timing). \
+source. Keep the SAME number of lines and each line about the SAME LENGTH (it will be dubbed to fit the timing).{budget_rule} \
 Use the scene/audio context below for tone.{gloss_suffix}\n\n{ctx}{ctx_block}=== LINES (rhythm template) ===\n{numbered}\n\nOutput ONLY 'N. <line>' per line, nothing else."
             )
         } else {
             format!(
                 "Translate EACH numbered line into natural, spoken {tgt} for dubbing — keep the order and the \
-numbering, match tone/slang/intent. Use ALL the context below (what the words alone don't convey):{gloss_suffix}\n\n\
+numbering, match tone/slang/intent.{budget_rule} Use ALL the context below (what the words alone don't convey):{gloss_suffix}\n\n\
 {ctx}{ctx_block}=== LINES ===\n{numbered}\n\nOutput ONLY 'N. <translation>' per line, nothing else."
             )
         };
@@ -312,7 +346,8 @@ numbering, match tone/slang/intent. Use ALL the context below (what the words al
                 let mut local: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
                 for c in re.captures_iter(&raw) {
                     if let Ok(k) = c[1].parse::<usize>() {
-                        local.insert(k, term_lock(c[2].trim(), &gloss));
+                        // защита: модель могла протащить маркер лимита «(≤NN)» в перевод -> вычищаем.
+                        local.insert(k, term_lock(&strip_budget_marker(c[2].trim()), &gloss));
                     }
                 }
                 let mut got = 0usize;
@@ -528,6 +563,15 @@ mod tests {
         assert_eq!(replace_word("Sam and Sam", "Sam", "Сэм"), "Сэм and Сэм");
         // нет вхождений
         assert_eq!(replace_word("nothing", "Sam", "Сэм"), "nothing");
+    }
+
+    #[test]
+    fn char_budget_and_marker_strip() {
+        assert_eq!(char_budget(2.0), Some(28)); // 14 симв/сек × 2с
+        assert_eq!(char_budget(0.0), None);
+        assert_eq!(strip_budget_marker("(≤45) перевод"), "перевод");
+        assert_eq!(strip_budget_marker("(<=12)  x"), "x");
+        assert_eq!(strip_budget_marker("без маркера"), "без маркера");
     }
 
     #[test]

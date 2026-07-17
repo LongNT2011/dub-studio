@@ -114,7 +114,7 @@ impl Default for EngineOpts {
             burn_cq: 24,
             blur_sigma: 60,
             caption_fps: 4,
-            max_stretch: 2.0,
+            max_stretch: 1.25,
         }
     }
 }

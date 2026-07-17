@@ -47,7 +47,8 @@ fn parse_numbered(text: &str, n: usize) -> Vec<Option<String>> {
             let i: usize = c[1].parse().unwrap_or(0);
             let val = c[2].trim();
             if (1..=n).contains(&i) && !got.contains_key(&i) && !val.is_empty() {
-                // " ".join(m.group(2).split()) — схлопнуть пробелы.
+                // " ".join(m.group(2).split()) — схлопнуть пробелы; защитно снять маркер лимита «(≤NN)».
+                let val = strip_budget_marker(val);
                 got.insert(i, val.split_whitespace().collect::<Vec<_>>().join(" "));
             }
         }
@@ -55,26 +56,36 @@ fn parse_numbered(text: &str, n: usize) -> Vec<Option<String>> {
     (1..=n).map(|i| got.get(&i).cloned()).collect()
 }
 
-/// _translate_one — нативный однострочный вызов (надёжный фолбэк при рассинхроне батча).
+/// _translate_one — нативный однострочный вызов (надёжный фолбэк при рассинхроне батча). budget —
+/// мягкий лимит символов (#107): Some(N) добавляет в промпт требование уложиться в N; None — без лимита.
 fn translate_one(
     llm: &ChatClient,
     txt: &str,
     tgt_name: &str,
     extra: &str,
     gloss_str: &str,
+    budget: Option<usize>,
 ) -> Result<String, TranslateError> {
+    let lim = match budget {
+        Some(n) => format!(
+            " Keep it within {n} characters — if it doesn't fit, drop filler words and repetitions, \
+             keep the meaning, invent nothing."
+        ),
+        None => String::new(),
+    };
     let prompt = format!(
-        "Translate the following text into {tgt_name}.{extra}{gloss_str} Note that you should only \
+        "Translate the following text into {tgt_name}.{extra}{gloss_str}{lim} Note that you should only \
          output the translated result without any additional explanation:\n\n{txt}"
     );
     let s = Sampling::new(0.7, 0.6, 512).top_k(20).repeat_penalty(1.05);
     let out = strip_think(&llm.chat(&[Message::user_text(prompt)], &s)?);
-    Ok(out
-        .lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty())
-        .collect::<Vec<_>>()
-        .join(" "))
+    Ok(strip_budget_marker(
+        &out.lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join(" "),
+    ))
 }
 
 /// _glossary — собрать пары (имя_src -> имя_tgt) для повторяющихся собственных ИМЁН (заглавные +
@@ -153,14 +164,35 @@ fn nonempty_idxs_and_nspk(segs: &[Seg]) -> (Vec<usize>, usize) {
     (idxs, nspk)
 }
 
-/// Нумерованный блок "1. текст\n2. текст…" для чанка индексов (общий для run/rewrite).
+/// Нумерованный блок "1. текст\n2. текст…" для чанка индексов (общий для run/rewrite). С мягким лимитом
+/// длины (#107): после номера «(≤NN)» из бюджета символов сегмента (14 симв/сек × длит.), у сегментов без
+/// таймингов лимита нет. Лимит вычищается из ответа защитно (strip_budget_marker в parse_numbered).
 fn numbered_block(segs: &[Seg], chunk: &[usize]) -> String {
     chunk
         .iter()
         .enumerate()
-        .map(|(j, &gi)| format!("{}. {}", j + 1, segs[gi].text.trim()))
+        .map(|(j, &gi)| match char_budget(segs[gi].end - segs[gi].start) {
+            Some(lim) => format!("{}. (\u{2264}{lim}) {}", j + 1, segs[gi].text.trim()),
+            None => format!("{}. {}", j + 1, segs[gi].text.trim()),
+        })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Плотность речи для бюджета длины (#107): ~14 символов/сек. Бюджет = round(14 × длит.сек); ≤0 -> None.
+const CHARS_PER_SEC: f64 = 14.0;
+fn char_budget(dur: f64) -> Option<usize> {
+    if dur > 0.0 {
+        Some((dur * CHARS_PER_SEC).round().max(1.0) as usize)
+    } else {
+        None
+    }
+}
+
+/// Вычистить ведущий маркер лимита «(≤NN)»/«(<=NN)» из перевода (если модель его протащила).
+fn strip_budget_marker(s: &str) -> String {
+    let re = Regex::new(r"^\s*\((?:\u{2264}|<=)\s*\d+\)\s*").unwrap();
+    re.replace(s, "").into_owned()
 }
 
 /// run — перевод каждого seg.text -> seg.tgt через Gemma (плоский MT, порт _run_hunyuan).
@@ -199,9 +231,11 @@ pub fn run(
             "You are a professional subtitle translator localizing a SHORT video for DUBBING into {tgt_name}.\
              {dlg} Use the WHOLE numbered list as shared context so each line (even one word) is correct and \
              consistent. Preserve the MEANING, write natural SPOKEN {tgt_name}, and keep each line about the \
-             SAME LENGTH as its source so it fits the dub timing.{extra}{gloss_str} Reply with ONLY the \
-             numbered {tgt_name} translations (1., 2., 3., …), one per line, nothing else — no reasoning, no \
-             English, no notes."
+             SAME LENGTH as its source so it fits the dub timing. After each number, a parenthesis like \
+             (\u{2264}45) gives a soft character limit for that line — stay within it: if it doesn't fit, drop \
+             filler words and repetitions, keep the meaning, invent nothing. Do NOT copy the (\u{2264}NN) marker \
+             into your output.{extra}{gloss_str} Reply with ONLY the numbered {tgt_name} translations \
+             (1., 2., 3., …), one per line, nothing else — no reasoning, no English, no notes."
         );
         let max_tokens = (96 + 48 * chunk.len()).min(4096) as u32;
         let s = Sampling::new(0.3, 0.9, max_tokens).top_k(20).repeat_penalty(1.05);
@@ -215,7 +249,8 @@ pub fn run(
             // нумерация уплыла -> надёжный per-line режим для этого чанка.
             for &gi in chunk {
                 let txt = segs[gi].text.trim().to_string();
-                segs[gi].tgt = translate_one(llm, &txt, &tgt_name, extra, &gloss_str)?;
+                let budget = char_budget(segs[gi].end - segs[gi].start);
+                segs[gi].tgt = translate_one(llm, &txt, &tgt_name, extra, &gloss_str, budget)?;
             }
         }
         c0 += CHUNK;
@@ -266,8 +301,10 @@ pub fn rewrite(
              IGNORE the literal meaning of the source lines — they are ONLY a rhythm/length template. Write a completely \
              NEW script whose CONTENT follows this instruction: \"{instruction}\". Every line must fit the instruction, \
              NOT translate the source. Keep the SAME number of lines and make each new line roughly the SAME LENGTH as \
-             its source line so it fits the dub timing.{extra} Output natural spoken {tgt_name}. Reply with ONLY the \
-             numbered {tgt_name} lines (1., 2., 3., …), nothing else — no notes, no source text."
+             its source line so it fits the dub timing. After each number, a parenthesis like (\u{2264}45) gives a soft \
+             character limit for that line — stay within it, invent nothing, and do NOT copy the (\u{2264}NN) marker into \
+             your output.{extra} Output natural spoken {tgt_name}. Reply with ONLY the numbered {tgt_name} lines \
+             (1., 2., 3., …), nothing else — no notes, no source text."
         );
         let max_tokens = (128 + 64 * chunk.len()).min(4096) as u32;
         let s = Sampling::new(0.85, 0.95, max_tokens).top_k(40).repeat_penalty(1.05);
@@ -279,7 +316,8 @@ pub fn rewrite(
                 segs[gi].tgt = p.clone();
             } else {
                 // пропущенная/сбитая строка -> перевести её (не озвучивать сырой исходник).
-                let one = translate_one(llm, &src_line, &tgt_name, extra, "")?;
+                let budget = char_budget(segs[gi].end - segs[gi].start);
+                let one = translate_one(llm, &src_line, &tgt_name, extra, "", budget)?;
                 segs[gi].tgt = if one.is_empty() { src_line } else { one };
             }
         }
@@ -321,5 +359,44 @@ mod tests {
         assert!(has_cjk("こんにちは"));
         assert!(has_cjk("中文"));
         assert!(!has_cjk("Hello"));
+    }
+
+    #[test]
+    fn char_budget_from_duration() {
+        assert_eq!(char_budget(3.0), Some(42)); // 14 симв/сек × 3с
+        assert_eq!(char_budget(0.0), None); // нет таймингов -> без лимита
+        assert_eq!(char_budget(-1.0), None);
+        assert_eq!(char_budget(0.01), Some(1)); // минимум 1
+    }
+
+    #[test]
+    fn strip_leading_budget_marker() {
+        assert_eq!(strip_budget_marker("(≤45) Привет"), "Привет");
+        assert_eq!(strip_budget_marker("(<=30)  Текст"), "Текст");
+        assert_eq!(strip_budget_marker("Обычный текст"), "Обычный текст");
+        // цифры/скобки внутри перевода не трогаем
+        assert_eq!(strip_budget_marker("В 2024 (год) было"), "В 2024 (год) было");
+    }
+
+    #[test]
+    fn numbered_block_has_budget_when_timed() {
+        let mut s = Seg::new("hello world", 0);
+        s.start = 0.0;
+        s.end = 3.0; // -> (≤42)
+        let segs = vec![s];
+        let block = numbered_block(&segs, &[0]);
+        assert!(block.starts_with("1. (≤42) hello world"), "{block}");
+        // без таймингов -> без лимита
+        let s0 = Seg::new("no timing", 0);
+        let b0 = numbered_block(&[s0], &[0]);
+        assert_eq!(b0, "1. no timing");
+    }
+
+    #[test]
+    fn parse_numbered_strips_budget_marker() {
+        // если модель протащила «(≤NN)» в ответ — вычищаем.
+        let p = parse_numbered("1. (≤20) Привет\n2. Мир", 2);
+        assert_eq!(p[0].as_deref(), Some("Привет"));
+        assert_eq!(p[1].as_deref(), Some("Мир"));
     }
 }

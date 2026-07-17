@@ -375,6 +375,7 @@
     "audioNone": "Original (sans doublage)",
     "audioDub": "Doublage",
     "audioVoiceover": "Voix off",
+    "origGain": "Original sous la traduction",
     "subsLabel": "Sous-titres",
     "subsNone": "Sans sous-titres",
     "subsOriginal": "Original",
