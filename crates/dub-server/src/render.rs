@@ -63,6 +63,7 @@ pub struct RenderPaths {
     pub max_stretch: f64,
     pub voices_dir: PathBuf,   // каталог голосов-паков + записей с микрофона
     pub asr: crate::models::AsrChoice, // выбранный ASR-движок — авто-транскрипция реф-клипа (ref_text клона)
+    pub bench: bool,           // пер-стадийный бенчмарк (галка настроек, ВЫКЛ по умолчанию)
     pub ref_secs: f64,         // длина реф-клипа клона голоса, сек (настройка «Экономия RAM», дефолт 12.0)
 }
 
@@ -88,8 +89,8 @@ pub fn run(
     dub_captions::set_fonts_dir(&paths.fonts_dir);
     let wd = &paths.work_dir;
     std::fs::create_dir_all(wd).map_err(|e| e.to_string())?;
-    // Бенчмаркинг рендера: probe / dub_audio (сепарация+TTS+микс) / burn / mux -> bench.json.
-    let mut bench = crate::bench::Bench::start(wd, "render");
+    // Бенчмаркинг рендера (галка настроек, ВЫКЛ по умолчанию): probe / dub_audio / burn / mux -> bench.json.
+    let mut bench = crate::bench::Bench::start(wd, "render", paths.bench);
     bench.stage("probe");
 
     // probe: длительность/размеры.

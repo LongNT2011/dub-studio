@@ -984,6 +984,7 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
     eprintln!("[models] render: TTS={} (q={}) · SEP={}", higgs_model_root.display(), higgs_quant, sep_model.display());
     let paths = render::RenderPaths {
         input,
+        bench: models::bench_enabled(&st.models_root),
         work_dir: dir.clone(),
         output: output.clone(),
         bsroformer_cli: st.bsroformer_cli.clone(),
@@ -1092,6 +1093,7 @@ async fn export_lang(
     let output = dst_dir.join("output.mp4");
     let paths = render::RenderPaths {
         input,
+        bench: models::bench_enabled(&st.models_root),
         work_dir: dst_dir.clone(),
         output: output.clone(),
         bsroformer_cli: st.bsroformer_cli.clone(),
@@ -1187,6 +1189,7 @@ async fn dub_audio_project(State(st): State<AppState>, AxPath(pid): AxPath<Strin
     let (higgs_model_root, higgs_quant) = models::resolve_tts(&st.models_root, &sel);
     let paths = render::RenderPaths {
         input,
+        bench: models::bench_enabled(&st.models_root),
         work_dir: dir.clone(),
         output: dir.join("output.mp4"),
         bsroformer_cli: st.bsroformer_cli.clone(),

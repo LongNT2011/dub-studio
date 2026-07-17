@@ -20,6 +20,7 @@ struct Sample {
 }
 
 pub struct Bench {
+    enabled: bool, // галка настроек (active.json "bench"); ВЫКЛ по умолчанию -> все методы no-op
     label: String, // "analyze" | "render"
     dir: PathBuf,
     t0: Instant,
@@ -31,11 +32,25 @@ pub struct Bench {
 }
 
 impl Bench {
-    /// Запустить бенч + фоновый семплер ресурсов.
-    pub fn start(dir: &Path, label: &str) -> Self {
+    /// Запустить бенч + фоновый семплер ресурсов. `enabled=false` (дефолт настроек) — пустышка:
+    /// ни фонового потока, ни bench.json, ни ⏱-строк в журнале.
+    pub fn start(dir: &Path, label: &str, enabled: bool) -> Self {
         let cur = Arc::new(Mutex::new(String::from("init")));
         let stop = Arc::new(AtomicBool::new(false));
         let samples = Arc::new(Mutex::new(Vec::new()));
+        if !enabled {
+            return Bench {
+                enabled: false,
+                label: label.into(),
+                dir: dir.to_path_buf(),
+                t0: Instant::now(),
+                cur,
+                marks: Vec::new(),
+                stop,
+                samples,
+                handle: None,
+            };
+        }
         let (c2, s2, sm2) = (cur.clone(), stop.clone(), samples.clone());
         let handle = std::thread::spawn(move || {
             let mut sys = sysinfo::System::new();
@@ -60,6 +75,7 @@ impl Bench {
             }
         });
         Bench {
+            enabled: true,
             label: label.into(),
             dir: dir.to_path_buf(),
             t0: Instant::now(),
@@ -74,6 +90,9 @@ impl Bench {
     /// Отметить начало новой стадии (закрывает предыдущую по времени).
     #[allow(dead_code)]
     pub fn stage(&mut self, name: &str) {
+        if !self.enabled {
+            return;
+        }
         let el = self.t0.elapsed().as_secs_f64();
         self.marks.push((name.to_string(), el));
         *self.cur.lock().unwrap() = name.to_string();
@@ -81,6 +100,9 @@ impl Bench {
 
     /// Остановить семплер, агрегировать по стадиям, дописать bench.json, эмитить строки через `emit_line`.
     pub fn finish(mut self, emit_line: impl Fn(&str)) {
+        if !self.enabled {
+            return;
+        }
         let total = self.t0.elapsed().as_secs_f64();
         self.marks.push(("__end__".into(), total));
         self.stop.store(true, Ordering::Relaxed);

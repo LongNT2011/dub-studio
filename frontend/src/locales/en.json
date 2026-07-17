@@ -273,7 +273,9 @@
     "higgsRef": "Voice-clone reference length",
     "higgsRefHint": "Shorter = less TTS RAM (helps 32 GB)",
     "auto": "Auto",
-    "sec": "s"
+    "sec": "s",
+    "bench": "Stage benchmark",
+    "benchHint": "Measure time/GPU/VRAM per pipeline stage -> bench.json + ⏱ lines in the log. Light background sampling once per second."
   },
   "help": {
     "title": "About Dub Studio",

@@ -243,7 +243,9 @@
     "higgsRef": "Durée de référence du clone",
     "higgsRefHint": "Plus courte = moins de RAM TTS (aide sur 32 Go)",
     "auto": "Auto",
-    "sec": "s"
+    "sec": "s",
+    "bench": "Benchmark des étapes",
+    "benchHint": "Mesure temps/GPU/VRAM par étape -> bench.json + lignes ⏱ dans le journal. Échantillonnage léger en arrière-plan chaque seconde."
   },
   "help": {
     "title": "À propos de Dub Studio",

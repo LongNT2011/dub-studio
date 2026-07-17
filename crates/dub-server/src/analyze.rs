@@ -420,8 +420,8 @@ impl WindowPlan {
 pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Result<Project, String> {
     // 0) кэш стадий (#80). Отсутствие/битый cache.json → пустой кэш (честный пересчёт).
     let mut cache = StageCache::load(&paths.work_dir);
-    // Бенчмаркинг: фоновый семплер GPU/CPU/VRAM по стадиям -> workspace/<pid>/bench.json.
-    let mut bench = crate::bench::Bench::start(&paths.work_dir, "analyze");
+    // Бенчмаркинг (галка в настройках, ВЫКЛ по умолчанию): семплер GPU/CPU/VRAM -> bench.json + ⏱ в журнал.
+    let mut bench = crate::bench::Bench::start(&paths.work_dir, "analyze", crate::models::bench_enabled(&paths.models_root));
     bench.stage("probe");
 
     // 1) probe (метаданные видео).
