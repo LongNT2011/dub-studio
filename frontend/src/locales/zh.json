@@ -303,6 +303,21 @@
     "play": "播放",
     "pause": "暂停"
   },
+  "hotkeys": {
+    "title": "键盘快捷键",
+    "hint": "按 ? 打开列表",
+    "playPause": "播放 / 暂停",
+    "seek5": "快退 / 快进 5 秒",
+    "seek1": "微调 ±1 秒",
+    "seek10": "大步 ±10 秒",
+    "homeEnd": "跳到开头 / 结尾",
+    "volume": "预览音量 ±5%",
+    "fsPreview": "预览全屏",
+    "fsWindow": "窗口全屏",
+    "wheelSeek": "Ctrl + 滚轮 — 拖动进度",
+    "help": "显示此帮助",
+    "esc": "关闭 / 退出全屏"
+  },
   "setup": {
     "title": "First run",
     "subtitle": "Dub Studio needs a few components before the first dub. Pick what to download — it runs in the background.",

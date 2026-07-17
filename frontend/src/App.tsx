@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
-import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine, ChevronDown, ScrollText, Clock } from "lucide-react";
+import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine, ChevronDown, ScrollText, Clock, Keyboard } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useFloatable, dockSlot } from "./lib/useFloatable";
 import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent, type ProjectSummary } from "./lib/api";
@@ -17,6 +17,10 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 function fmtT(s: number) {
   const m = Math.floor(s / 60), sec = Math.floor(s % 60), d = Math.floor((s * 10) % 10);
   return `${m}:${String(sec).padStart(2, "0")}.${d}`;
+}
+// timecode m:ss — компактный вид для слайдера перемотки и транскрипта
+function fmtMS(s: number) {
+  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 }
 
 // Имя файла из пути (Windows/POSIX-разделители); fallback — сам путь.
@@ -1055,6 +1059,142 @@ function CommandPalette({ commands }: { commands: { label: string; run: () => vo
   );
 }
 
+// Фокус в поле ввода -> хоткеи не перехватываем (образец гарда — как в undo/redo). Плюс сюда попадает
+// contentEditable (например, комбобоксы). Общий для всех медиа-биндов.
+function inTextField(e: KeyboardEvent): boolean {
+  const el = e.target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+}
+
+// Запросить фулскрин для элемента через БРАУЗЕРНЫЙ Fullscreen API (НЕ @tauri-apps/api: фронт грузится с
+// внешнего http://127.0.0.1 — JS-IPC ненадёжен). Esc выходит нативно. Тумблер: если уже фулскрин — выйти.
+function toggleElemFullscreen(el: Element | null) {
+  if (!el) return;
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else (el as HTMLElement).requestFullscreen?.().catch(() => {});
+}
+
+// Единый набор медиа-хоткеев для превью (Editor + TranscriptView). Space/K — плей/пауза; ←/→ ±5с,
+// Shift ±1с, Ctrl ±10с; Home/End; ↑/↓ громкость (если задан setVol); F — фулскрин области превью;
+// F10 — фулскрин окна; ? — шпаргалка. Ctrl+колесо над превью — перемотка ~1с/тик (passive:false +
+// preventDefault, иначе WebView2 зумит). Гард: не перехватываем в полях ввода и при открытой модалке.
+function useMediaHotkeys(opts: {
+  enabled: boolean;
+  duration: number;
+  scrubRef: React.MutableRefObject<number>;
+  seek: (t: number) => void;
+  togglePlay: () => void;
+  previewRef: React.RefObject<HTMLElement | null>;
+  setHelp: (v: boolean) => void;
+  blocked?: () => boolean;   // напр. открыт CommandPalette/модалка -> не перехватывать
+  vol?: number;
+  setVol?: (v: number) => void;
+}) {
+  const { enabled, duration, scrubRef, seek, togglePlay, previewRef, setHelp, blocked, vol, setVol } = opts;
+  useEffect(() => {
+    if (!enabled) return;
+    const clamp = (t: number) => Math.max(0, Math.min(duration || 0, t));
+    const onKey = (e: KeyboardEvent) => {
+      if (inTextField(e) || e.altKey || e.metaKey) return;
+      // Ctrl пропускаем ТОЛЬКО для ←/→ (перемотка ±10с). Иначе Ctrl+K/Ctrl+Z (палитра/undo) остаются за своими хендлерами.
+      if (e.ctrlKey && e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (blocked?.()) return;
+      const cur = scrubRef.current;
+      // Space на сфокусированной кнопке/ссылке — это её нативная активация, свой хоткей тут не навешиваем
+      // (иначе двойной тогл). K работает всегда.
+      const onButton = (() => { const a = document.activeElement as HTMLElement | null; return !!a && (a.tagName === "BUTTON" || a.tagName === "A" || a.getAttribute("role") === "button"); })();
+      switch (e.key) {
+        case " ":
+          if (onButton) return;
+          e.preventDefault(); togglePlay(); break;
+        case "k": case "K":
+          e.preventDefault(); togglePlay(); break;
+        case "ArrowRight":
+          e.preventDefault(); seek(clamp(cur + (e.shiftKey ? 1 : e.ctrlKey ? 10 : 5))); break;
+        case "ArrowLeft":
+          e.preventDefault(); seek(clamp(cur - (e.shiftKey ? 1 : e.ctrlKey ? 10 : 5))); break;
+        case "Home":
+          e.preventDefault(); seek(0); break;
+        case "End":
+          e.preventDefault(); seek(clamp(duration)); break;
+        case "ArrowUp":
+          if (setVol) { e.preventDefault(); setVol(Math.min(1, (vol ?? 1) + 0.05)); } break;
+        case "ArrowDown":
+          if (setVol) { e.preventDefault(); setVol(Math.max(0, (vol ?? 1) - 0.05)); } break;
+        case "f": case "F":
+          e.preventDefault(); toggleElemFullscreen(previewRef.current); break;
+        case "F10":
+          e.preventDefault();
+          if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+          else document.documentElement.requestFullscreen?.().catch(() => {});
+          break;
+        case "?":
+          e.preventDefault(); setHelp(true); break;
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [enabled, duration, seek, togglePlay, previewRef, setHelp, blocked, vol, setVol, scrubRef]);
+
+  // Ctrl+колесо над контейнером превью -> перемотка (шаг ~1с/тик). passive:false обязателен для preventDefault.
+  useEffect(() => {
+    if (!enabled) return;
+    const el = previewRef.current; if (!el) return;
+    const clamp = (t: number) => Math.max(0, Math.min(duration || 0, t));
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;                 // обычное колесо не трогаем (пусть скроллит)
+      e.preventDefault();                     // иначе WebView2 зумит страницу
+      seek(clamp(scrubRef.current + (e.deltaY > 0 ? 1 : -1)));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [enabled, duration, seek, previewRef, scrubRef]);
+}
+
+// Оверлей-шпаргалка горячих клавиш (стиль CommandPalette: glass-scrim/glass-panel). Таблица «клавиша —
+// действие» из i18n. Esc/клик мимо закрывает. Открывается по ? и из палитры команд.
+function ShortcutsHelp({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", h); return () => window.removeEventListener("keydown", h);
+  }, [onClose]);
+  const rows: [string, string][] = [
+    ["Space · K", t("hotkeys.playPause")],
+    ["← / →", t("hotkeys.seek5")],
+    ["Shift + ← / →", t("hotkeys.seek1")],
+    ["Ctrl + ← / →", t("hotkeys.seek10")],
+    ["Home · End", t("hotkeys.homeEnd")],
+    ["↑ / ↓", t("hotkeys.volume")],
+    ["F", t("hotkeys.fsPreview")],
+    ["F10", t("hotkeys.fsWindow")],
+    ["Ctrl + " + "\u{1F5B1}", t("hotkeys.wheelSeek")],
+    ["?", t("hotkeys.help")],
+    ["Esc", t("hotkeys.esc")],
+  ];
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center glass-scrim anim-fade" onClick={onClose}>
+      <div className="w-[min(92vw,480px)] rounded-xl glass-panel anim-pop overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 px-4 py-3 border-b border-[var(--color-border)]">
+          <Keyboard size={16} className="text-[var(--color-accent)]" />
+          <span className="text-[14px] font-semibold">{t("hotkeys.title")}</span>
+          <button onClick={onClose} className="ml-auto text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={16} /></button>
+        </div>
+        <div className="p-2">
+          {rows.map(([key, act]) => (
+            <div key={key} className="flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-[var(--color-surface-2)] transition-colors">
+              <span className="text-[13px] text-[var(--color-text)]">{act}</span>
+              <kbd className="mono text-[11px] px-2 py-0.5 rounded bg-[var(--color-surface-2)] border border-[var(--color-border)] text-[var(--color-muted)] shrink-0 ml-4">{key}</kbd>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Textarea фразы с АВТО-высотой под объём текста (реквест юзера: фикс-2-строки обрезали длинные
 // переводы, работать неудобно). height=scrollHeight на каждом изменении значения и на маунте.
 function AutoGrowTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
@@ -1141,6 +1281,9 @@ function Editor() {
   const [blurAll, setBlurAll] = useState(false);                      // blur: only active-on-frame vs all zones
   const [compare, setCompare] = useState(false);                      // before/after split preview (Topaz-style)
   const [play, setPlay] = useState(false);                            // dub playback: play TTS audio + advance preview frames + playhead
+  const [showHelp, setShowHelp] = useState(false);                    // оверлей-шпаргалка хоткеев (?)
+  const previewRef = useRef<HTMLDivElement>(null);                    // контейнер превью -> фулскрин по F + Ctrl-колесо
+  const scrubRef = useRef(0);                                         // свежий scrub без stale-замыкания в хоткеях
   const audioRef = useRef<HTMLAudioElement>(null);
   const [vol, setVol] = useState<number>(() => { const s = localStorage.getItem("dub-vol"); return s ? parseFloat(s) : 1; });
   const playEndRef = useRef<number>(Infinity);                        // stop time for single-phrase playback (Infinity = full)
@@ -1289,6 +1432,15 @@ function Editor() {
     playEndRef.current = seg.end; a.currentTime = seg.start; setScrub(seg.start); setRendered(false);
     if (play) a.play().catch(() => {}); else setPlay(true);
   }
+  // единый seek: скраб вейформы/слайдера + позиция dub-аудио (используется хоткеями, слайдером и вейформой)
+  function onSeek(tt: number) { setRendered(false); setScrub(tt); if (audioRef.current) audioRef.current.currentTime = tt; }
+  useEffect(() => { scrubRef.current = scrub; }, [scrub]);   // свежий scrub для хоткеев (без stale-замыкания)
+  const setVolK = (v: number) => { setVol(v); if (audioRef.current) audioRef.current.volume = v; localStorage.setItem("dub-vol", String(v)); };
+  useMediaHotkeys({
+    enabled: true, duration: p.meta.duration || 0, scrubRef, seek: onSeek,
+    togglePlay: playFull, previewRef, setHelp: setShowHelp, vol, setVol: setVolK,
+    blocked: () => document.querySelector(".glass-scrim") != null,   // открыта палитра/модалка -> не перехватывать
+  });
   async function doUndo() { const prev = undo(); if (prev) { setSelBlur(null); setSelTitle(null); setRendered(false); await api.putProject(pid, prev); bump(); } }
   async function doRedo() { const next = redo(); if (next) { setSelBlur(null); setSelTitle(null); setRendered(false); await api.putProject(pid, next); bump(); } }
   useEffect(() => {                                                  // Cmd/Ctrl+Z / Shift+Z / Y (not while typing in a field)
@@ -1349,6 +1501,7 @@ function Editor() {
     { label: t("common.undo"), run: () => doUndo() },
     { label: t("common.redo"), run: () => doRedo() },
     { label: t("compare.toggle"), run: () => setCompare((c) => !c) },
+    { label: t("hotkeys.title"), run: () => setShowHelp(true) },
     ...Object.keys(presets).map((n) => ({ label: `${t("preset.title")}: ${n}`, run: () => branch("preset", { name: n }) })),
   ];
   const activeRef = useRef<HTMLDivElement>(null);
@@ -1698,7 +1851,8 @@ function Editor() {
             )}
           </div>, s) : null; })()}
         </div>
-        <div className="flex-1 min-h-0 p-3 overflow-hidden">
+        <div ref={previewRef} className="fs-preview flex-1 min-h-0 p-3 overflow-hidden flex flex-col gap-2">
+          <div className="flex-1 min-h-0">
           {audioOnly ? (
             <div className="w-full h-full grid place-items-center rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)]">
               <div className="text-center px-6">
@@ -1715,6 +1869,16 @@ function Editor() {
           ) : (
             <PreviewCanvas pid={pid} project={p} scrub={scrub} rendered={rendered} lane={lane} playing={play}
               onChanged={(fresh) => setProject(fresh)} />
+          )}
+          </div>
+          {/* Слайдер перемотки под превью: явный прогресс + время. Клик/драг = seek (единый скраб с вейформой). */}
+          {!audioOnly && (
+            <div className="shrink-0 flex items-center gap-2.5">
+              <input type="range" min={0} max={Math.max(0.1, p.meta.duration || 0)} step={0.05} value={Math.min(scrub, p.meta.duration || 0)}
+                onChange={(e) => onSeek(parseFloat(e.target.value))}
+                className="flex-1 h-1 accent-[var(--color-accent)] cursor-pointer" />
+              <span className="mono text-[10px] tabnum text-[var(--color-muted)] shrink-0"><span className="text-[var(--color-accent)]">{fmtMS(scrub)}</span> / {fmtMS(p.meta.duration || 0)}</span>
+            </div>
           )}
         </div>
         <div className="flex items-center gap-3 px-4 py-2.5 border-t border-[var(--color-border)] bg-[var(--color-surface)]">
@@ -1737,7 +1901,7 @@ function Editor() {
           <div className="flex-1 min-w-0">
             <WaveformTimeline pid={pid} duration={p.meta.duration || 0} scrub={scrub} segments={p.segments}
               gainDb={gainDraft ?? p.audio.gain_db ?? 0}
-              onSeek={(t) => { setRendered(false); setScrub(t); if (audioRef.current) audioRef.current.currentTime = t; }} />
+              onSeek={onSeek} />
           </div>
         </div>
       </main>
@@ -1935,6 +2099,7 @@ function Editor() {
 
       </aside>
       <CommandPalette commands={cmds} />
+      {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
     </div>
   );
 }
@@ -2692,11 +2857,15 @@ function TranscriptView() {
   const { t } = useTranslation();
   const p = useStore((s) => s.project) as Project;
   const pid = useStore((s) => s.pid) as string;
+  const setStage = useStore((s) => s.setStage);                     // выход на главный экран (кнопка «Назад»)
   const [busy, setBusy] = useState<string | null>(null);            // спикер в работе, либо "__all__"
   const [made, setMade] = useState<Record<string, string>>({});     // спикер -> имя созданного голоса
   const [scrub, setScrub] = useState(() => initialScrub() || 0);      // ?t=SEC — deep-link на кадр транскрипта
   const [play, setPlay] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);                  // оверлей-шпаргалка хоткеев (?)
   const videoRef = useRef<HTMLVideoElement>(null);
+  const previewRef = useRef<HTMLDivElement>(null);                  // контейнер <video> -> фулскрин по F + Ctrl-колесо
+  const scrubRef = useRef(0);                                       // свежий scrub без stale-замыкания в хоткеях
   // Плей: <video> тянет /dub — для транскрипта (nodub) это ОРИГИНАЛ (видео+аудио). Скраб следует за
   // currentTime -> активная строка + караоке-подсветка слова. Один элемент = и картинка, и звук.
   useEffect(() => {
@@ -2707,6 +2876,12 @@ function TranscriptView() {
     return () => window.clearInterval(id);
   }, [play]);
   const seek = (tt: number) => { setScrub(tt); if (videoRef.current) videoRef.current.currentTime = tt; };
+  useEffect(() => { scrubRef.current = scrub; }, [scrub]);          // свежий scrub для хоткеев
+  useMediaHotkeys({                                                 // громкости нет -> ↑/↓ пропущены (setVol не задан)
+    enabled: true, duration: p.meta.duration || 0, scrubRef, seek,
+    togglePlay: () => setPlay((x) => !x), previewRef, setHelp: setShowHelp,
+    blocked: () => document.querySelector(".glass-scrim") != null,
+  });
   // пословные тайминги ASR (лежат в extra.words) — для караоке внутри активной фразы
   const wordsOf = (s: Project["segments"][number]) =>
     (((s as unknown as { extra?: { words?: Array<{ word: string; start: number; end: number }> } }).extra?.words) || []);
@@ -2754,11 +2929,14 @@ function TranscriptView() {
     <main className="flex-1 min-h-0 overflow-hidden grid grid-cols-[1.4fr_1fr] gap-3 p-3">
       <div className="min-h-0 flex flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="px-3 py-2 flex items-center justify-between border-b border-[var(--color-border)]">
-          <span className="text-[13px] font-medium flex items-center gap-2 min-w-0"><FileText size={15} className="text-[var(--color-accent)] shrink-0" /><span className="truncate">{p.meta.video ? baseName(p.meta.video) : t("transcribe.title")}</span></span>
+          <span className="text-[13px] font-medium flex items-center gap-2 min-w-0">
+            <button onClick={() => setStage("empty")} title={t("batch.back")} className="shrink-0 text-[var(--color-muted)] hover:text-[var(--color-text)] inline-flex items-center gap-1"><ArrowRight size={14} className="rotate-180" /><span className="hidden sm:inline text-[12px]">{t("batch.back")}</span></button>
+            <FileText size={15} className="text-[var(--color-accent)] shrink-0" /><span className="truncate">{p.meta.video ? baseName(p.meta.video) : t("transcribe.title")}</span>
+          </span>
           <span className="text-[11px] text-[var(--color-muted)] shrink-0">{speakers.length} {t("transcribe.speakersN")}</span>
         </div>
         <div className="px-3 pt-2 space-y-2">
-          <div className="relative rounded-lg overflow-hidden bg-black/50 border border-[var(--color-border)] grid place-items-center max-h-[34vh]">
+          <div ref={previewRef} className="fs-preview relative rounded-lg overflow-hidden bg-black/50 border border-[var(--color-border)] grid place-items-center max-h-[34vh]">
             <video ref={videoRef} src={api.dubUrl(pid)} playsInline preload="auto"
               onEnded={() => setPlay(false)} onClick={() => setPlay((x) => !x)}
               className="max-h-[34vh] max-w-full cursor-pointer" />
@@ -2825,6 +3003,7 @@ function TranscriptView() {
           <button onClick={exportTxt} className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#37414d] text-[12px] hover:border-[var(--color-accent)]"><FileText size={13} />{t("transcribe.exportTxt")}</button>
         </div>
       </div>
+      {showHelp && <ShortcutsHelp onClose={() => setShowHelp(false)} />}
     </main>
   );
 }

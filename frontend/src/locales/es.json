@@ -303,6 +303,21 @@
     "play": "Reproducir",
     "pause": "Pausa"
   },
+  "hotkeys": {
+    "title": "Atajos de teclado",
+    "hint": "Pulsa ? para abrir la lista",
+    "playPause": "Reproducir / pausar",
+    "seek5": "Retroceder / avanzar 5 s",
+    "seek1": "Paso fino ±1 s",
+    "seek10": "Paso grande ±10 s",
+    "homeEnd": "Ir al inicio / al final",
+    "volume": "Volumen de vista previa ±5%",
+    "fsPreview": "Vista previa a pantalla completa",
+    "fsWindow": "Ventana a pantalla completa",
+    "wheelSeek": "Ctrl + rueda — desplazar",
+    "help": "Mostrar esta ayuda",
+    "esc": "Cerrar / salir de pantalla completa"
+  },
   "setup": {
     "title": "First run",
     "subtitle": "Dub Studio needs a few components before the first dub. Pick what to download — it runs in the background.",
