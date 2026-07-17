@@ -4,7 +4,7 @@
 
 # Dub Studio
 
-**Studio de doublage vidéo par IA, gratuit et hors ligne, pour Windows —— redouble n'importe quelle vidéo courte dans une autre langue avec voix clonée, sous-titres traduits et localisation du texte à l'écran. 100% local, zéro Python : un `.exe` natif (Rust + C++/CUDA) ; tous les modèles et moteurs se téléchargent d'un bouton.**
+**Studio de doublage vidéo par IA, gratuit et hors ligne, pour Windows —— redouble n'importe quelle vidéo dans une autre langue avec voix clonée, sous-titres traduits et localisation du texte à l'écran. 100% local, zéro Python : un `.exe` natif (Rust + C++/CUDA) ; tous les modèles et moteurs se téléchargent d'un bouton.**
 
 [![License](https://img.shields.io/github/license/timoncool/dub-studio?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/timoncool/dub-studio?style=flat-square)](https://github.com/timoncool/dub-studio/stargazers)
@@ -31,7 +31,7 @@
 
 ## Qu'est-ce que c'est
 
-**Dub Studio** transforme n'importe quelle vidéo courte en une version doublée dans une autre langue —— **avec le timbre du locuteur cloné, des sous-titres traduits et le texte incrusté localisé à même l'image**. Déposez un clip : une passe automatique intelligente produit le premier jet ; puis un éditeur en direct met **chaque sous-titre, voix, zone de flou, police et titre** sous votre contrôle avec un aperçu instantané.
+**Dub Studio** transforme n'importe quelle vidéo en une version doublée dans une autre langue —— **avec le timbre du locuteur cloné, des sous-titres traduits et le texte incrusté localisé à même l'image**. Déposez un clip : une passe automatique intelligente produit le premier jet ; puis un éditeur en direct met **chaque sous-titre, voix, zone de flou, police et titre** sous votre contrôle avec un aperçu instantané.
 
 Tout tourne **100% sur votre machine** —— sans cloud, sans envoi, sans abonnement. Ni vos rushes ni votre voix ne quittent l'ordinateur.
 

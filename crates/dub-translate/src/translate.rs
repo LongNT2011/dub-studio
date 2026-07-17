@@ -246,7 +246,7 @@ pub fn run(
         // Стиль (#112) — доп-инструкция ПЕРЕД форматом-контрактом (он остаётся финальным и приоритетным,
         // чтобы стиль не сломал разбор нумерованного ответа).
         let sysmsg = format!(
-            "You are a professional subtitle translator localizing a SHORT video for DUBBING into {tgt_name}.\
+            "You are a professional subtitle translator localizing a video for DUBBING into {tgt_name}.\
              {dlg} Use the WHOLE numbered list as shared context so each line (even one word) is correct and \
              consistent. Preserve the MEANING, write natural SPOKEN {tgt_name}, and keep each line about the \
              SAME LENGTH as its source so it fits the dub timing. After each number, a parenthesis like \
@@ -317,7 +317,7 @@ pub fn rewrite(
         // То же, что ctx.rs: ЗАМЕНИТЬ содержимое на тему/стиль инструкции, НЕ переводить исходник (иначе Q4
         // просто переводит, тема не меняется — репорт юзера). Оба пути (funny-анализ и editor-remix) одинаковы.
         let sysmsg = format!(
-            "You are a creative scriptwriter writing a BRAND-NEW voice-over script in {tgt_name} for a short video.{dlg} \
+            "You are a creative scriptwriter writing a BRAND-NEW voice-over script in {tgt_name} for a video.{dlg} \
              IGNORE the literal meaning of the source lines — they are ONLY a rhythm/length template. Write a completely \
              NEW script whose CONTENT follows this instruction: \"{instruction}\". Every line must fit the instruction, \
              NOT translate the source. Keep the SAME number of lines and make each new line roughly the SAME LENGTH as \

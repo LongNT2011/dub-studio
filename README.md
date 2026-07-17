@@ -4,7 +4,7 @@
 
 # Dub Studio
 
-**Free, offline AI video dubbing studio for Windows — re-voice any short video into another language with a cloned voice, translated captions, and on‑screen‑text localization. 100% local, zero Python: one native `.exe` (Rust + C++/CUDA); every model and engine downloads with a button.**
+**Free, offline AI video dubbing studio for Windows — re-voice any video into another language with a cloned voice, translated captions, and on‑screen‑text localization. 100% local, zero Python: one native `.exe` (Rust + C++/CUDA); every model and engine downloads with a button.**
 
 [![License](https://img.shields.io/github/license/timoncool/dub-studio?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/timoncool/dub-studio?style=flat-square)](https://github.com/timoncool/dub-studio/stargazers)
@@ -22,7 +22,7 @@
 
 ## What it is
 
-**Dub Studio** turns any short video into a dubbed version in another language — **with the speaker's own voice cloned, captions translated, and on‑screen text localized right on the frame**. Drop a clip, and a smart auto‑pass builds the first draft; then a live editor puts **every caption, voice, blur box, font and title** under your control with an instant preview.
+**Dub Studio** turns any video into a dubbed version in another language — **with the speaker's own voice cloned, captions translated, and on‑screen text localized right on the frame**. Drop a clip, and a smart auto‑pass builds the first draft; then a live editor puts **every caption, voice, blur box, font and title** under your control with an instant preview.
 
 Everything runs **100% on your machine** — no cloud, no upload, no subscription. Your footage and your voiceprint never leave your computer.
 

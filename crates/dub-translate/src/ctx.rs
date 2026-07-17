@@ -329,7 +329,7 @@ Do NOT copy the (\u{2264}NN) marker into your output.";
         let style_c = crate::translate::style_clause(style);
         let tp = if let Some(instr) = rewrite {
             format!(
-                "You are a creative scriptwriter writing a BRAND-NEW voice-over script in {tgt} for this short video. \
+                "You are a creative scriptwriter writing a BRAND-NEW voice-over script in {tgt} for this video. \
 IGNORE the literal meaning of the source lines — they are ONLY a rhythm/length template. Write a completely NEW \
 script whose CONTENT follows this instruction: \"{instr}\". Every line must fit the instruction, NOT translate the \
 source. Keep the SAME number of lines and each line about the SAME LENGTH (it will be dubbed to fit the timing).{budget_rule}{style_c} \

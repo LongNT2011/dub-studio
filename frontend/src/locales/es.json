@@ -1,7 +1,7 @@
 {
   "app": {
     "name": "Dub Studio",
-    "tagline": "Dobla y traduce cualquier video corto — en local."
+    "tagline": "Dobla y traduce cualquier video — en local."
   },
   "drop": {
     "title": "Suelta un video para doblar",
@@ -15,7 +15,7 @@
   },
   "hero": {
     "eyebrow": "LOCAL · SIN CONEXIÓN · 100+ IDIOMAS",
-    "headline": "Dobla cualquier vídeo corto como si se hubiera grabado así.",
+    "headline": "Dobla cualquier vídeo como si se hubiera grabado así.",
     "sub": "El análisis automático hace la primera pasada; luego controlas todo: voces, texto, estilo de subtítulos, desenfoque, con vista previa en vivo en cada paso.",
     "f1": "Texto en pantalla, localizado en su lugar",
     "f2": "Clona, reparte voces o usa un pack",
@@ -249,7 +249,7 @@
   },
   "help": {
     "title": "Acerca de Dub Studio",
-    "intro": "Dub Studio dobla y traduce cualquier vídeo corto íntegramente en tu equipo — nada sale de tu ordenador. Suelta un clip: lo analiza una vez y luego ajustas cada detalle con vista previa en vivo.",
+    "intro": "Dub Studio dobla y traduce cualquier vídeo íntegramente en tu equipo — nada sale de tu ordenador. Suelta un clip: lo analiza una vez y luego ajustas cada detalle con vista previa en vivo.",
     "howTitle": "Cómo funciona",
     "how": [
       "Suelta un MP4/MOV — separa el audio, reconoce el habla, distingue a los hablantes, traduce y lee el texto en pantalla.",

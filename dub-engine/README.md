@@ -1,6 +1,6 @@
 # dub-engine
 
-Reusable, **100 % local** video dubbing / translation engine. Turns any short video into a
+Reusable, **100 % local** video dubbing / translation engine. Turns any video into a
 dubbed + captioned + on‑screen‑text‑localized clip, exposed through a single editable
 **`Project`** document so GUIs, CLIs and other apps all drive the same engine.
 

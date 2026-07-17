@@ -4,7 +4,7 @@
 
 # Dub Studio
 
-**面向 Windows 的免费离线 AI 视频配音工作室 —— 用克隆的声音、翻译字幕和画面文字本地化，把任意短视频重新配音成另一种语言。100% 本地运行，零 Python：一个原生 `.exe`（Rust + C++/CUDA），所有模型与引擎一键下载。**
+**面向 Windows 的免费离线 AI 视频配音工作室 —— 用克隆的声音、翻译字幕和画面文字本地化，把任意视频重新配音成另一种语言。100% 本地运行，零 Python：一个原生 `.exe`（Rust + C++/CUDA），所有模型与引擎一键下载。**
 
 [![License](https://img.shields.io/github/license/timoncool/dub-studio?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/timoncool/dub-studio?style=flat-square)](https://github.com/timoncool/dub-studio/stargazers)
@@ -31,7 +31,7 @@
 
 ## 这是什么
 
-**Dub Studio** 把任意短视频变成另一种语言的配音版本 —— **克隆说话人本人的音色、翻译字幕、并在画面上就地本地化嵌入文字**。拖入一个片段，智能自动流程先出初稿；随后实时编辑器让你掌控**每一条字幕、声音、模糊框、字体和标题**，即时预览。
+**Dub Studio** 把任意视频变成另一种语言的配音版本 —— **克隆说话人本人的音色、翻译字幕、并在画面上就地本地化嵌入文字**。拖入一个片段，智能自动流程先出初稿；随后实时编辑器让你掌控**每一条字幕、声音、模糊框、字体和标题**，即时预览。
 
 一切都在**你自己的电脑上 100% 运行** —— 无云端、无上传、无订阅。你的素材和声纹绝不离开电脑。
 

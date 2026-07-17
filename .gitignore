@@ -38,3 +38,5 @@ desktop/src-tauri/gen/
 desktop/src-tauri/staging/
 target2/
 scratchpad/
+logs/
+demos/

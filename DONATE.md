@@ -22,7 +22,7 @@ Thank you 🙏
 
 - ⭐ Star [Dub Studio](https://github.com/timoncool/dub-studio) and the [other projects](https://github.com/timoncool)
 - Report bugs, test on real clips, send PRs and model recipes
-- Tell a friend who dubs short videos
+- Tell a friend who dubs videos
 
 ---
 

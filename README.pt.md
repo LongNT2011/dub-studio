@@ -4,7 +4,7 @@
 
 # Dub Studio
 
-**Estúdio de dublagem de vídeo com IA, gratuito e offline, para Windows —— redubla qualquer vídeo curto para outro idioma com voz clonada, legendas traduzidas e localização do texto na tela. 100% local, zero Python: um `.exe` nativo (Rust + C++/CUDA); todos os modelos e motores baixam com um botão.**
+**Estúdio de dublagem de vídeo com IA, gratuito e offline, para Windows —— redubla qualquer vídeo para outro idioma com voz clonada, legendas traduzidas e localização do texto na tela. 100% local, zero Python: um `.exe` nativo (Rust + C++/CUDA); todos os modelos e motores baixam com um botão.**
 
 [![License](https://img.shields.io/github/license/timoncool/dub-studio?style=flat-square)](LICENSE)
 [![Stars](https://img.shields.io/github/stars/timoncool/dub-studio?style=flat-square)](https://github.com/timoncool/dub-studio/stargazers)
@@ -31,7 +31,7 @@
 
 ## O que é
 
-**Dub Studio** transforma qualquer vídeo curto em uma versão dublada para outro idioma —— **com o timbre do falante clonado, legendas traduzidas e o texto embutido localizado sobre o próprio quadro**. Solte um clipe e um passe automático inteligente cria o primeiro rascunho; depois um editor ao vivo coloca **cada legenda, voz, caixa de desfoque, fonte e título** sob seu controle com pré-visualização instantânea.
+**Dub Studio** transforma qualquer vídeo em uma versão dublada para outro idioma —— **com o timbre do falante clonado, legendas traduzidas e o texto embutido localizado sobre o próprio quadro**. Solte um clipe e um passe automático inteligente cria o primeiro rascunho; depois um editor ao vivo coloca **cada legenda, voz, caixa de desfoque, fonte e título** sob seu controle com pré-visualização instantânea.
 
 Tudo roda **100% na sua máquina** —— sem nuvem, sem upload, sem assinatura. Nem o seu material nem a sua voz saem do computador.
 
