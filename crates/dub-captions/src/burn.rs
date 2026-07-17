@@ -206,7 +206,21 @@ pub fn burn(
     };
 
     let enc = if gpu_encode { nv } else { sw };
-    run_ffmpeg(video, &vargs, &enc, out, gpu_decode)
+    // Таймаут пропорционален длительности: фикс-30мин зарезал бы легитимный burn многочасового
+    // фильма (NVENC ~5-10x риалтайма, softwarе медленнее). 4x длительность + 10 мин запас, минимум 30 мин.
+    let dur_secs = probe_duration_secs(video).unwrap_or(0.0);
+    let timeout = BURN_TIMEOUT_SECS.max((dur_secs * 4.0) as u64 + 600);
+    run_ffmpeg(video, &vargs, &enc, out, gpu_decode, timeout)
+}
+
+/// Длительность видео в секундах через ffprobe (для пропорционального таймаута burn). Ошибка -> None.
+fn probe_duration_secs(video: &Path) -> Option<f64> {
+    let out = Command::new(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" })
+        .args(["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0"])
+        .arg(video)
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse::<f64>().ok()
 }
 
 fn run_ffmpeg(
@@ -215,6 +229,7 @@ fn run_ffmpeg(
     enc: &[String],
     out: &Path,
     gpu_decode: bool,
+    timeout_secs: u64,
 ) -> Result<(), String> {
     let mut cmd = Command::new(FFMPEG);
     cmd.arg("-y");
