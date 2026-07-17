@@ -110,6 +110,12 @@ pub struct Segment {
     pub voice: Option<String>,
     #[serde(default)]
     pub dirty: bool,
+    /// BLAKE3-ключ последнего успешно синтезированного TTS-фрагмента (tgt_text+speaker+voice+ref+quant).
+    /// Позволяет решать ре-синтез сравнением ckpt с пересчитанным ключом ВМЕСТО/В ДОПОЛНЕНИЕ к dirty
+    /// (dirty остаётся UI-сигналом «показать точку правки»). Option → отсутствует в старых project.json
+    /// (serde default None) → полная обратная совместимость, инвариант extra=allow не задет.
+    #[serde(default)]
+    pub ckpt: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -423,6 +429,12 @@ pub struct Project {
     /// Verbatim ctx_extra.json passthrough (audio_context/scene_context/…).
     #[serde(default)]
     pub raw_ctx: Map<String, Value>,
+    /// Зеркало param-ключей крупных стадий analyze (extract/diarize/asr/translate/ocr) прямо в project.json,
+    /// чтобы resume работал даже если каталог work_dir/cache.json потеряли, но project.json сохранён (он
+    /// автосейвится каждый PATCH). Аддитивно, дефолтно, не нарушает инвариант «extra=allow». Формат:
+    /// {"extract":"<blake3-hex>", "diarize":"…", …}.
+    #[serde(default)]
+    pub stage_ckpts: Map<String, Value>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -447,6 +459,7 @@ impl Default for Project {
             render: Render::default(),
             work_dir: None,
             raw_ctx: Map::new(),
+            stage_ckpts: Map::new(),
             extra: Extra::new(),
         }
     }

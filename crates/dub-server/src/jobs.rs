@@ -23,6 +23,14 @@ fn new_job_id() -> String {
 /// Колбэк прогресса, передаваемый в тело джобы. Кладёт {"type":"progress", ...} в SSE-канал.
 pub type ProgressFn = Arc<dyn Fn(Value) + Send + Sync + 'static>;
 
+/// Пометить в SSE, что стадия взята из чекпоинта (#80): {"type":"progress","stage":..,"resumed":true,..}.
+/// Тонкая обёртка над ProgressFn — не меняет очередь/воркер; тело джобы (analyze/render) может звать её,
+/// чтобы UI показал «возобновлено из кэша». Фронт, не знающий про поле resumed, его игнорирует.
+#[allow(dead_code)] // публичный хелпер для тел джоб (lib.rs — другой агент); analyze шлёт resumed сам.
+pub fn emit_resumed(progress: &ProgressFn, stage: &str, msg: &str) {
+    progress(json!({ "stage": stage, "msg": msg, "resumed": true }));
+}
+
 struct Job {
     tx: broadcast::Sender<Value>, // SSE-события
     status: JobStatus,

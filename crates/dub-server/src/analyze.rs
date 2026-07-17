@@ -13,6 +13,252 @@ use serde_json::{json, Value};
 
 use crate::media;
 
+pub use cache::StageCache;
+
+/// Content-addressable per-stage кэш стадий analyze (#80 «чекпоинты»).
+///
+/// Файл `workspace/<pid>/cache.json` хранит по стадии: `param_hash = blake3(явные параметры стадии)`
+/// и список выходных артефактов `outputs[]` с размером. Стадия считается закэшированной (reuse), только
+/// если хэш параметров совпал И все её выходы присутствуют непусты (паттерн Nextflow: полнота+успех).
+/// Правка одного параметра стадии меняет её `param_hash` → стадия честно пересчитывается.
+///
+/// Запись атомарна (tmp→rename), чтобы краш между стадиями не оставил битый манифест. Модуль чистый
+/// (ФС+хэш, без GPU/Tokio) — тестируемый юнитами, не тянет тяжёлые зависимости.
+mod cache {
+    use serde::{Deserialize, Serialize};
+    use serde_json::Value;
+    use std::collections::BTreeMap;
+    use std::path::{Path, PathBuf};
+
+    /// Один выход стадии: путь (относительно work_dir, если внутри неё — иначе абсолютный) + размер в байтах.
+    /// Размер — дешёвый признак «файл на месте и непуст»; полный рехэш многочасовых wav избыточен.
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct StageOutput {
+        pub path: String,
+        #[serde(default)]
+        pub size: u64,
+    }
+
+    /// Запись о посчитанной стадии.
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct StageEntry {
+        /// blake3(явные параметры стадии) в hex.
+        pub param_hash: String,
+        #[serde(default)]
+        pub outputs: Vec<StageOutput>,
+        /// Юникс-время записи (диагностика; не участвует в решении о reuse).
+        #[serde(default)]
+        pub ts: u64,
+    }
+
+    /// Манифест кэша всего проекта: стадия → запись. BTreeMap → стабильный порядок ключей в JSON.
+    #[derive(Clone, Debug, Default, Serialize, Deserialize)]
+    pub struct StageCache {
+        #[serde(default)]
+        pub stages: BTreeMap<String, StageEntry>,
+        /// Неизвестные поля переживают round-trip (как extra=allow в Project).
+        #[serde(flatten)]
+        pub extra: BTreeMap<String, Value>,
+    }
+
+    fn cache_path(work_dir: &Path) -> PathBuf {
+        work_dir.join("cache.json")
+    }
+
+    fn now_secs() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
+    impl StageCache {
+        /// Загрузить `cache.json` из work_dir. Отсутствие/битый файл → пустой кэш (честный пересчёт всех
+        /// стадий): кэш — ускорение, а не источник истины, поэтому его потеря безопасна.
+        pub fn load(work_dir: &Path) -> Self {
+            match std::fs::read_to_string(cache_path(work_dir)) {
+                Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
+                Err(_) => Self::default(),
+            }
+        }
+
+        /// Атомарно записать `cache.json` (tmp→rename). Ошибку не роняем наружу как фатальную — кэш
+        /// вспомогательный; вызывающий может залогировать. Возвращает Result для явности.
+        pub fn save(&self, work_dir: &Path) -> Result<(), String> {
+            let body = serde_json::to_string_pretty(self)
+                .map_err(|e| format!("сериализация cache.json: {e}"))?;
+            let final_path = cache_path(work_dir);
+            let tmp = final_path.with_extension("json.tmp");
+            std::fs::write(&tmp, body.as_bytes())
+                .map_err(|e| format!("запись {}: {e}", tmp.display()))?;
+            std::fs::rename(&tmp, &final_path)
+                .map_err(|e| format!("rename {} -> {}: {e}", tmp.display(), final_path.display()))?;
+            Ok(())
+        }
+
+        /// Закэширована ли стадия: param_hash совпал И все её выходы присутствуют непусты (size>0 и файл
+        /// реально на диске с тем же размером). Ручное удаление файла из workspace → miss → честный пересчёт.
+        pub fn stage_cached(&self, work_dir: &Path, stage: &str, param_hash: &str) -> bool {
+            let Some(entry) = self.stages.get(stage) else {
+                return false;
+            };
+            if entry.param_hash != param_hash {
+                return false;
+            }
+            if entry.outputs.is_empty() {
+                // Стадия без файловых выходов (результат в project.json): при совпавшем хэше считаем
+                // валидной — durable-выход такой стадии это сам project.json, живущий рядом.
+                return true;
+            }
+            entry.outputs.iter().all(|o| {
+                let p = resolve(work_dir, &o.path);
+                match std::fs::metadata(&p) {
+                    Ok(m) => m.is_file() && m.len() > 0 && m.len() == o.size,
+                    Err(_) => false,
+                }
+            })
+        }
+
+        /// Записать (или обновить) запись стадии в память кэша: param_hash + фактические размеры выходов.
+        /// НЕ пишет на диск — вызвать `save` отдельно (обычно один раз в конце или после каждой стадии).
+        pub fn write_stage(&mut self, work_dir: &Path, stage: &str, param_hash: &str, outputs: &[&Path]) {
+            let outs: Vec<StageOutput> = outputs
+                .iter()
+                .map(|p| StageOutput {
+                    path: rel_or_abs(work_dir, p),
+                    size: std::fs::metadata(p).map(|m| m.len()).unwrap_or(0),
+                })
+                .collect();
+            self.stages.insert(
+                stage.to_string(),
+                StageEntry { param_hash: param_hash.to_string(), outputs: outs, ts: now_secs() },
+            );
+        }
+
+        /// Инвалидировать стадию (удалить её запись) — например, при ручном сбросе из UI
+        /// (POST /projects/{pid}/invalidate?stage=, проводка в lib.rs — вне владения этой подсистемы).
+        #[allow(dead_code)] // публичное API под ручной сброс стадии; вызывающий — lib.rs (другой агент).
+        pub fn invalidate(&mut self, stage: &str) {
+            self.stages.remove(stage);
+        }
+    }
+
+    /// Путь выхода относительно work_dir, если он внутри неё (переносимость каталога проекта); иначе абс.
+    fn rel_or_abs(work_dir: &Path, p: &Path) -> String {
+        match p.strip_prefix(work_dir) {
+            Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
+            Err(_) => p.to_string_lossy().into_owned(),
+        }
+    }
+
+    /// Обратное к rel_or_abs: относительный путь резолвим от work_dir, абсолютный — как есть.
+    fn resolve(work_dir: &Path, stored: &str) -> PathBuf {
+        let p = Path::new(stored);
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            work_dir.join(stored)
+        }
+    }
+
+    /// blake3-хэш конкатенации строк-параметров стадии → hex. Разделитель `\x1f` (unit separator) не
+    /// встречается в реальных параметрах, поэтому границы полей не спутать (a|b ≠ a||b — коллизия исключена).
+    pub fn hash_stage(parts: &[&str]) -> String {
+        let mut h = blake3::Hasher::new();
+        for p in parts {
+            h.update(p.as_bytes());
+            h.update(b"\x1f");
+        }
+        h.finalize().to_hex().to_string()
+    }
+
+    /// Быстрый префикс-хэш файла как ключ инвалидации стадий вниз по DAG: blake3(размер ‖ первые 8МБ ‖
+    /// последние 8МБ). Полный рехэш многочасового wav избыточен; для реального контента совпадение
+    /// размера+префикса+суффикса означает тот же файл. Нет файла → "0" (стадия честно пересчитается).
+    pub fn hash_file_prefix(path: &Path) -> String {
+        use std::io::{Seek, SeekFrom};
+        const CHUNK: u64 = 8 * 1024 * 1024;
+        let Ok(mut f) = std::fs::File::open(path) else {
+            return "0".to_string();
+        };
+        let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+        let mut h = blake3::Hasher::new();
+        h.update(&len.to_le_bytes());
+        let mut buf = vec![0u8; CHUNK as usize];
+        // Первые CHUNK байт.
+        let head = read_up_to(&mut f, &mut buf);
+        h.update(&buf[..head]);
+        // Последние CHUNK байт (если файл длиннее 2×CHUNK — иначе перекрытие с головой безвредно).
+        if len > CHUNK {
+            let start = len.saturating_sub(CHUNK);
+            if f.seek(SeekFrom::Start(start)).is_ok() {
+                let tail = read_up_to(&mut f, &mut buf);
+                h.update(&buf[..tail]);
+            }
+        }
+        h.finalize().to_hex().to_string()
+    }
+
+    fn read_up_to(f: &mut std::fs::File, buf: &mut [u8]) -> usize {
+        use std::io::Read;
+        let mut filled = 0;
+        while filled < buf.len() {
+            match f.read(&mut buf[filled..]) {
+                Ok(0) => break,
+                Ok(n) => filled += n,
+                Err(_) => break,
+            }
+        }
+        filled
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn hash_stage_field_boundaries_distinct() {
+            // "a"+"b" не должно коллидировать с "ab"+"" из-за разделителя.
+            assert_ne!(hash_stage(&["a", "b"]), hash_stage(&["ab", ""]));
+            // Детерминизм.
+            assert_eq!(hash_stage(&["x", "y"]), hash_stage(&["x", "y"]));
+        }
+
+        #[test]
+        fn stage_cached_roundtrip() {
+            let dir = std::env::temp_dir().join(format!("dubcache_test_{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&dir);
+            let out = dir.join("vocals16.wav");
+            std::fs::write(&out, b"1234567890").unwrap();
+            let mut c = StageCache::default();
+            let key = hash_stage(&["extract", "v1"]);
+            c.write_stage(&dir, "extract", &key, &[&out]);
+            c.save(&dir).unwrap();
+
+            let loaded = StageCache::load(&dir);
+            assert!(loaded.stage_cached(&dir, "extract", &key));
+            // Другой хэш → miss.
+            assert!(!loaded.stage_cached(&dir, "extract", "deadbeef"));
+            // Удалили выход → miss даже при совпавшем хэше.
+            std::fs::remove_file(&out).unwrap();
+            assert!(!loaded.stage_cached(&dir, "extract", &key));
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        #[test]
+        fn empty_outputs_valid_on_hash_match() {
+            let dir = std::env::temp_dir().join(format!("dubcache_empty_{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&dir);
+            let mut c = StageCache::default();
+            let key = hash_stage(&["diarize", "params"]);
+            c.write_stage(&dir, "diarize", &key, &[]); // результат в project.json, файловых выходов нет
+            assert!(c.stage_cached(&dir, "diarize", &key));
+            assert!(!c.stage_cached(&dir, "diarize", "other"));
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}
+
 /// Параметры analyze (из query POST /projects/{pid}/analyze). tgt_lang/mode/src_lang/subs/rewrite —
 /// как в app.py.analyze_project. В этой стадии влияют только на mode-дефолты Project и mode/subs поля.
 pub struct AnalyzeArgs {
@@ -41,6 +287,9 @@ pub struct AnalyzePaths {
     pub caption_fps: i32,             // частота семплинга кадров OCR
     /// Импортированные субтитры (SRT/ASS) — если есть, берём текст+тайминг отсюда вместо ASR.
     pub import_subs: Option<std::path::PathBuf>,
+    /// BSRoformer (сепарация вокала) — best practices: ЧИСТЫЙ вокал до диаризации/ASR, а не сырой микс.
+    pub bsroformer_cli: std::path::PathBuf,
+    pub bsroformer_model: std::path::PathBuf,
 }
 
 /// Колбэк прогресса джобы (msg + произвольные поля). stage — фаза как в питоне.
@@ -109,9 +358,72 @@ fn speaker_for(start: f64, end: f64, turns: &[dub_asr::Turn]) -> String {
     best_spk.to_string()
 }
 
+// ─── Параметры оконного драйвера (#79) и версии стадий (компонент кэш-ключа) ──────────────────
+//
+// Версии-строки — ручной bump при смене движка/дефолтов стадии: правка инвалидирует ТОЛЬКО свою
+// стадию + downstream, а не весь фильм. Все — env-override через DUB_* для тюнинга без пересборки.
+
+/// Порог включения оконного пути (сек). Короче → монолитный путь (байт-паритет с текущим поведением).
+/// Дефолт 900с (15мин). Env DUB_CHUNK_MIN_SEC.
+fn chunk_min_sec() -> f64 {
+    std::env::var("DUB_CHUNK_MIN_SEC").ok().and_then(|v| v.parse().ok()).unwrap_or(900.0)
+}
+/// Целевой размер окна (сек) для оконного ASR/диаризации. Дефолт 600с. Env DUB_WIN_TARGET_SEC.
+fn win_target_sec() -> f64 {
+    std::env::var("DUB_WIN_TARGET_SEC").ok().and_then(|v| v.parse().ok()).unwrap_or(600.0)
+}
+
+const EXTRACT_VER: &str = "extract-16kmono-v1";
+const DIAR_VER: &str = "sortformer-4spk-v2 · merge_gap=0.8 · min_spk=2.5";
+const ASR_VER: &str = "asr-v1";
+const TRANSLATE_VER: &str = "gemma-ctx-v1";
+const OCR_VER: &str = "ppocr-onnx-v1";
+
+/// План оконной обработки длинных дорожек. Короткий файл = 1 окно = текущее поведение (паритет).
+struct WindowPlan {
+    /// Число окон (≥1). 1 → монолитный путь.
+    n_windows: usize,
+    /// Границы окон [start,end) в секундах (для будущего оконного dub-asr API). При n=1 — весь файл.
+    windows: Vec<(f64, f64)>,
+}
+
+impl WindowPlan {
+    /// Построить план по длительности. Длиннее порога → нарезка на ~равные окна ≤win_target_sec.
+    /// ВНИМАНИЕ: пока dub-asr не имеет оконного API (turns_windowed/transcribe_windowed), фактическая
+    /// обработка идёт как window=1 (см. TODO-гейт в run) — план строится и эмитится для видимости и как
+    /// каркас под #79, но НЕ меняет вызовы стадий, чтобы не сломать паритет. Короткий файл → n=1 всегда.
+    fn build(duration: f64) -> Self {
+        let dur = duration.max(0.0);
+        if dur <= chunk_min_sec() || dur <= 0.0 {
+            return WindowPlan { n_windows: 1, windows: vec![(0.0, dur)] };
+        }
+        let target = win_target_sec().max(60.0);
+        let n = (dur / target).ceil().max(1.0) as usize;
+        let step = dur / n as f64;
+        let mut windows = Vec::with_capacity(n);
+        for i in 0..n {
+            let s = step * i as f64;
+            let e = if i + 1 == n { dur } else { step * (i + 1) as f64 };
+            windows.push((s, e));
+        }
+        WindowPlan { n_windows: n, windows }
+    }
+}
+
 /// Запустить analyze: extract -> diarize -> transcribe -> Project. Возвращает готовый Project.
 /// Диаризация/транскрипция тяжёлые (ONNX CPU) — вызывать в блокирующем контексте (job worker).
+///
+/// Поверх стадий лежит content-addressable per-stage кэш (cache.json): extract с файловым выходом
+/// (vocals16.wav) реально гейтится (skip+reuse при неизменном источнике); param-хэши остальных стадий
+/// (diarize/asr/translate/ocr) пишутся в cache.json + project.stage_ckpts — задел под честный resume
+/// (durable-выход этих стадий — сам project.json, который сохраняет вызывающий).
 pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Result<Project, String> {
+    // 0) кэш стадий (#80). Отсутствие/битый cache.json → пустой кэш (честный пересчёт).
+    let mut cache = StageCache::load(&paths.work_dir);
+    // Бенчмаркинг: фоновый семплер GPU/CPU/VRAM по стадиям -> workspace/<pid>/bench.json.
+    let mut bench = crate::bench::Bench::start(&paths.work_dir, "analyze");
+    bench.stage("probe");
+
     // 1) probe (метаданные видео).
     let meta = media::probe(&paths.input)?;
     emit(
@@ -126,10 +438,46 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         ),
     );
 
-    // 2) extract audio -> wav 16k mono.
-    emit(progress, "extract_audio", "извлечение аудио (ffmpeg -> 16k mono)");
+    // 1b) оконный план (#79). Короткий файл / import_subs → 1 окно (текущее поведение).
+    let plan = if paths.import_subs.is_some() {
+        WindowPlan { n_windows: 1, windows: vec![(0.0, meta.duration.max(0.0))] }
+    } else {
+        WindowPlan::build(meta.duration)
+    };
+    if plan.n_windows > 1 {
+        // TODO(#79): фактический оконный ASR/диаризация подключаются, когда dub-asr отдаст
+        // turns_windowed/transcribe_windowed. Пока — window=1-путь: план построен и виден в прогрессе,
+        // но стадии идут монолитно (паритет). Не ломаем короткие/длинные режимы.
+        let first = plan.windows.first().map(|w| w.1 - w.0).unwrap_or(0.0);
+        emit(
+            progress,
+            "window_plan",
+            &format!(
+                "длинная дорожка {:.0}с: план {} окон (первое ~{:.0}с) — оконный ASR ещё не активен, обработка монолитная",
+                meta.duration, plan.n_windows, first
+            ),
+        );
+    }
+
+    // 2) extract audio -> wav 16k mono. Кэш-гейт: если источник не менялся (префикс-хэш) и vocals16
+    //    на месте непуст — переиспользуем без повторного ffmpeg (дорого на многочасовом входе).
+    bench.stage("extract");
     let vocals16 = paths.work_dir.join("vocals16.wav");
-    media::extract_wav_16k_mono(&paths.input, &vocals16)?;
+    let src_hash = cache::hash_file_prefix(&paths.input);
+    let extract_key = cache::hash_stage(&[EXTRACT_VER, &src_hash]);
+    if cache.stage_cached(&paths.work_dir, "extract", &extract_key) {
+        // resumed:true — SSE-маркер «возобновлено из чекпоинта» (#80); фронт без поля его игнорирует.
+        progress(json!({
+            "stage": "extract_audio",
+            "msg": "аудио из кэша (источник не менялся) — пропуск ffmpeg",
+            "resumed": true
+        }));
+    } else {
+        emit(progress, "extract_audio", "извлечение аудио (ffmpeg -> 16k mono)");
+        media::extract_wav_16k_mono(&paths.input, &vocals16)?;
+        cache.write_stage(&paths.work_dir, "extract", &extract_key, &[&vocals16]);
+        let _ = cache.save(&paths.work_dir);
+    }
 
     // 3) диаризация. merge_gap=0.8, min_speaker_dur=2.5 — дефолты diarize.turns питона (asr.py-контракт).
     //    Если модель sortformer недоступна ИЛИ вернула <2 спикеров -> single-speaker (штатная ветка).
@@ -138,10 +486,51 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     //    в питоне transcribe ставит cfg.dub=False и НЕ диаризует, но у нас это отдельный режим «транскрипт+
     //    диаризация» (спикеры показываются в UI), поэтому диаризуем. nodub (только субтитры) — НЕ диаризуем
     //    (как питон whole-clip; иначе diarize-first порезал бы субтитры по спикерам иначе, чем оригинал).
+    // 2c) СЕПАРАЦИЯ ДО диаризации/ASR (best practices: чистый вокал вместо сырого микса — диаризация
+    // не путается на музыке, ASR точнее; приказ 2026-07-17). stems-кэш ОБЩИЙ с рендером (wd/stems) —
+    // рендер переиспользует, двойной сепарации нет. Fail-safe: сбой/нет движка -> сырой vocals16.
     let want_diar = args.mode != "nodub";
+    bench.stage("separate");
+    let asr_wav: std::path::PathBuf = if want_diar
+        && paths.bsroformer_cli.is_file()
+        && paths.bsroformer_model.is_file()
+    {
+        let clean16 = paths.work_dir.join("vocals16_clean.wav");
+        let stems = paths.work_dir.join("stems");
+        let cached_voc = stems.join("vocals.wav");
+        let sep_result: Result<std::path::PathBuf, String> = (|| {
+            if !cached_voc.is_file() {
+                let audio_hq = paths.work_dir.join("audio_hq.wav");
+                if !audio_hq.is_file() {
+                    emit(progress, "separate", "извлечение аудио 44.1k для сепарации");
+                    media::extract_audio(&paths.input, &audio_hq, 44100, 2)?;
+                }
+                emit(progress, "separate", "сепарация вокала (BSRoformer) — чистый голос для диаризации/ASR");
+                dub_sep::separate(&audio_hq, &stems, &paths.bsroformer_cli, &paths.bsroformer_model)
+                    .map_err(|e| e.to_string())?;
+            } else {
+                emit(progress, "separate", "сепарация из кэша (stems уже посчитаны)");
+            }
+            media::to_16k_mono(&cached_voc, &clean16)?;
+            Ok(clean16.clone())
+        })();
+        match sep_result {
+            Ok(p) => p,
+            Err(e) => {
+                emit(progress, "separate", &format!("сепарация не удалась ({e}) — диаризация/ASR по сырому аудио"));
+                vocals16.clone()
+            }
+        }
+    } else {
+        if want_diar {
+            emit(progress, "separate", "BSRoformer не найден — диаризация/ASR по сырому аудио");
+        }
+        vocals16.clone()
+    };
+    bench.stage("diarize");
     emit(progress, "diarize", "диаризация (Sortformer)");
     let diar = if want_diar && paths.sortformer_onnx.is_file() {
-        match dub_asr::turns(&vocals16, &paths.sortformer_onnx, 0.8, 2.5) {
+        match dub_asr::turns(&asr_wav, &paths.sortformer_onnx, 0.8, 2.5) {
             Ok(d) => Some(d),
             Err(e) => {
                 emit(
@@ -160,6 +549,11 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         );
         None
     };
+    // Param-хэш диаризации в cache.json. Вход = отпечаток источника (vocals16 детерминирован от него) +
+    // DIAR_VER + режим (влияет на want_diar). Файловых выходов нет — durable-результат в project.json;
+    // запись служит задел под честный resume/инкрементальный re-analyze (правка транскрипта её НЕ трогает).
+    let diar_key = cache::hash_stage(&[DIAR_VER, &src_hash, &args.mode]);
+    cache.write_stage(&paths.work_dir, "diarize", &diar_key, &[]);
 
     // 4) сегменты: из импортированных субтитров (точный текст+тайминг, ASR пропущен) ЛИБО через ASR.
     //    Импорт: спикеров всё равно раздаём — по максимальному перекрытию реплики с диаризацией.
@@ -192,6 +586,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
                     tgt_text,
                     voice: None,
                     dirty: false,
+                    ckpt: None,
                     extra: Default::default(),
                 }
             })
@@ -201,6 +596,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         (segs, n)
     } else {
         // Движок выбран настройкой (Parakeet/Whisper) — analyze не знает деталей (build_engine).
+        bench.stage("asr");
         let mut asr = crate::models::build_engine(&paths.asr);
         match &diar {
         Some(d) if d.n_speakers > 1 && !d.turns.is_empty() => {
@@ -210,7 +606,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
                 &format!("транскрипция по репликам ({} спикеров)", d.n_speakers),
             );
             let mut sp = asr
-                .transcribe_turns(&vocals16, &d.turns, &args.src_lang)
+                .transcribe_turns(&asr_wav, &d.turns, &args.src_lang)
                 .map_err(|e| format!("transcribe_turns: {e}"))?;
             // diarize-first складывает реплики ПО СПИКЕРАМ, не по времени -> сортируем по start
             // (как segs.sort в питоне), чтобы порядок сегментов был временной.
@@ -227,6 +623,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
                     tgt_text: String::new(),
                     voice: None,
                     dirty: false,
+                    ckpt: None,
                     extra: Default::default(),
                 })
                 .collect();
@@ -235,7 +632,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         _ => {
             emit(progress, "asr", "транскрипция всего клипа (single-speaker)");
             let ts = asr
-                .transcribe(&vocals16, &args.src_lang)
+                .transcribe(&asr_wav, &args.src_lang)
                 .map_err(|e| format!("transcribe: {e}"))?;
             let segs = ts
                 .into_iter()
@@ -261,6 +658,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
                         tgt_text: String::new(),
                         voice: None,
                         dirty: false,
+                        ckpt: None,
                         extra,
                     }
                 })
@@ -275,6 +673,25 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         "asr",
         &format!("{} сегментов, {} спикер(ов)", segments.len(), n_spk),
     );
+
+    // Param-хэш ASR в cache.json. Вход = отпечаток источника + движок ASR + src_lang + режим импорта
+    // (import_subs подменяет ASR субтитрами). Durable-выход — segments в project.json (файловых нет).
+    let import_tag = if paths.import_subs.is_some() { "import" } else { "asr" };
+    let asr_key = cache::hash_stage(&[ASR_VER, &src_hash, paths.asr.describe().as_str(), &args.src_lang, import_tag]);
+    cache.write_stage(&paths.work_dir, "asr", &asr_key, &[]);
+
+    // Отпечаток транскрипта (вход перевода): хэш всех src-текстов+спикеров по порядку. Правка src
+    // инвалидирует translate; правка tgt (ручная в редакторе) — нет (её ключ в render, не здесь).
+    let transcript_fp = {
+        let mut h = blake3::Hasher::new();
+        for s in &segments {
+            h.update(s.src_text.as_bytes());
+            h.update(b"\x1f");
+            h.update(s.speaker.as_deref().unwrap_or("").as_bytes());
+            h.update(b"\x1e");
+        }
+        h.finalize().to_hex().to_string()
+    };
 
     // 5) собрать Project по контракту dub-core (mode-дефолты).
     let (mut mode, subs_mode) = resolve_modes(args);
@@ -319,19 +736,49 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     //    Пайплайн последовательный: TTS в этот момент не загружен (как tts.release() в питоне) —
     //    Gemma получает всю VRAM. Fail-safe: сбой стадии оставляет tgt пустым (перевод — не блокер analyze).
     // vocals16 уже объявлен выше (стадия ASR) и не перемещался — переиспользуем.
-    crate::translate::stage(args, paths, &mut proj, &vocals16, meta.height, meta.duration, progress);
+    // Сигнатуру translate::stage НЕ трогаем — только пишем её param-хэш вокруг вызова (задел под resume).
+    bench.stage("translate");
+    crate::translate::stage(args, paths, &mut proj, &asr_wav, meta.height, meta.duration, progress);
+    let translate_key = cache::hash_stage(&[
+        TRANSLATE_VER,
+        &transcript_fp,
+        &proj.tgt_lang,
+        &proj.mode,
+        &args.rewrite,
+        if args.import_translated { "imp1" } else { "imp0" },
+    ]);
+    cache.write_stage(&paths.work_dir, "translate", &translate_key, &[]);
 
     // 7) OCR-стадия (раунд 4): детекция вшитого текста -> блюр-боксы субтитр-полосы + уточнение sub_y.
     //    Порт pipeline.run ocr_detect + compose.analyze_layout. Fail-safe: сбой OCR не валит analyze
     //    (боксы блюра — не блокер; их можно добавить руками в редакторе). Дорогая стадия (минуты на 4K):
     //    пропускаем по галочке detect_text (в режиме без субтитров вшитый текст не трогаем — экономит время).
+    bench.stage("ocr");
     if args.detect_text && meta.width > 0 && meta.height > 0 {
         crate::ocr::stage(args, paths, &mut proj, meta.width, meta.height, meta.duration, progress);
+        let ocr_key = cache::hash_stage(&[
+            OCR_VER,
+            &src_hash,
+            &meta.width.to_string(),
+            &meta.height.to_string(),
+            &paths.caption_fps.to_string(),
+        ]);
+        cache.write_stage(&paths.work_dir, "ocr", &ocr_key, &[]);
     } else if meta.width == 0 || meta.height == 0 {
         emit(progress, "ocr_detect", "аудио-режим: без видео, детекция экранного текста не нужна");
     } else {
         emit(progress, "ocr_detect", "детекция вшитого текста отключена (галочка)");
     }
+
+    // 8) финализация кэша: зеркалим param-ключи крупных стадий в project.stage_ckpts (resume работает
+    //    даже при потере work_dir/cache.json, т.к. project.json автосейвится), и атомарно пишем cache.json.
+    for (stage, entry) in &cache.stages {
+        proj.stage_ckpts.insert(stage.clone(), Value::String(entry.param_hash.clone()));
+    }
+    if let Err(e) = cache.save(&paths.work_dir) {
+        emit(progress, "cache", &format!("не удалось сохранить cache.json: {e} (не критично)"));
+    }
+    bench.finish(|m| emit(progress, "bench", m));
 
     Ok(proj)
 }

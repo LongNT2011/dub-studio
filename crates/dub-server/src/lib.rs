@@ -7,6 +7,7 @@
 //! раунды; их карта в docs/PORT-CONTRACT.md.
 
 mod analyze;
+mod bench;
 mod compose;
 mod endpoints;
 mod frame;
@@ -92,6 +93,9 @@ pub fn verify_captions_e2e(
         models_root: mroot,
         caption_fps: opts.caption_fps,
         import_subs: None,
+        // ocr::stage сепарацию не использует — заглушки (verify-путь без BSRoformer).
+        bsroformer_cli: unused.clone(),
+        bsroformer_model: unused.clone(),
     };
     let cb = |ev: Value| {
         if let Some(m) = ev.get("msg").and_then(|v| v.as_str()) {
@@ -301,6 +305,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/setup/download", post(setup_download))
         .route("/setup/cancel", post(setup_cancel))
         .route("/setup/browse", post(setup_browse))
+        .route("/pick-folder", post(pick_folder))
         .route("/setup/import", post(setup_import))
         .route("/hw/snapshot", get(hw_snapshot))
         .route("/record/devices", get(record_devices))
@@ -320,7 +325,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects", post(create_project).get(list_projects))
         .route(
             "/projects/{pid}",
-            get(get_project).patch(patch_project).put(endpoints::put_project),
+            get(get_project).patch(patch_project).put(endpoints::put_project).delete(delete_project),
         )
         .route("/projects/{pid}/analyze", post(analyze_project))
         .route("/projects/{pid}/remix", post(endpoints::remix_project))
@@ -332,6 +337,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects/{pid}/open", post(open_output))
         .route("/projects/{pid}/reveal", post(reveal_file))
         .route("/projects/{pid}/save-text", post(save_text))
+        .route("/projects/{pid}/save-output", post(save_output))
         .route("/projects/{pid}/dub-audio", post(dub_audio_project))
         // /original?t= отдаёт ОДИН PNG-кадр оригинала (порт app.py.original -> source_frame),
         // фронт (ComparePane) вставляет его как <img src>. Range-раздача сырого видео — /dub.
@@ -810,6 +816,23 @@ async fn get_project(State(st): State<AppState>, AxPath(pid): AxPath<String>) ->
     }
 }
 
+// ─── DELETE /projects/{pid} — удалить проект (весь каталог workspace/<pid>) ───
+// Убирает проект из «последних» на главной И реально стирает его данные с диска.
+async fn delete_project(State(st): State<AppState>, AxPath(pid): AxPath<String>) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp, // невалидный/несуществующий pid -> та же ошибка, что у прочих ручек
+    };
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => ([("content-type", "application/json")], "{\"ok\":true}").into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("удаление проекта {}: {e}", dir.display()),
+        )
+            .into_response(),
+    }
+}
+
 // ─── POST /projects/{pid}/analyze ───────────────────────────────────────────
 
 async fn analyze_project(
@@ -871,6 +894,9 @@ async fn analyze_project(
         models_root: st.models_root.clone(),
         caption_fps: st.opts.caption_fps,
         import_subs,
+        // Сепарация ДО диаризации/ASR (best practices): чистый вокал; stems-кэш общий с рендером.
+        bsroformer_cli: st.bsroformer_cli.clone(),
+        bsroformer_model: st.bsroformer_model.clone(),
     };
 
     // Тело джобы: analyze -> project.json (атомарно). Прогресс -> SSE.
@@ -1217,6 +1243,61 @@ async fn output(
     let ext = f.extension().and_then(|s| s.to_str()).unwrap_or("mp4");
     let filename = if dl { Some(format!("{pid}_dub.{ext}")) } else { None };
     serve_file_range(&f, req, filename).await
+}
+
+/// POST /pick-folder — нативный диалог выбора папки (rfd). Возвращает {dir} или {dir:null} при отмене.
+/// Для batch-экспорта: юзер выбирает ОДНУ папку назначения, дальше save-output кладёт туда все файлы.
+async fn pick_folder() -> Json<Value> {
+    let dir = tokio::task::spawn_blocking(|| {
+        rfd::FileDialog::new().set_title("Куда сохранить результаты").pick_folder()
+    })
+    .await
+    .ok()
+    .flatten();
+    Json(json!({ "dir": dir.map(|d| d.to_string_lossy().into_owned()) }))
+}
+
+/// POST /projects/{pid}/save-output {dir, name} — скопировать готовый output проекта в папку `dir` под
+/// именем `name` (оригинальное имя файла), сохранив расширение реального выхода. Для batch-вывода:
+/// все переведённые файлы в ОДНУ папку с исходными именами.
+async fn save_output(State(st): State<AppState>, AxPath(pid): AxPath<String>, Json(body): Json<Value>) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(resp) => return resp,
+    };
+    let src = dir.join("output.mp4");
+    let src = if src.is_file() { src } else { dir.join("output.wav") };
+    if !src.is_file() {
+        return (StatusCode::NOT_FOUND, "not rendered").into_response();
+    }
+    let Some(dest_dir) = body.get("dir").and_then(|v| v.as_str()) else {
+        return (StatusCode::BAD_REQUEST, "no dir").into_response();
+    };
+    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("output");
+    // <исходный stem>.<расширение реального выхода> — имя как у оригинала, контейнер как у результата.
+    let stem = std::path::Path::new(name).file_stem().and_then(|s| s.to_str()).unwrap_or(name);
+    let out_ext = src.extension().and_then(|s| s.to_str()).unwrap_or("mp4");
+    let base = std::path::Path::new(dest_dir);
+    let mut dest = base.join(format!("{stem}.{out_ext}"));
+    // Коллизия имён: два входа с одинаковым basename (напр. разные папки, оба intro.mp4) при batch
+    // «Сохранить все в папку» затёрли бы друг друга → добавляем суффикс (2),(3)… (ревью-находка H).
+    let mut n = 2u32;
+    while dest.exists() {
+        dest = base.join(format!("{stem} ({n}).{out_ext}"));
+        n += 1;
+    }
+    match std::fs::copy(&src, &dest) {
+        Ok(_) => (
+            [("content-type", "application/json")],
+            format!("{{\"ok\":true,\"path\":{:?}}}", dest.to_string_lossy()),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("копирование в {}: {e}", dest.display()),
+        )
+            .into_response(),
+    }
 }
 
 /// POST /projects/{pid}/open — открыть готовый output.mp4 в СИСТЕМНОМ плеере (на машине пользователя).
