@@ -176,16 +176,72 @@ pub fn run(
     // ── MUX ────────────────────────────────────────────────────────────────────
     bench.stage("mux");
     emit(progress, "mux", "муксирование видео + аудио");
-    if is_dub || new_audio != paths.input {
-        media::mux(&captioned, &new_audio, &paths.output)?;
-    } else {
-        // nodub: тянем аудио из исходного видео (captioned без звука) -> mux исходной дорожки.
-        media::mux(&captioned, &paths.input, &paths.output)?;
+    // Экспорт с ОРИГИНАЛЬНОЙ дорожкой (#113): дубляж (default, 1-я) + оригинал (2-я). Только dub/voiceover
+    // (в nodub/transcribe оригинал уже основной — вторая дорожка ни к чему). Контейнер mp4|mkv из настроек.
+    // Выход — output.<container>; при ошибке мультитрек-mux — фолбэк на обычный одинодорожечный mux.
+    let mut out_path = paths.output.clone();
+    let two_track = is_dub && proj.audio.keep_original_track;
+    let mut muxed = false;
+    if two_track {
+        let container = if proj.audio.container == "mkv" { "mkv" } else { "mp4" };
+        out_path = paths.output.with_extension(container);
+        let dub_lang = media::iso639_1_to_2(&proj.tgt_lang);
+        let src_code = proj
+            .meta
+            .extra
+            .get("src_lang")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let orig_lang = media::iso639_1_to_2(src_code);
+        let dub_title = format!("{} (дубляж)", lang_display(&proj.tgt_lang));
+        let orig_title = format!("{} (оригинал)", lang_display(src_code));
+        emit(progress, "mux", &format!("две дорожки: {dub_title} + {orig_title} -> {container}"));
+        match media::mux_multitrack(
+            &captioned, &new_audio, &paths.input, &out_path,
+            dub_lang, orig_lang, &dub_title, &orig_title,
+        ) {
+            Ok(()) => muxed = true,
+            Err(e) => {
+                emit(progress, "mux", &format!("мультитрек-mux не удался ({e}) -> одна дорожка"));
+                out_path = paths.output.clone();
+            }
+        }
+    }
+    if !muxed {
+        if is_dub || new_audio != paths.input {
+            media::mux(&captioned, &new_audio, &out_path)?;
+        } else {
+            // nodub: тянем аудио из исходного видео (captioned без звука) -> mux исходной дорожки.
+            media::mux(&captioned, &paths.input, &out_path)?;
+        }
+    }
+    // Убрать STALE выход другого контейнера от прошлого экспорта — иначе раздача (find_output) отдала бы
+    // устаревший output.mp4 вместо свежего output.mkv (и наоборот).
+    let stale = out_path.with_extension(if out_path.extension().and_then(|e| e.to_str()) == Some("mkv") { "mp4" } else { "mkv" });
+    if stale != out_path && stale.is_file() {
+        let _ = std::fs::remove_file(&stale);
     }
 
-    emit(progress, "done", &format!("готово -> {}", paths.output.display()));
+    emit(progress, "done", &format!("готово -> {}", out_path.display()));
     bench.finish(|m| emit(progress, "bench", m));
-    Ok(RenderResult { output: paths.output.clone() })
+    Ok(RenderResult { output: out_path })
+}
+
+/// Человекочитаемое имя языка для title дорожки. Нативных имён в проекте нет — берём английское имя из
+/// dub_translate::WHISPER_LANGS (единый источник языков), для незнакомого/auto — код заглавными.
+fn lang_display(code: &str) -> String {
+    let lc = code.trim().to_lowercase();
+    dub_translate::WHISPER_LANGS
+        .iter()
+        .find(|(k, _)| *k == lc.as_str())
+        .map(|(_, v)| v.to_string())
+        .unwrap_or_else(|| {
+            if lc.is_empty() || lc == "auto" {
+                "Original".to_string()
+            } else {
+                code.to_uppercase()
+            }
+        })
 }
 
 /// Только ДУБ-АУДИО (без бёрна субтитров и mux видео): TTS+fit+timeline+mix -> work_dir/dub_audio.m4a.

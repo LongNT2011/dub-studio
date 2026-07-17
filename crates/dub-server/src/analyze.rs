@@ -722,6 +722,9 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     };
     proj.mode = mode;
     proj.tgt_lang = args.tgt_lang.clone();
+    // Язык оригинала (для метки 2-й дорожки при keep_original_track). "auto" не детектится типизированно —
+    // храним как есть; render маппит непустой не-auto код через iso639, иначе "und". Инвариант extra=allow.
+    proj.meta.extra.insert("src_lang".into(), Value::String(args.src_lang.clone()));
     proj.subs.mode = subs_mode;
     proj.subs.burn = args.burn; // композируемость: вжигать субтитры/титры или нет
     proj.segments = segments;

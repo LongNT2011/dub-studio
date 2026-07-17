@@ -782,7 +782,9 @@ async fn list_projects(State(st): State<AppState>) -> Response {
                         .to_string()
                 });
             let audio_only = proj.meta.width <= 0 || proj.meta.height <= 0;
-            let done = dir.join("output.mp4").is_file() || dir.join("output.wav").is_file();
+            let done = dir.join("output.mp4").is_file()
+                || dir.join("output.mkv").is_file()
+                || dir.join("output.wav").is_file();
             items.push(json!({
                 "pid": pid,
                 "video": video,
@@ -1226,6 +1228,18 @@ async fn dub_audio_project(State(st): State<AppState>, AxPath(pid): AxPath<Strin
 
 // ─── GET /projects/{pid}/output ; /original ; /dub (Range-раздача файла) ─────
 
+/// Найти готовый выходной файл проекта: output.mp4 (обычный/mp4-мультитрек) -> output.mkv (mkv-мультитрек,
+/// #113) -> output.wav (аудио-режим). Единый порядок фолбэков для раздачи/сохранения/открытия/превью.
+fn find_output(dir: &std::path::Path) -> std::path::PathBuf {
+    for name in ["output.mp4", "output.mkv", "output.wav"] {
+        let p = dir.join(name);
+        if p.is_file() {
+            return p;
+        }
+    }
+    dir.join("output.mp4")
+}
+
 async fn output(
     State(st): State<AppState>,
     AxPath(pid): AxPath<String>,
@@ -1236,9 +1250,8 @@ async fn output(
         Ok(d) => d,
         Err(resp) => return resp,
     };
-    // output.mp4 (видео) или output.wav (аудио-режим, вход без видео).
-    let f = dir.join("output.mp4");
-    let f = if f.is_file() { f } else { dir.join("output.wav") };
+    // output.mp4/.mkv (видео; mkv — экспорт с оригинальной дорожкой) или output.wav (аудио-режим).
+    let f = find_output(&dir);
     if !f.is_file() {
         return (StatusCode::NOT_FOUND, "not rendered").into_response();
     }
@@ -1268,8 +1281,7 @@ async fn save_output(State(st): State<AppState>, AxPath(pid): AxPath<String>, Js
         Ok(d) => d,
         Err(resp) => return resp,
     };
-    let src = dir.join("output.mp4");
-    let src = if src.is_file() { src } else { dir.join("output.wav") };
+    let src = find_output(&dir);
     if !src.is_file() {
         return (StatusCode::NOT_FOUND, "not rendered").into_response();
     }
@@ -1310,8 +1322,7 @@ async fn open_output(State(st): State<AppState>, AxPath(pid): AxPath<String>) ->
         Ok(d) => d,
         Err(r) => return r,
     };
-    let f = dir.join("output.mp4");
-    let f = if f.is_file() { f } else { dir.join("output.wav") };
+    let f = find_output(&dir);
     if !f.is_file() {
         return (StatusCode::NOT_FOUND, "not rendered").into_response();
     }
@@ -1397,8 +1408,7 @@ async fn dub_video(
     // «перегенерировать озвучку»/regen) несут актуальную дорожку — но regen обновляет ТОЛЬКО dub_audio.m4a,
     // не output.mp4. Прежний жёсткий приоритет output.mp4 играл в превью УСТАРЕВШИЙ дубляж после regen
     // (юзеры: «перегенерировать не работает, новое слышно только после Экспорта») -> берём НОВЕЙШИЙ по mtime.
-    let output_mp4 = dir.join("output.mp4");
-    let output = if output_mp4.is_file() { output_mp4 } else { dir.join("output.wav") }; // .wav = аудио-режим
+    let output = find_output(&dir); // output.mp4/.mkv (видео) или output.wav (аудио-режим)
     let dub_audio = dir.join("dub_audio.m4a");
     let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
     let mut f = match (output.is_file(), dub_audio.is_file()) {

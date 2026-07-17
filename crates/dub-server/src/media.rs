@@ -345,14 +345,97 @@ pub fn gain(src: &Path, dst: &Path, gain_db: f64) -> Result<(), String> {
 
 /// Смуксить видео (copy) + аудио (aac). БЕЗ -shortest (выход по длиннейшему потоку). Порт media.mux.
 /// -af aformat=cl=stereo нормализует channel layout (mono-дубляж от hound = "1 channels (FL)", AAC
-/// его отвергает -22); на уже-стерео входе это no-op.
+/// его отвергает -22); на уже-стерео входе это no-op. +faststart двигает moov в начало (мгновенный
+/// старт воспроизведения по сети/в webview) — на mp4 no-op для локального файла, но полезен при раздаче.
 pub fn mux(video: &Path, audio: &Path, out: &Path) -> Result<(), String> {
     run_ff(&[
         OsStr::new("-y"), OsStr::new("-i"), video.as_os_str(), OsStr::new("-i"), audio.as_os_str(),
         OsStr::new("-map"), OsStr::new("0:v:0"), OsStr::new("-map"), OsStr::new("1:a:0?"),
         OsStr::new("-af"), OsStr::new("aformat=channel_layouts=stereo"),
-        OsStr::new("-c:v"), OsStr::new("copy"), OsStr::new("-c:a"), OsStr::new("aac"), out.as_os_str(),
+        OsStr::new("-c:v"), OsStr::new("copy"), OsStr::new("-c:a"), OsStr::new("aac"),
+        OsStr::new("-movflags"), OsStr::new("+faststart"), out.as_os_str(),
     ])
+}
+
+/// ISO 639-1 (2-буквенный код Whisper/UI) -> ISO 639-2/B (3-буквенный код дорожки контейнера, `language`
+/// в metadata:s:a). Покрывает весь WHISPER_LANGS (99 языков) + алиасы. Незнакомый код -> "und" (undefined).
+pub fn iso639_1_to_2(code: &str) -> &'static str {
+    match code.trim().to_lowercase().as_str() {
+        "en" => "eng", "zh" => "zho", "de" => "deu", "es" => "spa", "ru" => "rus",
+        "ko" => "kor", "fr" => "fra", "ja" => "jpn", "pt" => "por", "tr" => "tur",
+        "pl" => "pol", "ca" => "cat", "nl" => "nld", "ar" => "ara", "sv" => "swe",
+        "it" => "ita", "id" => "ind", "hi" => "hin", "fi" => "fin", "vi" => "vie",
+        "he" => "heb", "uk" => "ukr", "el" => "ell", "ms" => "msa", "cs" => "ces",
+        "ro" => "ron", "da" => "dan", "hu" => "hun", "ta" => "tam", "no" => "nor",
+        "th" => "tha", "ur" => "urd", "hr" => "hrv", "bg" => "bul", "lt" => "lit",
+        "la" => "lat", "mi" => "mri", "ml" => "mal", "cy" => "cym", "sk" => "slk",
+        "te" => "tel", "fa" => "fas", "lv" => "lav", "bn" => "ben", "sr" => "srp",
+        "az" => "aze", "sl" => "slv", "kn" => "kan", "et" => "est", "mk" => "mkd",
+        "br" => "bre", "eu" => "eus", "is" => "isl", "hy" => "hye", "ne" => "nep",
+        "mn" => "mon", "bs" => "bos", "kk" => "kaz", "sq" => "sqi", "sw" => "swa",
+        "gl" => "glg", "mr" => "mar", "pa" => "pan", "si" => "sin", "km" => "khm",
+        "sn" => "sna", "yo" => "yor", "so" => "som", "af" => "afr", "oc" => "oci",
+        "ka" => "kat", "be" => "bel", "tg" => "tgk", "sd" => "snd", "gu" => "guj",
+        "am" => "amh", "yi" => "yid", "lo" => "lao", "uz" => "uzb", "fo" => "fao",
+        "ht" => "hat", "ps" => "pus", "tk" => "tuk", "nn" => "nno", "mt" => "mlt",
+        "sa" => "san", "lb" => "ltz", "my" => "mya", "bo" => "bod", "tl" => "tgl",
+        "mg" => "mlg", "as" => "asm", "tt" => "tat", "haw" => "haw", "ln" => "lin",
+        "ha" => "hau", "ba" => "bak", "jw" => "jav", "su" => "sun", "yue" => "yue",
+        _ => "und",
+    }
+}
+
+/// Смуксить видео (copy) + ДВЕ звуковые дорожки: дубляж (default, 1-я) + оригинал (2-я). MP4/MKV по
+/// расширению `out`. Дубляж перекодируется в AAC (mono-дубляж от hound требует нормализации layout),
+/// оригинал ВСЕГДА перекодируется в AAC (без ffprobe-джсона кодек не определить — перекод только аудио
+/// дёшев). БЕЗ -shortest. Метки языка (ISO 639-2) и человекочитаемые title'ы кладутся в metadata дорожек;
+/// disposition:a:0 default помечает дубляж дорожкой по умолчанию, оригинал — недефолтной. +faststart на mp4.
+#[allow(clippy::too_many_arguments)]
+pub fn mux_multitrack(
+    video: &Path,
+    dub_audio: &Path,
+    orig_source: &Path,
+    out: &Path,
+    dub_lang: &str,
+    orig_lang: &str,
+    dub_title: &str,
+    orig_title: &str,
+) -> Result<(), String> {
+    let dl = format!("language={dub_lang}");
+    let dt = format!("title={dub_title}");
+    let ol = format!("language={orig_lang}");
+    let ot = format!("title={orig_title}");
+    let is_mp4 = out
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("mp4"))
+        .unwrap_or(true);
+    let mut args: Vec<&OsStr> = vec![
+        OsStr::new("-y"),
+        OsStr::new("-i"), video.as_os_str(),
+        OsStr::new("-i"), dub_audio.as_os_str(),
+        OsStr::new("-i"), orig_source.as_os_str(),
+        OsStr::new("-map"), OsStr::new("0:v:0"),
+        OsStr::new("-map"), OsStr::new("1:a:0"),
+        OsStr::new("-map"), OsStr::new("2:a:0?"),
+        OsStr::new("-c:v"), OsStr::new("copy"),
+        // дубляж (a:0)
+        OsStr::new("-c:a:0"), OsStr::new("aac"), OsStr::new("-b:a:0"), OsStr::new("192k"),
+        OsStr::new("-metadata:s:a:0"), OsStr::new(&dl),
+        OsStr::new("-metadata:s:a:0"), OsStr::new(&dt),
+        // оригинал (a:1) — всегда перекод в AAC (кодек источника без ffprobe не знаем)
+        OsStr::new("-c:a:1"), OsStr::new("aac"), OsStr::new("-b:a:1"), OsStr::new("192k"),
+        OsStr::new("-metadata:s:a:1"), OsStr::new(&ol),
+        OsStr::new("-metadata:s:a:1"), OsStr::new(&ot),
+        OsStr::new("-disposition:a:0"), OsStr::new("default"),
+        OsStr::new("-disposition:a:1"), OsStr::new("0"),
+    ];
+    if is_mp4 {
+        args.push(OsStr::new("-movflags"));
+        args.push(OsStr::new("+faststart"));
+    }
+    args.push(out.as_os_str());
+    run_ff(&args)
 }
 
 /// Сконвертировать аудио в PCM 16-bit WAV (стерео). Финальный формат аудио-режима (вход без видео):
@@ -496,5 +579,44 @@ mod env_tests {
             .collect();
         let e = duck_volume_expr(&blocks);
         assert!(e.len() < 60 * 300 + 64, "len={}", e.len());
+    }
+}
+
+#[cfg(test)]
+mod iso639_tests {
+    use super::iso639_1_to_2;
+
+    #[test]
+    fn known_codes_map_to_iso639_2() {
+        assert_eq!(iso639_1_to_2("ru"), "rus");
+        assert_eq!(iso639_1_to_2("en"), "eng");
+        assert_eq!(iso639_1_to_2("de"), "deu");
+        assert_eq!(iso639_1_to_2("ja"), "jpn");
+        assert_eq!(iso639_1_to_2("zh"), "zho");
+        assert_eq!(iso639_1_to_2("uk"), "ukr");
+        // 3-буквенные входы Whisper (haw/yue) тоже покрыты
+        assert_eq!(iso639_1_to_2("haw"), "haw");
+        assert_eq!(iso639_1_to_2("yue"), "yue");
+    }
+
+    #[test]
+    fn case_and_whitespace_insensitive() {
+        assert_eq!(iso639_1_to_2("RU"), "rus");
+        assert_eq!(iso639_1_to_2("  Fr  "), "fra");
+    }
+
+    #[test]
+    fn unknown_or_auto_is_und() {
+        assert_eq!(iso639_1_to_2("auto"), "und");
+        assert_eq!(iso639_1_to_2(""), "und");
+        assert_eq!(iso639_1_to_2("xx"), "und");
+    }
+
+    #[test]
+    fn every_whisper_code_has_mapping() {
+        // Незнакомый код -> "und". Все коды из WHISPER_LANGS должны маппиться в НЕ-"und".
+        for (code, _) in dub_translate::WHISPER_LANGS {
+            assert_ne!(iso639_1_to_2(code), "und", "no ISO 639-2 mapping for {code}");
+        }
     }
 }

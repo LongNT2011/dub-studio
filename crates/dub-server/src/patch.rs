@@ -318,6 +318,19 @@ fn op_voiceover_gain(p: &mut Project, edit: &Value) -> PatchResult {
     Ok(())
 }
 
+/// keep_original — экспортировать вторую дорожку с оригиналом {keep: bool, container?: "mp4"|"mkv"}.
+/// Только ремукс на экспорте (дубляж из кэша) — dirty не ставим. Неверный container -> 400.
+fn op_keep_original(p: &mut Project, edit: &Value) -> PatchResult {
+    p.audio.keep_original_track = b(edit, "keep").unwrap_or(true);
+    if let Some(c) = s(edit, "container") {
+        match c.as_str() {
+            "mp4" | "mkv" => p.audio.container = c,
+            other => return Err((400, format!("unknown container {other:?}"))),
+        }
+    }
+    Ok(())
+}
+
 /// Наложить caption-поля стиля на SubStyle (типизированные — в поля, прочие — в extra passthrough).
 /// Порт edit_caption._apply: неизвестных ключей нет (Pydantic валидирует), но extra="allow" сохраняет
 /// vision-поля (background/scene_*). Здесь принимаем любые ключи стиля; типизированные кладём в поля,
@@ -660,6 +673,7 @@ pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
         "regen_all" => op_regen_all(p, edit),
         "gain" => op_gain(p, edit),
         "voiceover_gain" => op_voiceover_gain(p, edit),
+        "keep_original" => op_keep_original(p, edit),
         other => Err((400, format!("unknown op {other:?}"))),
     }
 }
@@ -850,6 +864,27 @@ mod tests {
         assert!(p.captions.preset.name.is_none());
         apply(&mut p, &json!({"op":"blur_enable","on":false})).unwrap();
         assert!(!p.render.blur);
+    }
+
+    #[test]
+    fn keep_original_toggles_and_validates_container() {
+        let mut p = proj_with_seg();
+        // дефолты: выключено, mp4.
+        assert!(!p.audio.keep_original_track);
+        assert_eq!(p.audio.container, "mp4");
+        // keep + mkv.
+        apply(&mut p, &json!({"op":"keep_original","keep":true,"container":"mkv"})).unwrap();
+        assert!(p.audio.keep_original_track);
+        assert_eq!(p.audio.container, "mkv");
+        // ре-TTS не требуется — dirty НЕ ставится.
+        assert!(!p.segments[0].dirty);
+        // keep без container — контейнер не трогается.
+        apply(&mut p, &json!({"op":"keep_original","keep":false})).unwrap();
+        assert!(!p.audio.keep_original_track);
+        assert_eq!(p.audio.container, "mkv");
+        // невалидный container -> 400.
+        let e = apply(&mut p, &json!({"op":"keep_original","keep":true,"container":"avi"})).unwrap_err();
+        assert_eq!(e.0, 400);
     }
 
     #[test]

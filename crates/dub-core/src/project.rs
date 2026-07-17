@@ -68,6 +68,13 @@ pub struct Audio {
     /// Дефолт -12 dB: перевод на ~8-10 LU громче фона (broadcast-практика), оригинал слышно, но приглушённо.
     #[serde(default = "default_voiceover_gain")]
     pub voiceover_gain_db: f64,
+    /// Экспортировать ВТОРУЮ звуковую дорожку с оригиналом (дубляж — default 1-я, оригинал — 2-я).
+    /// false = один трек как раньше. Только dub/voiceover (в nodub/transcribe оригинал уже основной).
+    #[serde(default)]
+    pub keep_original_track: bool,
+    /// Контейнер выхода при keep_original_track: "mp4" | "mkv" (mkv надёжнее держит мультитрек-метаданные).
+    #[serde(default = "default_container")]
+    pub container: String,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -80,6 +87,10 @@ fn default_voiceover_gain() -> f64 {
     -12.0
 }
 
+fn default_container() -> String {
+    "mp4".to_string()
+}
+
 impl Default for Audio {
     fn default() -> Self {
         Audio {
@@ -88,6 +99,8 @@ impl Default for Audio {
             rewrite: None,
             gain_db: 0.0,
             voiceover_gain_db: default_voiceover_gain(),
+            keep_original_track: false,
+            container: default_container(),
             extra: Extra::new(),
         }
     }
