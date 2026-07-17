@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
 import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine, ChevronDown, ScrollText, Clock } from "lucide-react";
@@ -1026,6 +1026,19 @@ function CommandPalette({ commands }: { commands: { label: string; run: () => vo
   );
 }
 
+// Textarea фразы с АВТО-высотой под объём текста (реквест юзера: фикс-2-строки обрезали длинные
+// переводы, работать неудобно). height=scrollHeight на каждом изменении значения и на маунте.
+function AutoGrowTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";                       // сброс, чтобы уметь и уменьшаться
+    el.style.height = `${el.scrollHeight + 2}px`;   // +2 — бордеры, иначе появляется скролл на 1px
+  }, [props.value]);
+  return <textarea ref={ref} rows={1} {...props} />;
+}
+
 function Editor() {
   const { t, i18n } = useTranslation();
   const p = useStore((s) => s.project) as Project;
@@ -1394,10 +1407,10 @@ function Editor() {
                   </span>
                 </div>
                 <div className="text-[11px] text-[var(--color-muted)]/80 mt-1.5 leading-snug">{seg.src_text}</div>
-                <textarea value={seg.tgt_text} onChange={(e) => patchSeg(seg.id, e.target.value)}
+                <AutoGrowTextarea value={seg.tgt_text} onChange={(e) => patchSeg(seg.id, e.target.value)}
                   onClick={(e) => e.stopPropagation()}                       // editing text must not re-seek on every click
                   onBlur={(e) => { burstRef.current = null; persistSeg(seg.id, e.target.value); }}   // end the edit burst
-                  className="w-full mt-1.5 bg-[var(--color-bg)]/60 border border-[var(--color-border)] rounded-lg p-1.5 text-[13px] leading-snug resize-none focus:border-[var(--color-accent)] focus:outline-none transition-colors" rows={2} />
+                  className="w-full mt-1.5 bg-[var(--color-bg)]/60 border border-[var(--color-border)] rounded-lg p-1.5 text-[13px] leading-snug resize-none overflow-hidden focus:border-[var(--color-accent)] focus:outline-none transition-colors" />
                 {on && (
                   <div className="flex items-center gap-1.5 mt-1.5" onClick={(e) => e.stopPropagation()} title={t("seg.timingHint")}>
                     <Clock size={11} className="text-[var(--color-muted)] shrink-0" />
