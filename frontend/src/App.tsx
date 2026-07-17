@@ -545,14 +545,17 @@ function DropZone() {
   // с уведомлением. Текущий движок спрашиваем у бэкенда В МОМЕНТ выбора (не кэш с маунта): юзер мог
   // сменить движок в «Моделях», DropZone при этом не ремаунтится — кэш дал бы решение по устаревшему
   // значению и Parakeet молча поехал бы по языку, которого не знает (ревью-находка).
+  const srcReq = useRef("");                                                   // актуальность async-ответа: быстрый повторный выбор языка не должен воскрешать ноту прошлого
   function pickSrc(lang: string) {
     setSrc(lang);
+    srcReq.current = lang;
     if (lang === "auto" || PARAKEET_LANGS.has(lang)) {
       setAsrNote(null);
       return;
     }
     api.capabilities()
       .then((c) => {
+        if (srcReq.current !== lang) return; // юзер уже выбрал другой язык — ответ устарел
         if ((c.selection?.asr_engine ?? "parakeet") === "parakeet") {
           api.setSelection("asr_engine", "whisper").catch(() => {});
           setAsrNote(DUB_LANGS.find((l) => l.code === lang)?.name ?? lang);
@@ -560,7 +563,7 @@ function DropZone() {
           setAsrNote(null);
         }
       })
-      .catch(() => setAsrNote(null));
+      .catch(() => { if (srcReq.current === lang) setAsrNote(null); });
   }
   const [file, setFile] = useState<File | null>(null);                          // staged video — analyzed on Start, not on drop
   const [subsFile, setSubsFile] = useState<File | null>(null);                  // опц. готовые субтитры (SRT/ASS) -> текст+тайминг вместо ASR
