@@ -235,6 +235,23 @@ pub fn mix(voice: &Path, music: &Path, out: &Path) -> Result<(), String> {
     ])
 }
 
+/// Сведение диалог+фон с САЙДЧЕЙН-ДАКИНГОМ — проф. практика дубляжа: компрессор приглушает фон
+/// ТОЛЬКО пока звучит голос (attack 150мс / release 600мс — плавные подныривания), в паузах фон
+/// живёт ровно 1:1 — атмосфера НЕ гробится статичным резом (требование юзера: «дубляж громче фона,
+/// но фон не гробить»). Замер: фон мультика -17.1 LUFS ≈ уровню голоса — без дакинга речь тонет.
+/// threshold 0.02 / ratio 8 ≈ -6..-9 дБ фону под фразой. Порядок sidechaincompress: [фон][ключ-голос].
+pub fn mix_ducked(voice: &Path, music: &Path, out: &Path) -> Result<(), String> {
+    let fc = "[0:a]aformat=channel_layouts=stereo,asplit=2[v][vkey];\
+              [1:a]aformat=channel_layouts=stereo[m];\
+              [m][vkey]sidechaincompress=threshold=0.02:ratio=8:attack=150:release=600:makeup=1[bg];\
+              [v][bg]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[a]";
+    run_ff(&[
+        OsStr::new("-y"), OsStr::new("-i"), voice.as_os_str(), OsStr::new("-i"), music.as_os_str(),
+        OsStr::new("-filter_complex"), OsStr::new(fc), OsStr::new("-map"), OsStr::new("[a]"),
+        OsStr::new("-c:a"), OsStr::new("aac"), OsStr::new("-b:a"), OsStr::new("192k"), out.as_os_str(),
+    ])
+}
+
 /// Финальная нормализация программы по EBU R128 (ffmpeg loudnorm): интегральная громкость к I LUFS
 /// + true-peak лимитер к TP dBTP. Решение юзера (best-practice, НЕ питон): ставится последним шагом на
 /// смиксованную дорожку — держит целевую громкость соцсетей и ловит пики (пофразного клэмпа поэтому нет).

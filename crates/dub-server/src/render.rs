@@ -869,19 +869,16 @@ fn build_dub(
         media::mix(&dub, &bed, &new_audio)?;
         new_audio
     } else if let Some(inst) = instrumental {
-        // Фон под диалогом: деликатные -3 дБ (ТВ-стандарт M&E под речью). Замер 2026-07-17: фон
-        // мультика -17.1 LUFS при голосе -16 — зазор 1.1 LU, «дубляж не слышно вообще» (юзер);
-        // с голосом -14 и фоном -3 зазор ~6 LU. НЕ 0.45 (-7 дБ) — тот дав фон убивал атмосферу.
-        emit(progress, "mix", "сведение: инструментал (-3 dB под диалогом) + дубль-вокал");
+        // Сайдчейн-дакинг (проф. практика дубляжа): фон приседает ТОЛЬКО под фразами (компрессор по
+        // ключу-голосу), в паузах — ровно 1:1. Требование юзера: «дубляж громче фона, но фон не
+        // гробить» — статичный рез (-3/-7 дБ) убивал атмосферу, а без дакинга речь тонула (замер:
+        // фон -17.1 LUFS ≈ уровню голоса). Сбой фильтра -> честный fallback на прямой mix.
+        emit(progress, "mix", "сведение: инструментал + дубль-вокал (сайдчейн-дакинг под фразами)");
         let new_audio = wd.join("new_audio.m4a");
-        let bed = {
-            let ducked = wd.join("inst_bed.m4a");
-            match media::gain(&inst, &ducked, -3.0) {
-                Ok(()) => ducked,
-                Err(_) => inst.clone(),
-            }
-        };
-        media::mix(&dub, &bed, &new_audio)?;
+        if media::mix_ducked(&dub, &inst, &new_audio).is_err() {
+            emit(progress, "mix", "sidechain недоступен -> прямой mix");
+            media::mix(&dub, &inst, &new_audio)?;
+        }
         new_audio
     } else {
         dub
