@@ -35,6 +35,7 @@
     "voicing": "Generating voiceover",
     "style": "Detecting caption style",
     "locating": "Locating on-screen text",
+    "assembling": "Assembling video",
     "cancel": "Cancel"
   },
   "editor": {

@@ -35,6 +35,7 @@
     "voicing": "生成配音",
     "style": "检测字幕样式",
     "locating": "定位画面文字",
+    "assembling": "合成视频",
     "cancel": "取消"
   },
   "editor": {

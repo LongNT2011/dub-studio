@@ -35,6 +35,7 @@
     "voicing": "Generando la voz",
     "style": "Detectando estilo de subtítulos",
     "locating": "Localizando texto en pantalla",
+    "assembling": "Montando el vídeo",
     "cancel": "Cancelar"
   },
   "editor": {

@@ -35,6 +35,7 @@
     "voicing": "Gerando a narração",
     "style": "Detectando estilo das legendas",
     "locating": "Localizando texto na tela",
+    "assembling": "Montando o vídeo",
     "cancel": "Cancelar"
   },
   "editor": {

@@ -540,6 +540,10 @@ function DropZone() {
   const [tgt, setTgt] = useState<string>((i18n.language as string) || "ru");   // translate TO (default = UI lang)
   const [src, setSrc] = useState("auto");                                       // translate FROM (auto-detect)
   const [asrNote, setAsrNote] = useState<string | null>(null);                  // «Parakeet не знает язык → переключили на Whisper»
+  // Текущий ASR-движок — из ФАКТИЧЕСКОГО выбора бэкенда (active.json через capabilities.selection):
+  // нота и авто-переключение уместны только когда реально выбран Parakeet.
+  const [asrEngine, setAsrEngine] = useState<string>("parakeet");
+  useEffect(() => { api.capabilities().then((c) => setAsrEngine(c.selection?.asr_engine ?? "parakeet")).catch(() => {}); }, []);
   // Выбор источника: если язык вне 25 европейских Parakeet — авто-переключаем ASR на Whisper (99 языков)
   // с уведомлением. «auto» и европейские оставляют быстрый Parakeet.
   function pickSrc(lang: string) {
@@ -607,6 +611,18 @@ function DropZone() {
     if (!file) return;
     s.setStage("analyzing");
     s.setAudioOnly(audioOnly);               // «Анализируем аудио» вместо «видео» для аудио-входа
+    // Шаги степпера — только те, что реально будут в ЭТОЙ джобе (жалоба: «Находим текст на экране»
+    // при выключенной детекции; «Переводим/Генерируем озвучку» в режиме транскрипта).
+    {
+      const wantTranslate = audio === "dub" || audio === "voiceover" || (!audioOnly && subs === "translate") || (funnyOn && !!funny.trim());
+      const wantVoice = audio === "dub" || audio === "voiceover";
+      const steps = ["download", "separating", "diarizing", "recognizing"];
+      if (wantTranslate) steps.push("translating");
+      if (wantVoice) steps.push("voicing");
+      if (!audioOnly && detectText) steps.push("locating");
+      steps.push("assembling");
+      s.setJobSteps(steps);
+    }
     s.setProgress("", "", null);             // fresh stepper for this run
     try {
       const { project_id } = await api.createProject(file, isAudioFile(file) ? null : subsFile);   // сабы — только для видео
@@ -849,7 +865,10 @@ const ANALYZE_STEPS: { key: string; stages: string[] }[] = [
   { key: "recognizing", stages: ["asr"] },
   { key: "translating", stages: ["translate", "translate_ctx", "vision", "rewrite", "rewrite_ctx"] },   // "vision" = ctx-проход (vision layout + перевод транскрипта)
   { key: "voicing",     stages: ["tts", "mix"] },        // TTS synthesis + mix — runs BETWEEN translate and OCR; without this the stepper blanks (cur=-1) during voice gen
-  { key: "locating",    stages: ["ocr_detect", "translate_titles", "translate_tagline", "build", "burn", "mux"] },
+  // «Находим текст на экране» = ТОЛЬКО OCR-стадии: юзер с выключенной детекцией не должен видеть этот
+  // шаг вовсе (жалоба). Сборка выходного файла (build/burn/mux) — отдельный честный шаг.
+  { key: "locating",    stages: ["ocr_detect", "translate_titles", "translate_tagline"] },
+  { key: "assembling",  stages: ["build", "burn", "mux"] },
 ];
 // стадия -> переведённая метка шага (бэкенд шлёт детальный msg по-русски; в UI показываем локализованный
 // ярлык стадии вместо сырого текста, чтобы статус был на языке интерфейса). Неизвестная стадия -> null.
@@ -864,8 +883,10 @@ function stageLabel(stage: string | undefined, t: (k: string) => string): string
 
 function AnalyzeProgress() {
   const { t } = useTranslation();
-  const { progress, audioOnly } = useStore();
-  const matched = ANALYZE_STEPS.findIndex((stp) => stp.stages.includes(progress.stage));
+  const { progress, audioOnly, jobSteps } = useStore();
+  // Показываем только шаги текущей джобы (jobSteps из run()); null (открытие по ?pid и т.п.) = все.
+  const STEPS = jobSteps ? ANALYZE_STEPS.filter((stp) => jobSteps.includes(stp.key)) : ANALYZE_STEPS;
+  const matched = STEPS.findIndex((stp) => stp.stages.includes(progress.stage));
   // монотонно: неизвестная/незамапленная стадия (напр. промежуточный лог) НЕ гасит прогресс — держим
   // самый дальний достигнутый шаг. Компонент перемонтируется на каждый прогон, поэтому ref сбрасывается.
   const maxStep = useRef(-1);
@@ -879,7 +900,7 @@ function AnalyzeProgress() {
         <div className="text-center text-lg font-semibold">{audioOnly ? t("analyze.titleAudio") : t("analyze.title")}</div>
         {dl && <div className="mt-1 text-center text-[12px] text-[var(--color-muted)]">{t("analyze.firstRunNote")}</div>}
         <div className="mt-6 space-y-2.5">
-          {ANALYZE_STEPS.map((stp, i) => {
+          {STEPS.map((stp, i) => {
             const done = cur > i, active = cur === i;
             return (
               <div key={stp.key} className="flex items-center gap-3">
@@ -2757,7 +2778,11 @@ export default function App() {
   const [cap, setCap] = useState("");
   useEffect(() => { api.capabilities().then((c) => {
     const base = (p?: string) => p ? (p.split(/[\\/]/).pop() || p).replace(/\.(gguf|onnx|bin|pt|safetensors)$/i, "") : "";
-    const parts = [c.device, `ASR ${c.asr_model}`];
+    // ASR в футере — из ФАКТИЧЕСКОГО выбора (active.json), не из статичного имени Parakeet-модели:
+    // юзер переключил движок в «Моделях» -> строка обязана показать то, чем реально пойдёт прогон.
+    const sel = (c as { selection?: Record<string, string> }).selection ?? {};
+    const asrLabel = sel.asr_engine === "whisper" ? `whisper ${sel.whisper_model || "auto"}` : c.asr_model;
+    const parts = [c.device, `ASR ${asrLabel}`];
     if (c.models?.llm) parts.push(`MT+vision ${base(c.models.llm)}`);
     if (c.models?.tts) parts.push(`TTS ${c.models.tts}${c.tts_quant ? ` ${c.tts_quant}` : ""}`);
     parts.push("sep BSRoformer", "diar Sortformer", "OCR PP-OCR");   // фикс-движки пайплайна

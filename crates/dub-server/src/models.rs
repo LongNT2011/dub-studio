@@ -327,3 +327,30 @@ pub fn resolve_mt(mroot: &Path, sel: &Value) -> (PathBuf, PathBuf) {
         mroot.join("mt").join("mmproj-gemma-4-12b-it-qat-q4_0.gguf"),
     )
 }
+
+#[cfg(test)]
+mod resolve_live_tests {
+    use super::*;
+
+    // Диагностический (марафон QC): резолв ASR на живых путях репо. На CI без models/ — скип.
+    #[test]
+    fn resolve_asr_choice_on_live_repo() {
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap().parent().unwrap();
+        let mroot = repo.join("models");
+        if !mroot.join("active.json").is_file() {
+            eprintln!("skip: нет models/active.json");
+            return;
+        }
+        let sel = load_selection(&mroot);
+        let choice = resolve_asr_choice(repo, &mroot, &sel);
+        eprintln!("sel = {sel}");
+        eprintln!("resolved = {}", choice.describe());
+        if pick(&sel, "asr_engine") == Some("whisper") {
+            assert!(
+                choice.describe().starts_with("Whisper"),
+                "active.json просит whisper, но резолв дал: {}", choice.describe()
+            );
+        }
+    }
+}

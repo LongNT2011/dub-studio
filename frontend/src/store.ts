@@ -23,6 +23,8 @@ type State = {
   setJustAnalyzed: (b: boolean) => void;
   audioOnly: boolean;                // вход без видео -> заголовок прогресса «Анализируем аудио», не «видео»
   setAudioOnly: (b: boolean) => void;
+  jobSteps: string[] | null;         // ключи шагов степпера ТЕКУЩЕЙ джобы (по конфигу запуска); null = все
+  setJobSteps: (s: string[] | null) => void;
   setStage: (s: Stage) => void;
   setPid: (p: string | null) => void;
   setProject: (p: Project | null) => void;
@@ -58,6 +60,8 @@ export const useStore = create<State>((set, get) => ({
   setJustAnalyzed: (justAnalyzed) => set({ justAnalyzed }),
   audioOnly: false,
   setAudioOnly: (audioOnly) => set({ audioOnly }),
+  jobSteps: null,
+  setJobSteps: (jobSteps) => set({ jobSteps }),
   setStage: (stage) => set({ stage }),
   setPid: (pid) => set({ pid }),
   setProject: (project) => set({ project }),
