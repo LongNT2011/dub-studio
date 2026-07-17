@@ -545,6 +545,63 @@ const AUDIO_EXT = /\.(wav|mp3|flac|m4a|aac|ogg|opus|wma|aiff|aif|alac)$/i;
 // Файл — аудио (без видеодорожки)? По MIME или расширению. Видео-MIME имеет приоритет (напр. .ogv/.m4v).
 const isAudioFile = (f: File) => !f.type.startsWith("video/") && (f.type.startsWith("audio/") || AUDIO_EXT.test(f.name));
 
+// Стиль перевода (#112): пресет -> АНГЛИЙСКАЯ инструкция для Геммы (уходит на бэк как translate_style).
+// "" = обычный (без указаний). "custom" -> берётся свой текст из textarea. Формулировки на английском.
+const TR_STYLE_PRESETS: Record<string, string> = {
+  "": "",
+  technical: "Technical register: translate terminology precisely, keep product names and units as-is, no colloquialisms.",
+  literary: "Literary register: natural expressive language, idiomatic phrasing, preserve tone and imagery.",
+  casual: "Casual conversational register: everyday spoken language, contractions, simple words.",
+};
+// Итоговый текст стиля на бэк: пресет -> его текст; "custom" -> свой текст (обрезанный).
+function resolveTrStyle(choice: string, custom: string): string {
+  return choice === "custom" ? custom.trim() : (TR_STYLE_PRESETS[choice] ?? "");
+}
+// Красивое имя голоса для списка: срезаем префиксы RU_Male_/RU_Female_ и подчёркивания (значение — полное имя).
+const prettyVoice = (n: string) => n.replace(/^[A-Z]{2}_(Female|Male)_/i, "").replace(/_/g, " ");
+
+// Динамический список слотов голосов одного пола (#114): строки [селект голоса][▶ сэмпл][× удалить] + «+ добавить».
+// Порядок строк = приоритет спикеров. Значение слота — полное имя файла без расширения (как в GET /voices).
+function VoiceSlotList({ title, voices, slots, onChange }: {
+  title: string; voices: string[]; slots: string[]; onChange: (v: string[]) => void;
+}) {
+  const { t } = useTranslation();
+  const [playing, setPlaying] = useState<number | null>(null);   // индекс проигрываемого слота
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => () => { audioRef.current?.pause(); }, []);
+  const toggle = (i: number, name: string) => {
+    audioRef.current?.pause();
+    if (playing === i) { setPlaying(null); return; }              // повторный клик = стоп
+    if (!name) return;
+    const a = new Audio(api.voiceSampleUrl(name)); audioRef.current = a; setPlaying(i);
+    a.onended = () => setPlaying(null); a.play().then(() => setPlaying(i)).catch(() => setPlaying(null));
+  };
+  const opts = voices.map((v) => ({ value: v, label: prettyVoice(v), search: v }));
+  const setAt = (i: number, v: string) => onChange(slots.map((s, j) => (j === i ? v : s)));
+  const removeAt = (i: number) => { audioRef.current?.pause(); setPlaying(null); onChange(slots.filter((_, j) => j !== i)); };
+  const add = () => onChange([...slots, voices[0] ?? ""]);
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{title}</div>
+      <div className="space-y-1">
+        {slots.map((name, i) => (
+          <div key={i} className="flex items-center gap-1">
+            <Combobox value={name} onChange={(v) => setAt(i, v)} options={opts}
+              placeholder={t("voice.search")} noResults={t("voice.noMatch")} size="sm" className="flex-1 min-w-0" />
+            <button onClick={() => toggle(i, name)} title={t("voice.preview")}
+              className="shrink-0 p-1 rounded-md text-[var(--color-muted)] hover:text-[var(--color-accent)]">{playing === i ? <Pause size={13} /> : <Play size={13} />}</button>
+            <button onClick={() => removeAt(i)} title={t("voiceSlots.remove")}
+              className="shrink-0 p-1 rounded-md text-[var(--color-muted)] hover:text-[#ef4444]"><X size={13} /></button>
+          </div>
+        ))}
+      </div>
+      <button onClick={add} disabled={voices.length === 0}
+        className="mt-1 inline-flex items-center gap-1 text-[11px] text-[var(--color-accent-2)] hover:text-[var(--color-accent)] disabled:opacity-40">
+        <Plus size={12} />{t("voiceSlots.add")}</button>
+    </div>
+  );
+}
+
 function DropZone() {
   const { t, i18n } = useTranslation();
   const s = useStore();
@@ -596,6 +653,25 @@ function DropZone() {
     return Number.isFinite(v) ? v : -12;
   });
   const setVoGainSaved = (v: number) => { setVoGain(v); localStorage.setItem("dub-vo-gain", String(v)); };
+  // Стиль перевода (#112): выбор пресета + свой текст. Персистятся как глобальный дефолт для будущих запусков.
+  const [trStyle, setTrStyle] = useState<string>(() => localStorage.getItem("dub-tr-style-choice") ?? "");
+  const [trStyleCustom, setTrStyleCustom] = useState<string>(() => localStorage.getItem("dub-tr-style-custom") ?? "");
+  const setTrStyleSaved = (v: string) => { setTrStyle(v); localStorage.setItem("dub-tr-style-choice", v); };
+  const setTrStyleCustomSaved = (v: string) => { setTrStyleCustom(v); localStorage.setItem("dub-tr-style-custom", v); };
+  // Сохранить оригинальную дорожку (#113): 2-я аудиодорожка + контейнер вывода (mp4|mkv). Персист.
+  const [keepOrig, setKeepOrig] = useState<boolean>(() => localStorage.getItem("dub-keep-orig") === "1");
+  const [container, setContainer] = useState<"mp4" | "mkv">(() => (localStorage.getItem("dub-container") === "mkv" ? "mkv" : "mp4"));
+  const setKeepOrigSaved = (v: boolean) => { setKeepOrig(v); localStorage.setItem("dub-keep-orig", v ? "1" : "0"); };
+  const setContainerSaved = (v: "mp4" | "mkv") => { setContainer(v); localStorage.setItem("dub-container", v); };
+  // Голоса из библиотеки (#114): режим клон|library + два списка слотов (порядок = приоритет). Персист.
+  const [voiceSrc, setVoiceSrc] = useState<"clone" | "library">(() => (localStorage.getItem("dub-voice-src") === "library" ? "library" : "clone"));
+  const [slotsM, setSlotsM] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("dub-voice-slots-m") ?? "[]"); } catch { return []; } });
+  const [slotsF, setSlotsF] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("dub-voice-slots-f") ?? "[]"); } catch { return []; } });
+  const setVoiceSrcSaved = (v: "clone" | "library") => { setVoiceSrc(v); localStorage.setItem("dub-voice-src", v); };
+  const setSlotsMSaved = (v: string[]) => { setSlotsM(v); localStorage.setItem("dub-voice-slots-m", JSON.stringify(v)); };
+  const setSlotsFSaved = (v: string[]) => { setSlotsF(v); localStorage.setItem("dub-voice-slots-f", JSON.stringify(v)); };
+  const [voiceLib, setVoiceLib] = useState<string[]>([]);                        // имена голосов из GET /voices (для селектов слотов)
+  useEffect(() => { api.voices().then((r) => setVoiceLib(r.voices)).catch(() => {}); }, []);
   const [preview, setPreview] = useState<string | null>(null);                  // objectURL превью выбранного видео (первый кадр)
   const audioOnly = !!file && isAudioFile(file);                                // вход без видео -> режим «только аудио»
   useEffect(() => {                                                             // создаём/освобождаем objectURL под выбранный файл
@@ -659,6 +735,9 @@ function DropZone() {
     try {
       const { project_id } = await api.createProject(file, isAudioFile(file) ? null : subsFile);   // сабы — только для видео
       s.setPid(project_id);
+      // Стиль перевода (#112): читается стадией перевода ВНУТРИ analyze -> патчим ДО analyze (не как voiceover_gain).
+      const trStyleText = resolveTrStyle(trStyle, trStyleCustom);
+      if (trStyleText) await api.patch(project_id, { op: "translate_style", style: trStyleText });
       // subtitles = ОРИГИНАЛ: исходная дорожка + субтитры на языке оригинала (без дубляжа, без перевода);
       // voiceover = закадровый (перевод+TTS, оригинал слышно приглушённым); transcribe = транскрипт+диаризация.
       // Композируемо: аудио-выход, содержимое субтитров, шуточный ремикс — независимы.
@@ -673,6 +752,17 @@ function DropZone() {
       const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       if (audio === "voiceover") await api.patch(project_id, { op: "voiceover_gain", gain_db: voGain });   // громкость оригинала со старта -> рендер ниже подхватит
+      // Сохранить оригинальную дорожку (#113): 2-я аудиодорожка при mux рендера. Только dub/voiceover, не аудио-режим.
+      if (keepOrig && !audioOnly && (audio === "dub" || audio === "voiceover"))
+        await api.patch(project_id, { op: "keep_original", keep: true, container });
+      // Голоса из библиотеки (#114): раздать слоты по спикерам ПОСЛЕ analyze и ДО подготовки озвучки.
+      // Ошибка не роняет флоу — продолжаем с дефолтным клонированием.
+      if (voiceSrc === "library" && (audio === "dub" || audio === "voiceover") && (slotsM.length || slotsF.length)) {
+        try {
+          const r = await api.voiceSlots(project_id, { male: slotsM, female: slotsF });
+          useStore.getState().pushActivity(t("voiceSlots.assigned", { n: Object.keys(r.speakers || {}).length }), "done");
+        } catch (e) { useStore.getState().pushActivity(String(e), "error"); }
+      }
       s.setProject(await api.getProject(project_id));
       // Озвучку готовим ЗДЕСЬ, на экране загрузки (не собирая видео — кадры даёт per-frame preview),
       // чтобы редактор открылся с готовым дубом (плей сразу играет). Иначе рендер блокировал бы превью
@@ -846,6 +936,63 @@ function DropZone() {
             <textarea value={funny} onChange={(e) => setFunny(e.target.value)} rows={2} placeholder={t("remix.placeholder")}
               className="mt-1.5 w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-2 text-[12px] focus:border-[var(--color-accent)] focus:outline-none resize-none" />
           )}
+          {/* ГОЛОСА (#114): клон из видео (дефолт) или слоты из библиотеки. Свёрнут в пустом состоянии — одна строка радио. */}
+          {(audio === "dub" || audio === "voiceover") && (
+            <div className="mt-2.5">
+              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("voiceSlots.label")}</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {(["clone", "library"] as const).map((m) => (
+                  <button key={m} onClick={() => setVoiceSrcSaved(m)}
+                    className={`px-2 py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${voiceSrc === m ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+                    {t(m === "clone" ? "voiceSlots.clone" : "voiceSlots.library")}</button>
+                ))}
+              </div>
+              {voiceSrc === "library" && (
+                <div className="mt-1.5 space-y-2">
+                  <p className="text-[10px] text-[var(--color-muted)] leading-tight">{t("voiceSlots.priorityHint")}</p>
+                  <VoiceSlotList title={t("voiceSlots.male")} voices={voiceLib} slots={slotsM} onChange={setSlotsMSaved} />
+                  <VoiceSlotList title={t("voiceSlots.female")} voices={voiceLib} slots={slotsF} onChange={setSlotsFSaved} />
+                </div>
+              )}
+            </div>
+          )}
+          {/* СОХРАНИТЬ ОРИГИНАЛ (#113): 2-я аудиодорожка в выводе + контейнер. Только dub/voiceover, не аудио-режим. */}
+          {(audio === "dub" || audio === "voiceover") && !audioOnly && (
+            <div className="mt-2">
+              <label className="flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit" title={t("keepOrig.hint")}>
+                <input type="checkbox" checked={keepOrig} onChange={(e) => setKeepOrigSaved(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
+                {t("keepOrig.label")}
+                <span title={t("keepOrig.hint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
+              </label>
+              {keepOrig && (
+                <div className="mt-1.5 flex rounded-lg border border-[var(--color-border)] overflow-hidden text-[11px] w-fit">
+                  {(["mp4", "mkv"] as const).map((c) => (
+                    <button key={c} onClick={() => setContainerSaved(c)} title={t(c === "mp4" ? "keepOrig.mp4Hint" : "keepOrig.mkvHint")}
+                      className={`px-2.5 py-1 transition-colors ${container === c ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+                      {t(c === "mp4" ? "keepOrig.mp4" : "keepOrig.mkv")}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {/* СТИЛЬ ПЕРЕВОДА (#112): доп-регистр для Геммы. Виден при дубляже/закадре ИЛИ переводных субтитрах. */}
+          {(audio === "dub" || audio === "voiceover" || subs === "translate") && (
+            <div className="mt-2.5">
+              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("trStyle.label")}</div>
+              <select value={trStyle} onChange={(e) => setTrStyleSaved(e.target.value)}
+                className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[12px] focus:border-[var(--color-accent)] focus:outline-none">
+                <option value="">{t("trStyle.normal")}</option>
+                <option value="technical">{t("trStyle.technical")}</option>
+                <option value="literary">{t("trStyle.literary")}</option>
+                <option value="casual">{t("trStyle.casual")}</option>
+                <option value="custom">{t("trStyle.custom")}</option>
+              </select>
+              {trStyle === "custom" && (
+                <textarea value={trStyleCustom} onChange={(e) => setTrStyleCustomSaved(e.target.value)} rows={2} placeholder={t("trStyle.customPlaceholder")}
+                  className="mt-1.5 w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-2 text-[12px] focus:border-[var(--color-accent)] focus:outline-none resize-none" />
+              )}
+            </div>
+          )}
           {/* ЗАКАДРОВЫЙ: громкость оригинала под переводом — глобальный дефолт, применяется ко всем создаваемым проектам */}
           {audio === "voiceover" && (
             <div className="mt-2">
@@ -897,7 +1044,7 @@ function DropZone() {
       <input ref={inputRef} type="file" accept={MEDIA_ACCEPT} className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) setFile(f); }} />
       <input ref={batchRef} type="file" multiple accept={MEDIA_ACCEPT} className="hidden"
-        onChange={(e) => { const fs = [...(e.target.files || [])]; if (fs.length) { batchState.files = fs; batchState.tgt = tgt; batchState.src = src; batchState.audio = audio; batchState.subs = subs; batchState.burn = burn; batchState.detectText = detectText; batchState.funnyOn = funnyOn; batchState.funny = funny; batchState.voGain = voGain; s.setStage("batch"); } }} />
+        onChange={(e) => { const fs = [...(e.target.files || [])]; if (fs.length) { batchState.files = fs; batchState.tgt = tgt; batchState.src = src; batchState.audio = audio; batchState.subs = subs; batchState.burn = burn; batchState.detectText = detectText; batchState.funnyOn = funnyOn; batchState.funny = funny; batchState.voGain = voGain; batchState.trStyle = resolveTrStyle(trStyle, trStyleCustom); batchState.keepOrig = keepOrig; batchState.container = container; batchState.voiceSrc = voiceSrc; batchState.slotsM = slotsM; batchState.slotsF = slotsF; s.setStage("batch"); } }} />
     </div>
   );
 }
@@ -1464,7 +1611,10 @@ function Editor() {
       const { job_id } = await api.render(pid);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") { updateExport(exId, { msg: e.msg || "" }); pushActivity(e.msg || "", "work"); } });
       updateExport(exId, { status: "done", msg: "", url: `${api.outputUrl(pid)}?rev=${Date.now()}` });   // bust cache on re-export
-      api.reveal(pid, "output.mp4").catch(() => {});   // открыть проводник с выделенным готовым файлом — юзер видит, куда сохранилось
+      // Раскрыть реальный выход в проводнике: контейнер может быть output.mkv (#113, сохранена ориг. дорожка) —
+      // не хардкодим .mp4. Расширение из project.json (keep_original_track + container), иначе .mp4.
+      const outName = p.audio.keep_original_track && p.audio.container === "mkv" ? "output.mkv" : "output.mp4";
+      api.reveal(pid, outName).catch(() => {});   // открыть проводник с выделенным готовым файлом — юзер видит, куда сохранилось
       pushActivity(`${t("compare.result")}: ${name}`, "done"); playSfx("success");
       setRendered(true); setDubRev(Date.now());   // /dub now serves the freshly rendered output.mp4 -> reload <audio>
     } catch (err) {
@@ -2617,8 +2767,8 @@ function FirstRun() {
 }
 
 // Пакетная обработка: DropZone кладёт выбранные файлы + настройки сюда, BatchView читает (без раздувания стора).
-const batchState: { files: File[]; tgt: string; src: string; audio: string; subs: string; burn: boolean; detectText: boolean; funnyOn: boolean; funny: string; voGain: number } =
-  { files: [], tgt: "ru", src: "auto", audio: "dub", subs: "translate", burn: true, detectText: false, funnyOn: false, funny: "", voGain: -12 };
+const batchState: { files: File[]; tgt: string; src: string; audio: string; subs: string; burn: boolean; detectText: boolean; funnyOn: boolean; funny: string; voGain: number; trStyle: string; keepOrig: boolean; container: "mp4" | "mkv"; voiceSrc: "clone" | "library"; slotsM: string[]; slotsF: string[] } =
+  { files: [], tgt: "ru", src: "auto", audio: "dub", subs: "translate", burn: true, detectText: false, funnyOn: false, funny: "", voGain: -12, trStyle: "", keepOrig: false, container: "mp4", voiceSrc: "clone", slotsM: [], slotsF: [] };
 
 type BatchItem = { name: string; status: "queued" | "analyzing" | "rendering" | "done" | "error"; pid: string | null; pct: number; msg?: string; detail?: string };
 
@@ -2628,7 +2778,7 @@ function BatchView() {
   const { t } = useTranslation();
   const setStage = useStore((s) => s.setStage);
   const filesRef = useRef<File[]>(batchState.files);
-  const { tgt, src, audio, subs, burn, detectText, funnyOn, funny, voGain } = batchState;
+  const { tgt, src, audio, subs, burn, detectText, funnyOn, funny, voGain, trStyle, keepOrig, container, voiceSrc, slotsM, slotsF } = batchState;
   const [items, setItems] = useState<BatchItem[]>(() => filesRef.current.map((f) => ({ name: f.name, status: "queued", pid: null, pct: 0 })));
   const [running, setRunning] = useState(false);
   const [doneN, setDoneN] = useState(0);
@@ -2649,6 +2799,8 @@ function BatchView() {
         const ao = isAudioFile(bf);                                // этот файл — аудио (без видео)?
         const { project_id } = await api.createProject(bf);
         upd({ pid: project_id });
+        // Стиль перевода (#112): читается стадией перевода ВНУТРИ analyze -> патчим ДО analyze КАЖДОГО файла.
+        if (trStyle) await api.patch(project_id, { op: "translate_style", style: trStyle });
         // Транскрипт всегда вжигает субтитры (иначе транскрипт-режим дал бы видео без текста); аудио-файл ->
         // субтитры/бёрн/OCR off (нет видео) -> на выходе озвученный WAV.
         const fSubs = ao ? "none" : eSubs;
@@ -2656,6 +2808,12 @@ function BatchView() {
         const { job_id } = await api.analyze(project_id, tgt, eMode, src, fSubs, eRewrite, fBurn, ao ? false : detectText);
         await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); });
         if (audio === "voiceover") await api.patch(project_id, { op: "voiceover_gain", gain_db: voGain });   // громкость оригинала со старта -> общий для всех проектов батча
+        // Сохранить оригинальную дорожку (#113): 2-я дорожка при mux. Только dub/voiceover, не аудио-файл.
+        if (keepOrig && !ao && doRender) await api.patch(project_id, { op: "keep_original", keep: true, container });
+        // Голоса из библиотеки (#114): раздать слоты ПЕРЕД render каждого проекта. Ошибка не роняет батч (клон-фолбэк).
+        if (voiceSrc === "library" && doRender && (slotsM.length || slotsF.length)) {
+          try { await api.voiceSlots(project_id, { male: slotsM, female: slotsF }); } catch { /* фолбэк на клон */ }
+        }
         if (doRender) {
           upd({ status: "rendering", pct: 0 });
           const r = await api.render(project_id);

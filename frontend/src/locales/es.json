@@ -418,5 +418,33 @@
     "subsClear": "Quitar — usar reconocimiento automático",
     "translated": "Los subtítulos ya están en el idioma de destino (sin traducción)",
     "translatedHint": "Ej.: vídeo en inglés + subtítulos en ruso → doblaje en ruso. El texto va directo a la voz; se omiten el reconocimiento y la traducción."
+  },
+  "trStyle": {
+    "label": "Estilo de traducción",
+    "normal": "Normal",
+    "technical": "Técnico",
+    "literary": "Literario",
+    "casual": "Coloquial",
+    "custom": "Personalizado…",
+    "customPlaceholder": "Tu indicación para el traductor — p. ej. «formal, sin jerga», «tono Gen-Z»"
+  },
+  "keepOrig": {
+    "label": "Conservar la pista original",
+    "hint": "Añade una segunda pista de audio con el original — conmutable en cualquier reproductor.",
+    "mp4": "MP4",
+    "mkv": "MKV",
+    "mp4Hint": "MP4 — máxima compatibilidad",
+    "mkvHint": "MKV — todos los reproductores ven las pistas"
+  },
+  "voiceSlots": {
+    "label": "Voces",
+    "clone": "Clonar del vídeo",
+    "library": "De la biblioteca",
+    "male": "Voces masculinas",
+    "female": "Voces femeninas",
+    "add": "Añadir voz",
+    "remove": "Quitar",
+    "priorityHint": "Orden = prioridad: la ranura 1 es el hablante que más habla de ese género, luego en ciclo. Lista vacía = ese género se clona.",
+    "assigned": "Voces asignadas: {{n}} hablante(s)"
   }
 }

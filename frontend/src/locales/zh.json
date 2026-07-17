@@ -418,5 +418,33 @@
     "subsClear": "移除——使用自动识别",
     "translated": "字幕已是目标语言（不翻译）",
     "translatedHint": "例如：英语视频 + 俄语字幕 → 俄语配音。字幕文本直接用于配音，跳过识别与翻译。"
+  },
+  "trStyle": {
+    "label": "翻译风格",
+    "normal": "普通",
+    "technical": "技术",
+    "literary": "文学",
+    "casual": "口语",
+    "custom": "自定义…",
+    "customPlaceholder": "给译者的说明——例如「正式，无俚语」「Z 世代语气」"
+  },
+  "keepOrig": {
+    "label": "保留原始音轨",
+    "hint": "添加带原声的第二条音轨——可在任意播放器中切换。",
+    "mp4": "MP4",
+    "mkv": "MKV",
+    "mp4Hint": "MP4——兼容性最佳",
+    "mkvHint": "MKV——所有播放器都能识别音轨"
+  },
+  "voiceSlots": {
+    "label": "配音音色",
+    "clone": "从视频克隆",
+    "library": "从音色库",
+    "male": "男声",
+    "female": "女声",
+    "add": "添加音色",
+    "remove": "移除",
+    "priorityHint": "顺序 = 优先级：第 1 个槽位是该性别中说话最多的说话人，然后循环分配。列表为空 = 该性别使用克隆。",
+    "assigned": "已分配音色：{{n}} 位说话人"
   }
 }

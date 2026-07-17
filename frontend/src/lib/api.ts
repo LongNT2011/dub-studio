@@ -22,7 +22,7 @@ export type Title = {
 export type Project = {
   meta: { video: string; duration: number; width: number; height: number; fps: number; src_codec: string };
   mode: string; tgt_lang: string;
-  audio: { keep_music: boolean; voice: { mode: string; name?: string | null }; rewrite?: string | null; gain_db?: number; voiceover_gain_db?: number };
+  audio: { keep_music: boolean; voice: { mode: string; name?: string | null }; rewrite?: string | null; gain_db?: number; voiceover_gain_db?: number; translate_style?: string; keep_original_track?: boolean; container?: string };
   segments: Segment[];
   subs: { mode: string; burn?: boolean };
   captions: {
@@ -115,6 +115,9 @@ export const api = {
   voicesRename: (from: string, to: string) => postJson<{ voices: string[] }>("/voices/rename", { from, to }),
   voicesDelete: (name: string) => postJson<{ voices: string[] }>("/voices/delete", { name }),
   speakerVoice: (pid: string, speaker: string, name: string) => postJson<{ ok: boolean; name: string; voices: string[] }>(`/projects/${pid}/speaker-voice`, { speaker, name }),
+  // Слоты голосов из библиотеки (#114): раздать голоса по спикерам по полу/приоритету. Пустые списки -> клон.
+  voiceSlots: (pid: string, slots: { male: string[]; female: string[] }) =>
+    postJson<{ ok: boolean; speakers: Record<string, { voice: string | null; gender: string | null; f0: number }> }>(`/projects/${pid}/voice-slots`, slots),
   presets: () => getJson<{ presets: Record<string, Record<string, unknown>>; reveals: string[] }>("/presets"),
   createProject: (file: File, subs?: File | null) => {
     const fd = new FormData(); fd.append("file", file);

@@ -418,5 +418,33 @@
     "subsClear": "Remove — use auto-recognition",
     "translated": "Subtitles already in the target language (no translation)",
     "translatedHint": "E.g. English video + Russian subtitles → Russian dub. Subtitle text goes straight to voicing; ASR and translation are skipped."
+  },
+  "trStyle": {
+    "label": "Translation style",
+    "normal": "Normal",
+    "technical": "Technical",
+    "literary": "Literary",
+    "casual": "Casual",
+    "custom": "Custom…",
+    "customPlaceholder": "Your instruction for the translator — e.g. 'formal, no slang', 'Gen-Z tone'"
+  },
+  "keepOrig": {
+    "label": "Keep original track",
+    "hint": "Adds a second audio track with the original — switchable in any player.",
+    "mp4": "MP4",
+    "mkv": "MKV",
+    "mp4Hint": "MP4 — best compatibility",
+    "mkvHint": "MKV — every player sees the tracks"
+  },
+  "voiceSlots": {
+    "label": "Voices",
+    "clone": "Clone from video",
+    "library": "From library",
+    "male": "Male voices",
+    "female": "Female voices",
+    "add": "Add voice",
+    "remove": "Remove",
+    "priorityHint": "Order = priority: slot 1 is the most-speaking speaker of that gender, then round-robin. Empty list = that gender is cloned.",
+    "assigned": "Voices assigned: {{n}} speaker(s)"
   }
 }

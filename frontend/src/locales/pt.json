@@ -418,5 +418,33 @@
     "subsClear": "Remover — usar reconhecimento automático",
     "translated": "Legendas já no idioma de destino (sem tradução)",
     "translatedHint": "Ex.: vídeo em inglês + legendas em russo → dublagem em russo. O texto vai direto para a voz; reconhecimento e tradução são ignorados."
+  },
+  "trStyle": {
+    "label": "Estilo de tradução",
+    "normal": "Normal",
+    "technical": "Técnico",
+    "literary": "Literário",
+    "casual": "Coloquial",
+    "custom": "Personalizado…",
+    "customPlaceholder": "Sua instrução para o tradutor — ex. «formal, sem gíria», «tom Gen-Z»"
+  },
+  "keepOrig": {
+    "label": "Manter a faixa original",
+    "hint": "Adiciona uma segunda faixa de áudio com o original — alternável em qualquer player.",
+    "mp4": "MP4",
+    "mkv": "MKV",
+    "mp4Hint": "MP4 — melhor compatibilidade",
+    "mkvHint": "MKV — todos os players veem as faixas"
+  },
+  "voiceSlots": {
+    "label": "Vozes",
+    "clone": "Clonar do vídeo",
+    "library": "Da biblioteca",
+    "male": "Vozes masculinas",
+    "female": "Vozes femininas",
+    "add": "Adicionar voz",
+    "remove": "Remover",
+    "priorityHint": "Ordem = prioridade: o slot 1 é o falante que mais fala desse gênero, depois em rodízio. Lista vazia = esse gênero é clonado.",
+    "assigned": "Vozes atribuídas: {{n}} falante(s)"
   }
 }
