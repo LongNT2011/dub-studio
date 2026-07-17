@@ -216,7 +216,7 @@ pub fn dub_audio(
 /// Само значение регулирует пользователь (proj.audio.voiceover_gain_db, дефолт -6 dB).
 const VOICEOVER_DUCK_MIN_DB: f64 = -40.0;
 
-/// Анти-артефактный ретрай синтеза фразы: до MAX_TTS_ATTEMPTS попыток; детект «гудения» — is_hum_artifact
+/// Анти-артефактный ретрай синтеза фразы: до MAX_TTS_ATTEMPTS попыток; детект дефектов — synth_defect
 /// (in-memory по сэмплам voice_clone, ~мкс, без ffmpeg-субпроцесса). Если ПОДРЯД больше CONSECUTIVE_ABORT
 /// артефакт-фраз ИЛИ суммарно ретраев больше бюджета (по длине ролика) — стоп с ошибкой (стенд/рефы).
 /// Лестница: 1 — дефолт; 2-3 — temp-бамп (0.9/1.2); 4-5 — АЛЬТЕРНАТИВНЫЙ реф спикера (+temp).
@@ -325,7 +325,7 @@ fn qc_similarity(expected: &str, heard: &str) -> f64 {
 
 /// Динамический размах фразы (дБ, peak↔trough покадрового RMS 25мс) — скалярный «скор чистоты» для
 /// выбора наименее плохой попытки, когда ВСЕ ретраи с артефактом: речь ~53дБ, гул 3-11дБ (та же
-/// эмпирика, что у is_hum_artifact). Невалидный/короткий клип -> 0.0 (хуже всех).
+/// эмпирика, что у гул-ветки synth_defect). Невалидный/короткий клип -> 0.0 (хуже всех).
 fn hum_range_db(samples: &[f32], sr: i32) -> f64 {
     if sr <= 0 {
         return 0.0;
@@ -348,39 +348,6 @@ fn hum_range_db(samples: &[f32], sr: i32) -> f64 {
     let peak = rms.iter().cloned().fold(0.0f64, f64::max);
     let trough = rms.iter().cloned().filter(|&r| r > 1e-9).fold(peak, f64::min);
     20.0 * (peak / trough.max(1e-9)).log10()
-}
-
-fn is_hum_artifact(samples: &[f32], sr: i32) -> bool {
-    if sr <= 0 {
-        return false;
-    }
-    let sr = sr as usize;
-    let w = sr / 40; // окно 25мс
-    if w == 0 || samples.len() < (sr * 2) / 5 {
-        return false; // < 0.4с — слишком коротко, чтобы судить о паузах
-    }
-    let frames = samples.len() / w;
-    if frames < 4 {
-        return false;
-    }
-    let mut rms: Vec<f64> = Vec::with_capacity(frames);
-    for f in 0..frames {
-        let mut acc = 0.0f64;
-        for i in 0..w {
-            let v = samples[f * w + i] as f64;
-            acc += v * v;
-        }
-        rms.push((acc / w as f64).sqrt());
-    }
-    let peak = rms.iter().cloned().fold(0.0f64, f64::max);
-    if peak < 0.0056 {
-        return false; // почти тишина (≈−45 dBFS) — это не «гул», не флагаем
-    }
-    let thr = peak * 0.0316; // peak−30дБ = peak·10^(-30/20)
-    let silent = rms.iter().filter(|&&r| r < thr).count() as f64 / frames as f64;
-    let trough = rms.iter().cloned().filter(|&r| r > 1e-9).fold(peak, f64::min);
-    let range_db = 20.0 * (peak / trough.max(1e-9)).log10();
-    silent < 0.05 && range_db < 14.0
 }
 
 /// Полный аудио-конвейер дубляжа -> путь к new_audio. Порт _build_dub/_regen_dub (TTS+fit+timeline+mix).
@@ -641,7 +608,7 @@ fn build_dub(
                 None => (ref_of(s), reftext_of(s)),
             };
             // Анти-артефактный ретрай: иногда Higgs выдаёт «гудение» (непрерывный гул без речи). Детект
-            // in-memory (is_hum_artifact) по сэмплам; перегенерируем — синтез стохастичен, повтор обычно
+            // in-memory (synth_defect) по сэмплам; перегенерируем — синтез стохастичен, повтор обычно
             // даёт валидный дубль. Вариативность ретрая (BORROWINGS #17 + ревью-находка D): у Higgs
             // подтверждён рычаг сэмплинга `temperature` (PROSODY_FINDINGS §6.1); поле `seed` НЕ подтверждено
             // (DLL прекомпилена, C++ нет). Если варьировать ТОЛЬКО seed и DLL его игнорит — все 3 попытки
