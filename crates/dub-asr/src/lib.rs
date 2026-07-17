@@ -7,9 +7,20 @@
 //! Сегментация словного потока (_segment), transcribe / diarize / transcribe_turns — порт
 //! dubengine/asr.py и dubengine/diarize.py: паузы >0.6с, конец предложения .!?…, макс 8.0с.
 
+mod reconcile;
 mod segment;
+mod speaker_global;
 mod whisper;
+mod window;
+pub use reconcile::{speaker_for_overlap, DiarIndex};
+pub use speaker_global::{
+    cluster_embeddings, cosine, map_local_to_global, Embedding, LocalSpeaker, NullEmbedder,
+    SpeakerEmbedder,
+};
 pub use whisper::WhisperAsr;
+pub use window::{
+    detect_active_spans, merge_windows, plan_windows, speech_envelope, Window, WindowConfig,
+};
 
 use parakeet_rs::sortformer::{DiarizationConfig, Sortformer};
 use parakeet_rs::{ExecutionConfig, ParakeetTDT, TimestampMode, Transcriber};
@@ -131,6 +142,20 @@ pub struct SpeakerSegment {
 pub trait AsrEngine {
     fn transcribe(&mut self, wav: &Path, lang: &str) -> Result<Vec<Segment>, AsrError>;
     fn transcribe_turns(&mut self, wav: &Path, turns: &[Turn], lang: &str) -> Result<Vec<SpeakerSegment>, AsrError>;
+    /// Пакетная транскрипция МНОГИХ коротких файлов → полный текст каждого (None = не распознан/сбой).
+    /// Дефолт — цикл transcribe (Parakeet in-process и так быстр); Whisper переопределяет ОДНИМ
+    /// сабпроцессом на весь список (старт процесса дорогой, 333 файла по-одному — минуты впустую).
+    /// Используется QC-верификацией синтеза в рендере (сверка сказанного с ожидаемым переводом).
+    fn transcribe_many(&mut self, files: &[std::path::PathBuf], lang: &str) -> Vec<Option<String>> {
+        files
+            .iter()
+            .map(|f| {
+                self.transcribe(f, lang)
+                    .ok()
+                    .map(|segs| segs.into_iter().map(|s| s.text).collect::<Vec<_>>().join(" "))
+            })
+            .collect()
+    }
 }
 
 /// ASR-движок: держит загруженную TDT-модель тёплой между вызовами.
@@ -164,6 +189,164 @@ impl Asr {
         let (audio, sr) = load_wav_16k_mono(wav.as_ref())?;
         let words = self.transcribe_words(&audio, sr)?;
         Ok(segment_words(&words, SEG_MAX_GAP, SEG_MAX_DUR))
+    }
+
+    /// ОКОННАЯ транскрипция длинного клипа (задача #79): нарезать вокал на окна min-cut'ом
+    /// (`plan_windows`), транскрибировать КАЖДОЕ окно отдельно (RAM O(окна), не O(фильма)), прибавить
+    /// `window_offset` ко всем словным таймкодам, склеить с де-дупом слов на overlap соседних окон,
+    /// затем обычная `segment_words`. Для короткого файла (`total ≤ chunk_size`) `plan_windows` вернёт
+    /// ОДНО окно [0,total) -> путь совпадает с `transcribe` (питон-паритет, короткий режим не ломаем).
+    ///
+    /// `cfg=None` -> `WindowConfig::default()`. Публичный словный поток (после offset+dedup) можно
+    /// получить через [`Asr::transcribe_words_windowed`] — эта функция лишь добавляет сегментацию.
+    pub fn transcribe_windowed(
+        &mut self,
+        wav: impl AsRef<Path>,
+        _lang: &str,
+        cfg: Option<window::WindowConfig>,
+    ) -> Result<Vec<Segment>, AsrError> {
+        let (audio, sr) = load_wav_16k_mono(wav.as_ref())?;
+        let words = self.transcribe_words_windowed(&audio, sr, cfg)?;
+        Ok(segment_words(&words, SEG_MAX_GAP, SEG_MAX_DUR))
+    }
+
+    /// Словный поток по окнам (offset + де-дуп на overlap), без сегментации. Открытая точка для
+    /// оркестратора, которому нужны сырые слова (например для reconcile или сборки собственных сегментов).
+    pub fn transcribe_words_windowed(
+        &mut self,
+        audio: &[f32],
+        sr: u32,
+        cfg: Option<window::WindowConfig>,
+    ) -> Result<Vec<Word>, AsrError> {
+        let cfg = cfg.unwrap_or_default();
+        let total = audio.len() as f64 / sr as f64;
+        let windows = window::plan_windows(audio, sr, total, &cfg);
+        // Один window -> прямой прогон (идентично transcribe_words: без нарезки/дедупа).
+        if windows.len() <= 1 {
+            return self.transcribe_words(audio, sr);
+        }
+        // ПАРАЛЛЕЛЬ ЧЕРЕЗ N НЕЗАВИСИМЫХ СЕССИЙ: `ort::Session::run` берёт `&mut self` — параллель на
+        // ОДНОЙ сессии невозможна, но N отдельных инстансов ParakeetTDT (~0.7-1.5ГБ каждый при 24ГБ
+        // VRAM) работают одновременно. DUB_STUDIO_ASR_WORKERS (дефолт 3; 1 = старый последовательный).
+        // Любая ошибка параллельного пути -> тихий фолбэк на последовательный (ниже).
+        let workers: usize = std::env::var("DUB_STUDIO_ASR_WORKERS")
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(3)
+            .clamp(1, windows.len());
+        if workers > 1 {
+            if let Ok(all) = self.windowed_parallel(audio, sr, &windows, workers) {
+                return Ok(all);
+            }
+        }
+        let mut all: Vec<Word> = Vec::new();
+        for w in &windows {
+            let a = ((w.start * sr as f64) as usize).min(audio.len());
+            let b = ((w.end * sr as f64) as usize).min(audio.len());
+            if b <= a {
+                continue;
+            }
+            let clip = &audio[a..b];
+            let mut ws = self.transcribe_words(clip, sr)?;
+            let off = w.offset();
+            for word in &mut ws {
+                word.start += off;
+                word.end += off;
+            }
+            append_dedup_words(&mut all, ws, w.start);
+        }
+        Ok(all)
+    }
+
+    /// Параллельный оконный прогон: пул из `workers` потоков, КАЖДЫЙ со своей сессией
+    /// `ParakeetTDT::from_pretrained` (эксклюзивность `&mut self` обходится числом сессий, не очередью).
+    /// Очередь окон общая; результаты собираются по индексу окна и склеиваются В ПОРЯДКЕ окон тем же
+    /// `append_dedup_words`, что и последовательный путь (та же обработка overlap-швов).
+    fn windowed_parallel(
+        &mut self,
+        audio: &[f32],
+        sr: u32,
+        windows: &[window::Window],
+        workers: usize,
+    ) -> Result<Vec<Word>, AsrError> {
+        ensure_ort_dylib();
+        // Задания: (индекс окна, offset, w.start, клип-копия O(окна)).
+        let jobs: Vec<(usize, f64, f64, Vec<f32>)> = windows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, w)| {
+                let a = ((w.start * sr as f64) as usize).min(audio.len());
+                let b = ((w.end * sr as f64) as usize).min(audio.len());
+                if b <= a {
+                    None
+                } else {
+                    Some((i, w.offset(), w.start, audio[a..b].to_vec()))
+                }
+            })
+            .collect();
+        let n_slots = windows.len();
+        let queue = std::sync::Arc::new(std::sync::Mutex::new(jobs));
+        let results: std::sync::Arc<std::sync::Mutex<Vec<Option<(f64, Vec<Word>)>>>> =
+            std::sync::Arc::new(std::sync::Mutex::new((0..n_slots).map(|_| None).collect()));
+        let failed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        let mut handles = Vec::new();
+        for _ in 0..workers {
+            let (q, res, fail) = (queue.clone(), results.clone(), failed.clone());
+            let dir = self.tdt_dir.clone();
+            let sr_c = sr;
+            handles.push(std::thread::spawn(move || {
+                let mut model = match ParakeetTDT::from_pretrained(&dir, Some(exec_config())) {
+                    Ok(m) => m,
+                    Err(_) => {
+                        // не хватило VRAM/сессия не встала -> помечаем, воркер выходит
+                        fail.store(true, std::sync::atomic::Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    let job = { q.lock().unwrap().pop() };
+                    let Some((i, off, w_start, clip)) = job else { break };
+                    match model.transcribe_samples(clip, sr_c, 1, Some(TimestampMode::Words)) {
+                        Ok(r) => {
+                            let end_abs = |v: f64| v;
+                            let mut ws: Vec<Word> = r
+                                .tokens
+                                .into_iter()
+                                .map(|t| Word {
+                                    word: t.text.trim().to_string(),
+                                    start: end_abs(t.start as f64) + off,
+                                    end: (t.end as f64).max(t.start as f64) + off,
+                                })
+                                .filter(|w| !w.word.is_empty())
+                                .collect();
+                            ws.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
+                            res.lock().unwrap()[i] = Some((w_start, ws));
+                        }
+                        Err(_) => {
+                            fail.store(true, std::sync::atomic::Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                }
+            }));
+        }
+        for h in handles {
+            let _ = h.join();
+        }
+        if failed.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(AsrError::Parakeet("параллельный оконный прогон не удался (фолбэк на последовательный)".into()));
+        }
+        let slots = std::sync::Arc::try_unwrap(results)
+            .map_err(|_| AsrError::Parakeet("results arc".into()))?
+            .into_inner()
+            .map_err(|_| AsrError::Parakeet("results lock".into()))?;
+        let mut all: Vec<Word> = Vec::new();
+        for slot in slots.into_iter().flatten() {
+            let (w_start, ws) = slot;
+            append_dedup_words(&mut all, ws, w_start);
+        }
+        Ok(all)
     }
 
     /// Прогнать модель на семплах 16k/mono и получить словные таймстемпы (TimestampMode::Words).
@@ -364,10 +547,86 @@ pub fn turns(
     Ok(DiarTurns { turns: out, n_speakers: labels.len(), ref_windows: rw })
 }
 
+/// Нормализовать слово для сравнения на шве: lowercase + снять КОНЕЧНУЮ пунктуацию (.,!?…;:).
+/// Это чинит баг дедупа: ASR на границе окна отдаёт то же слово с разной пунктуацией ("fox" vs
+/// "fox,") — по сырому lowercased-тексту это «разные» слова, дубль просачивался. Ведущую пунктуацию
+/// (кавычки/тире) тоже снимаем, чтобы «„world" == world». Всё остальное (внутри-словные дефисы,
+/// апострофы) сохраняем — они различают настоящие слова.
+fn norm_word(w: &str) -> String {
+    w.trim()
+        .trim_matches(|c: char| {
+            matches!(c, '.' | ',' | '!' | '?' | '…' | ';' | ':' | '"' | '\'' | '«' | '»' | '„' | '“' | '”' | '‘' | '’' | '(' | ')' | '[' | ']' | '-' | '—' | '–')
+        })
+        .to_lowercase()
+}
+
+/// Дописать слова нового окна к общему потоку с де-дупом ре-транскрипции шва (overlap соседних окон).
+///
+/// Окна режутся с захлёстом (`WindowConfig::overlap`), поэтому у соседних окон есть общая зона
+/// `[window_start, prev_last_end]`, где ОБА окна распознают одни и те же слова. Дубль возникает ТОЛЬКО
+/// здесь. Слово нового окна отбрасываем, если оно (а) попадает в зону захлёста по времени И (б) по
+/// нормализованному тексту (см. [`norm_word`] — без конечной пунктуации) совпадает с уже добавленным
+/// словом в близком времени. Настоящий быстрый повтор («да да») сюда не попадает: его второй экземпляр
+/// либо за пределами зоны захлёста, либо это ТОТ ЖЕ поток одного окна (дедуп межоконный, incoming — из
+/// нового окна). Порядок сохраняется. Первое окно (all пусто) дописывается как есть.
+pub(crate) fn append_dedup_words(all: &mut Vec<Word>, incoming: Vec<Word>, window_start: f64) {
+    if all.is_empty() {
+        all.extend(incoming);
+        return;
+    }
+    // Допуск по времени: на шве два окна дают чуть разные тайминги одного слова. 0.6с покрывает
+    // overlap≈0.5с плюс дрожание ASR. Порог узкий намеренно — иначе съест настоящий быстрый повтор.
+    const DUP_TIME_TOL: f64 = 0.6;
+    // Верхняя граница зоны захлёста = конец уже покрытого предыдущим окном времени.
+    let last_end = all.last().map(|w| w.end).unwrap_or(f64::NEG_INFINITY);
+    for w in incoming {
+        // Дубль возможен ТОЛЬКО в зоне захлёста: слово началось до конца покрытого времени (+допуск)
+        // И не раньше начала общей зоны. Всё, что позже покрытого времени, — новый контент, добавляем.
+        let in_overlap_zone = w.start >= window_start - DUP_TIME_TOL && w.start <= last_end + DUP_TIME_TOL;
+        if in_overlap_zone && is_dup_of_tail(all, &w, DUP_TIME_TOL) {
+            continue;
+        }
+        all.push(w);
+    }
+}
+
+/// Является ли слово `w` ре-транскрипцией уже добавленного слова на шве: нормализованный текст (без
+/// конечной пунктуации, lowercase) совпадает И временные интервалы РЕАЛЬНО пересекаются (одно и то же
+/// физическое аудио распознано дважды). Смотрим только на хвост `all` — захлёст локален по времени.
+///
+/// КЛЮЧЕВОЕ отличие от настоящего быстрого повтора: ре-транскрипция шва занимает ТУ ЖЕ временную
+/// область, что уже покрытое слово (интервалы пересекаются). Настоящий повтор («да да») — это ДВА
+/// последовательных, НЕ пересекающихся во времени интервала. Поэтому дубль = пересечение интервалов
+/// (>0) при совпадении нормализованного текста; проверку по близости start оставляем как дешёвый
+/// пред-фильтр, но решает именно пересечение.
+fn is_dup_of_tail(all: &[Word], w: &Word, tol: f64) -> bool {
+    let wn = norm_word(&w.word);
+    if wn.is_empty() {
+        return false;
+    }
+    // до 6 последних слов достаточно для типичного overlap (0.5с ≈ 2-3 слова)
+    for prev in all.iter().rev().take(6) {
+        if norm_word(&prev.word) != wn {
+            continue;
+        }
+        // Пересечение интервалов [prev.start,prev.end] и [w.start,w.end]. >0 -> то же физическое
+        // аудио (ре-транскрипция шва). Настоящий повтор «да да» не пересекается (start_2 > end_1).
+        let overlap = prev.end.min(w.end) - prev.start.max(w.start);
+        if overlap > 0.0 {
+            return true;
+        }
+        // Вырожденный случай нулевой длительности (start==end): fallback на близость start в tol.
+        if (prev.end - prev.start).abs() < 1e-6 && (prev.start - w.start).abs() <= tol {
+            return true;
+        }
+    }
+    false
+}
+
 // ─── загрузка/подготовка аудио ──────────────────────────────────────────────
 
 /// Прочитать WAV, свести в моно и ресемплировать в 16 кГц (parakeet-rs требует ровно 16k моно).
-fn load_wav_16k_mono(path: &Path) -> Result<(Vec<f32>, u32), AsrError> {
+pub(crate) fn load_wav_16k_mono(path: &Path) -> Result<(Vec<f32>, u32), AsrError> {
     let disp = path.display().to_string();
     let wav_err = |e: hound::Error| AsrError::WavRead(disp.clone(), e.to_string());
     let mut reader = hound::WavReader::open(path).map_err(wav_err)?;
@@ -424,4 +683,96 @@ fn resample_linear(input: &[f32], src_sr: u32, dst_sr: u32) -> Vec<f32> {
         out.push(a + (b - a) * frac);
     }
     out
+}
+
+#[cfg(test)]
+mod dedup_tests {
+    use super::*;
+
+    fn w(word: &str, start: f64, end: f64) -> Word {
+        Word { word: word.into(), start, end }
+    }
+
+    #[test]
+    fn first_window_appended_verbatim() {
+        let mut all: Vec<Word> = Vec::new();
+        append_dedup_words(&mut all, vec![w("a", 0.0, 0.3), w("b", 0.3, 0.6)], 0.0);
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].word, "a");
+    }
+
+    #[test]
+    fn overlap_duplicate_dropped() {
+        // окно 1 дало "...world" на 9.8-10.0; окно 2 (window_start=9.5, overlap) повторяет "world"
+        // на ~9.85 -> дубль отбрасываем, а новое "next" на 10.2 добавляем.
+        let mut all: Vec<Word> = vec![w("hello", 9.4, 9.7), w("world", 9.8, 10.0)];
+        let incoming = vec![w("world", 9.85, 10.05), w("next", 10.2, 10.5)];
+        append_dedup_words(&mut all, incoming, 9.5);
+        let texts: Vec<&str> = all.iter().map(|x| x.word.as_str()).collect();
+        assert_eq!(texts, vec!["hello", "world", "next"], "дубль 'world' должен уйти: {texts:?}");
+    }
+
+    #[test]
+    fn non_overlap_word_kept_even_if_same_text_far_away() {
+        // одинаковый текст, но далеко по времени (>tol) — НЕ дубль, оставляем оба
+        let mut all: Vec<Word> = vec![w("yes", 1.0, 1.2)];
+        append_dedup_words(&mut all, vec![w("yes", 50.0, 50.2)], 49.5);
+        assert_eq!(all.len(), 2, "далёкий повтор — не дубль overlap");
+    }
+
+    #[test]
+    fn offset_applied_monotonic_after_dedup() {
+        // проверяем, что после дедупа порядок по времени сохранён (монотонность стыка)
+        let mut all: Vec<Word> = vec![w("one", 88.0, 88.4), w("two", 88.5, 89.0)];
+        // новое окно с offset уже применён вызывающим; overlap повторяет "two"
+        append_dedup_words(&mut all, vec![w("two", 88.55, 89.05), w("three", 89.2, 89.6)], 88.2);
+        for pair in all.windows(2) {
+            assert!(pair[1].start >= pair[0].start - 1e-9, "не монотонно: {all:?}");
+        }
+        assert_eq!(all.last().unwrap().word, "three");
+    }
+
+    #[test]
+    fn seam_duplicate_with_different_punctuation_dropped() {
+        // ГЛАВНЫЙ баг: окно 1 закончилось "fox," (с запятой), окно 2 на шве ре-транскрибировало
+        // то же слово как "fox" (без) -> по сырому тексту это «разные» слова и дубль просачивался.
+        // norm_word снимает конечную пунктуацию -> "fox,"=="fox" -> дубль уходит, сегмент не рвётся.
+        let mut all: Vec<Word> = vec![w("the", 9.4, 9.6), w("fox,", 9.7, 10.0)];
+        let incoming = vec![w("fox", 9.75, 10.05), w("jumps.", 10.2, 10.6)];
+        append_dedup_words(&mut all, incoming, 9.5);
+        let texts: Vec<&str> = all.iter().map(|x| x.word.as_str()).collect();
+        assert_eq!(texts, vec!["the", "fox,", "jumps."], "дубль 'fox' (с/без пунктуации): {texts:?}");
+    }
+
+    #[test]
+    fn seam_duplicate_punct_on_new_side_dropped() {
+        // Симметрично: окно 1 дало "world" (без), окно 2 на шве — "world." (с точкой). Тоже дубль.
+        let mut all: Vec<Word> = vec![w("hello", 5.2, 5.5), w("world", 5.6, 5.9)];
+        let incoming = vec![w("world.", 5.62, 5.92), w("bye", 6.1, 6.3)];
+        append_dedup_words(&mut all, incoming, 5.4);
+        let texts: Vec<&str> = all.iter().map(|x| x.word.as_str()).collect();
+        assert_eq!(texts, vec!["hello", "world", "bye"], "дубль 'world.'/'world': {texts:?}");
+    }
+
+    #[test]
+    fn genuine_fast_repeat_kept_across_windows() {
+        // Настоящий быстрый повтор "да да" (0.15с врозь) НЕ должен схлопнуться. Второе "да" из нового
+        // окна начинается ПОСЛЕ конца покрытого времени (last_end=10.0) -> не в зоне захлёста -> живёт.
+        let mut all: Vec<Word> = vec![w("да", 9.8, 10.0)];
+        let incoming = vec![w("да", 10.05, 10.25), w("точно", 10.4, 10.7)];
+        // window_start ниже, но второе "да" за last_end+tol не попадает в зону -> сохраняем
+        append_dedup_words(&mut all, incoming, 9.6);
+        let texts: Vec<&str> = all.iter().map(|x| x.word.as_str()).collect();
+        assert_eq!(texts, vec!["да", "да", "точно"], "быстрый повтор не должен схлопнуться: {texts:?}");
+    }
+
+    #[test]
+    fn norm_strips_terminal_and_wrapping_punctuation() {
+        assert_eq!(norm_word("Fox,"), "fox");
+        assert_eq!(norm_word("«world»"), "world");
+        assert_eq!(norm_word("End…"), "end");
+        // внутрисловные апострофы/дефисы НЕ трогаем (различают настоящие слова)
+        assert_eq!(norm_word("don't"), "don't");
+        assert_eq!(norm_word("well-known"), "well-known");
+    }
 }

@@ -115,13 +115,22 @@ impl AsrChoice {
     }
 }
 
-/// Путь к бинарю Whisper: env DUB_STUDIO_WHISPER_BIN, иначе <repo>/tools/whisper/whisper-faster.exe.
+/// Путь к бинарю Whisper: env DUB_STUDIO_WHISPER_BIN, иначе приоритетом XXL-сборка
+/// (<repo>/tools/whisper/Faster-Whisper-XXL/faster-whisper-xxl.exe — свежий движок, CUDA-DLL в
+/// комплекте (_xxl_data), умеет --batched), фолбэк — старый onefile whisper-faster.exe (CPU).
 pub fn whisper_bin(repo_root: &Path) -> PathBuf {
     if let Ok(p) = std::env::var("DUB_STUDIO_WHISPER_BIN") {
         return PathBuf::from(p);
     }
-    let name = if cfg!(windows) { "whisper-faster.exe" } else { "whisper-faster" };
-    repo_root.join("tools").join("whisper").join(name)
+    let wdir = repo_root.join("tools").join("whisper");
+    if cfg!(windows) {
+        let xxl = wdir.join("Faster-Whisper-XXL").join("faster-whisper-xxl.exe");
+        if xxl.is_file() {
+            return xxl;
+        }
+        return wdir.join("whisper-faster.exe");
+    }
+    wdir.join("whisper-faster")
 }
 
 /// Каталог Whisper-моделей: <mroot>/whisper (внутри — faster-whisper-<size>). Есть ли модель на диске.
@@ -145,10 +154,18 @@ pub fn resolve_asr_choice(repo_root: &Path, mroot: &Path, sel: &Value) -> AsrCho
                 .map(String::from)
         });
         if let (true, Some(model)) = (bin.is_file(), model) {
-            // Девайс Whisper: onefile-бинарь без bundled CUDA-либ -> дефолт cpu (CTranslate2 CPU, работает
-            // из коробки). Пользователь может задать cuda в настройках, если положил CUDA11-либы рядом.
-            let device = pick(sel, "whisper_device").unwrap_or("cpu").to_string();
-            let mut compute = pick(sel, "whisper_compute").unwrap_or("int8").to_string();
+            // Девайс Whisper: авто по ФАКТУ наличия CUDA-либ. whisper-faster (CTranslate2, CUDA 11)
+            // требует cublas64_11 + cudnn8 РЯДОМ С EXE (официальный Purfview: GPU execution requires
+            // cuBLAS and cuDNN libs next to the executable). CUDA-13 DLL Higgs'а ему не подходят —
+            // имена версионные (cublas64_13 ≠ cublas64_11), cuDNN в дистрибутиве нет вообще. Поэтому:
+            // либы лежат -> cuda (GPU в разы быстрее на длинных), нет -> честный cpu БЕЗ попыток и
+            // фолбэков. Явная настройка whisper_device перекрывает авто-детект.
+            let auto_dev = if whisper_cuda_libs_present(&bin) { "cuda" } else { "cpu" };
+            let device = pick(sel, "whisper_device").unwrap_or(auto_dev).to_string();
+            // Квант: на GPU дефолт float16 (родной для тензорных ядер), на CPU — int8.
+            let mut compute = pick(sel, "whisper_compute")
+                .unwrap_or(if device == "cuda" { "float16" } else { "int8" })
+                .to_string();
             // ГАРД: float16/bfloat16 не поддерживаются на CPU — CTranslate2 роняет процесс с
             // "Requested float16 compute type, but the target device do not support efficient float16".
             // На cpu коэрсим GPU-only кванты в безопасный int8, чтобы транскрипция не падала.
@@ -161,6 +178,31 @@ pub fn resolve_asr_choice(repo_root: &Path, mroot: &Path, sel: &Value) -> AsrCho
         }
     }
     AsrChoice::Parakeet(resolve_asr(mroot, sel))
+}
+
+/// Лежат ли рядом с whisper-faster.exe CUDA-библиотеки CTranslate2 (cuBLAS 11/12 + cuDNN).
+/// Ровно те имена, что требует движок; без них cuda-запуск гарантированно падает.
+/// XXL-сборка — self-contained: cublas64_12 + cudnn64_8 лежат внутри её _xxl_data (проверено по
+/// содержимому архива r245.4) -> для неё сразу true.
+fn whisper_cuda_libs_present(bin: &std::path::Path) -> bool {
+    if bin
+        .file_name()
+        .and_then(|s| s.to_str())
+        .is_some_and(|n| n.eq_ignore_ascii_case("faster-whisper-xxl.exe"))
+    {
+        return true;
+    }
+    let Some(dir) = bin.parent() else { return false };
+    let cublas = dir.join("cublas64_11.dll").is_file() || dir.join("cublas64_12.dll").is_file();
+    let cudnn = std::fs::read_dir(dir)
+        .map(|rd| {
+            rd.flatten().any(|e| {
+                let n = e.file_name().to_string_lossy().to_lowercase();
+                n.starts_with("cudnn") && n.ends_with(".dll")
+            })
+        })
+        .unwrap_or(false);
+    cublas && cudnn
 }
 
 /// Построить ASR-движок из выбора (boxed trait-object): analyze не знает деталей резолва.
