@@ -432,18 +432,24 @@ pub fn diarize(
         DiarizationConfig::callhome(),
     )
     .map_err(|e| AsrError::Parakeet(e.to_string()))?;
-    let segs = sf
-        .diarize(audio, sr, 1)
-        .map_err(|e| AsrError::Parakeet(e.to_string()))?;
-    // Sortformer отдаёт start/end в СЕМПЛАХ (при 16 кГц). Перенумеруем спикеров в контиг. 0..k-1.
-    let mut raw: Vec<Turn> = segs
-        .iter()
-        .map(|s| Turn {
-            start: s.start as f64 / TARGET_SR as f64,
-            end: s.end as f64 / TARGET_SR as f64,
-            speaker: s.speaker_id as i32,
-        })
-        .collect();
+    // ДЛИННЫЙ файл — оконная диаризация: окна DIAR_WIN с перекрытием, спикеры соседних окон
+    // сшиваются по пересечению реплик в оверлапе (страховка от роста памяти/деградации на часах).
+    let total = audio.len() as f64 / sr as f64;
+    let mut raw: Vec<Turn> = if total > DIAR_WINDOW_GATE_SECS {
+        diarize_windowed(&mut sf, &audio, sr)?
+    } else {
+        let segs = sf
+            .diarize(audio, sr, 1)
+            .map_err(|e| AsrError::Parakeet(e.to_string()))?;
+        // Sortformer отдаёт start/end в СЕМПЛАХ (при 16 кГц).
+        segs.iter()
+            .map(|s| Turn {
+                start: s.start as f64 / TARGET_SR as f64,
+                end: s.end as f64 / TARGET_SR as f64,
+                speaker: s.speaker_id as i32,
+            })
+            .collect()
+    };
     raw.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
     let mut labels: Vec<i32> = raw.iter().map(|t| t.speaker).collect();
     labels.sort_unstable();
@@ -454,6 +460,96 @@ pub fn diarize(
         t.speaker = remap[&t.speaker];
     }
     Ok(raw)
+}
+
+/// Гейт оконной диаризации: до часа whole-file проверен, длиннее — окна (страховка памяти/качества).
+const DIAR_WINDOW_GATE_SECS: f64 = 60.0 * 60.0;
+const DIAR_WIN_SECS: f64 = 30.0 * 60.0;
+const DIAR_OVERLAP_SECS: f64 = 10.0;
+
+/// Оконная диаризация: Sortformer по окнам DIAR_WIN с перекрытием DIAR_OVERLAP; спикеры окна i+1
+/// сшиваются со спикерами окна i по максимальному пересечению реплик в зоне оверлапа (стандартный
+/// приём стриминговой диаризации); не сматченные получают новые глобальные id. Реплики из головы
+/// окна, уже покрытые предыдущим (до середины оверлапа), отбрасываются — без дублей на шве.
+fn diarize_windowed(
+    sf: &mut Sortformer,
+    audio: &[f32],
+    sr: u32,
+) -> Result<Vec<Turn>, AsrError> {
+    let total = audio.len() as f64 / sr as f64;
+    let n_win = ((total / DIAR_WIN_SECS).ceil() as usize).max(1);
+    let mut out: Vec<Turn> = Vec::new();
+    let mut next_gid: i32 = 0;
+    // Глобальные реплики предыдущего окна в зоне оверлапа — для матчинга спикеров.
+    let mut prev_tail: Vec<Turn> = Vec::new();
+    for i in 0..n_win {
+        let grid0 = i as f64 * DIAR_WIN_SECS;
+        let w0 = if i == 0 { 0.0 } else { grid0 - DIAR_OVERLAP_SECS };
+        let w1 = ((i + 1) as f64 * DIAR_WIN_SECS).min(total);
+        let a0 = (w0 * sr as f64) as usize;
+        let a1 = ((w1 * sr as f64) as usize).min(audio.len());
+        let segs = sf
+            .diarize(audio[a0..a1].to_vec(), sr, 1)
+            .map_err(|e| AsrError::Parakeet(e.to_string()))?;
+        let local: Vec<Turn> = segs
+            .iter()
+            .map(|s| Turn {
+                start: w0 + s.start as f64 / TARGET_SR as f64,
+                end: w0 + s.end as f64 / TARGET_SR as f64,
+                speaker: s.speaker_id as i32,
+            })
+            .collect();
+        // Мапа локальный спикер -> глобальный id: по максимальному суммарному пересечению с
+        // репликами prev_tail в зоне оверлапа [w0, w0+OVERLAP].
+        let mut map: std::collections::HashMap<i32, i32> = Default::default();
+        if i > 0 {
+            let ov_end = w0 + DIAR_OVERLAP_SECS;
+            let mut locals: Vec<i32> = local.iter().map(|t| t.speaker).collect();
+            locals.sort_unstable();
+            locals.dedup();
+            for lid in locals {
+                let mut best: (f64, Option<i32>) = (0.0, None);
+                let mut per_gid: std::collections::HashMap<i32, f64> = Default::default();
+                for lt in local.iter().filter(|t| t.speaker == lid && t.start < ov_end) {
+                    for pt in prev_tail.iter() {
+                        let inter = (lt.end.min(pt.end) - lt.start.max(pt.start)).max(0.0);
+                        if inter > 0.0 {
+                            *per_gid.entry(pt.speaker).or_insert(0.0) += inter;
+                        }
+                    }
+                }
+                for (gid, secs) in per_gid {
+                    if secs > best.0 {
+                        best = (secs, Some(gid));
+                    }
+                }
+                if let (s, Some(gid)) = best {
+                    if s >= 0.5 {
+                        map.insert(lid, gid);
+                    }
+                }
+            }
+        }
+        let cut = if i == 0 { 0.0 } else { w0 + DIAR_OVERLAP_SECS / 2.0 };
+        for t in &local {
+            let gid = *map.entry(t.speaker).or_insert_with(|| {
+                let g = next_gid;
+                next_gid += 1;
+                g
+            });
+            // Голову окна до середины оверлапа отдаёт предыдущее окно (без дублей).
+            if t.end <= cut {
+                continue;
+            }
+            out.push(Turn { start: t.start.max(cut), end: t.end, speaker: gid });
+        }
+        // Хвост текущего окна (глобальными id) — вход матчинга следующего.
+        let next_ov_start = w1 - DIAR_OVERLAP_SECS;
+        prev_tail = out.iter().filter(|t| t.end > next_ov_start).cloned().collect();
+        // next_gid не меньше максимального выданного id + 1 (map мог добавить новые).
+        next_gid = next_gid.max(out.iter().map(|t| t.speaker).max().unwrap_or(-1) + 1);
+    }
+    Ok(out)
 }
 
 /// Окно референса спикера: [start, end] его самой длинной реплики (для клон-x-вектора).

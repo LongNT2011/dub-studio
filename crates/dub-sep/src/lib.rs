@@ -83,6 +83,14 @@ pub fn separate(
     let vocals = out_dir.join("vocals.wav");
     let instrumental = out_dir.join("instrumental.wav");
 
+    // ДЛИННЫЙ файл (> SEP_WINDOW_GATE_SECS) — оконная сепарация: чтение целиком раздуло бы RAM
+    // (4ч 44.1к stereo f32 ≈ 5ГБ на дорожку, а их тут три), окна с кроссфейдной сшивкой держат
+    // память O(окна) при том же качестве (стыки в перекрытии, шов заглажен фейдом 1с).
+    let (_, _, dur) = wav::probe(mix_wav).map_err(SepError::Wav)?;
+    if dur > SEP_WINDOW_GATE_SECS {
+        return separate_windowed(mix_wav, out_dir, cli, model, dur);
+    }
+
     run_cli(cli, model, mix_wav, &vocals)?;
     if !vocals.is_file() {
         return Err(SepError::NoOutput(vocals));
@@ -95,6 +103,99 @@ pub fn separate(
     let inst = subtract(mix, &voc);
     wav::write_f32(&instrumental, &inst).map_err(SepError::Wav)?;
 
+    Ok(SepResult { vocals, instrumental })
+}
+
+/// Гейт оконной сепарации: до 30 мин whole-file проверен (22-мин эпизод многократно), длиннее — окна.
+const SEP_WINDOW_GATE_SECS: f64 = 30.0 * 60.0;
+/// Размер окна сепарации (сек) и перекрытие соседних окон; кроссфейд шва — в середине перекрытия.
+const SEP_WIN_SECS: f64 = 20.0 * 60.0;
+const SEP_OVERLAP_SECS: f64 = 6.0;
+const SEP_CROSSFADE_SECS: f64 = 1.0;
+
+/// Оконная сепарация длинного файла: окна SEP_WIN c перекрытием, каждый через CLI, стемы сшиваются
+/// потоково (StreamWriter) с линейным кроссфейдом в середине перекрытия. Инструментал — вторым
+/// оконным проходом mix − собранный vocals (память O(окна)).
+fn separate_windowed(
+    mix_wav: &Path,
+    out_dir: &Path,
+    cli: &Path,
+    model: &Path,
+    dur: f64,
+) -> Result<SepResult, SepError> {
+    let (sr, ch, _) = wav::probe(mix_wav).map_err(SepError::Wav)?;
+    let ch = ch.max(1);
+    let vocals = out_dir.join("vocals.wav");
+    let instrumental = out_dir.join("instrumental.wav");
+    let f = |secs: f64| -> u32 { (secs * sr as f64).round() as u32 }; // сек -> фреймы
+    let total_frames = f(dur);
+    let n_win = ((dur / SEP_WIN_SECS).ceil() as usize).max(1);
+    let cf = f(SEP_CROSSFADE_SECS) as usize;
+
+    let mut out_voc = wav::StreamWriter::create(&vocals, sr, ch).map_err(SepError::Wav)?;
+    // Хвост предыдущего окна для кроссфейда: интерливнутые сэмплы от точки (cut - CF/2) до конца окна.
+    let mut carry: Vec<f32> = Vec::new();
+    for i in 0..n_win {
+        // Границы окна в фреймах: [g0, g1); первые окна тянут перекрытие влево.
+        let grid0 = f(i as f64 * SEP_WIN_SECS);
+        let g0 = if i == 0 { 0 } else { grid0.saturating_sub(f(SEP_OVERLAP_SECS)) };
+        let g1 = f(((i + 1) as f64 * SEP_WIN_SECS).min(dur)).min(total_frames);
+        let win_in = out_dir.join(format!("sep_win_{i}.wav"));
+        let win_voc = out_dir.join(format!("sep_win_{i}_voc.wav"));
+        let chunk = wav::read_f32_range(mix_wav, g0, g1 - g0).map_err(SepError::Wav)?;
+        wav::write_f32(&win_in, &chunk).map_err(SepError::Wav)?;
+        run_cli(cli, model, &win_in, &win_voc)?;
+        let voc = wav::read_f32(&win_voc).map_err(SepError::Wav)?;
+        let _ = std::fs::remove_file(&win_in);
+        let _ = std::fs::remove_file(&win_voc);
+        let s = voc.data; // интерливнуто, локальный фрейм 0 == глобальный g0
+
+        // Точка шва с ПРЕДЫДУЩИМ окном: cut_prev = grid0 - OV/2 (глобально). Пишем: кроссфейд
+        // [cut-CF/2, cut+CF/2) из carry и текущего окна, затем тело до следующего шва (хвост -> carry).
+        let to_local = |gframe: u32| -> usize { (gframe.saturating_sub(g0)) as usize * ch as usize };
+        let body_start_local = if i == 0 {
+            0
+        } else {
+            let cut = grid0 - f(SEP_OVERLAP_SECS / 2.0);
+            let cf_start = to_local(cut).saturating_sub(cf * ch as usize / 2);
+            // линейный кроссфейд carry (fade-out) x текущее окно (fade-in), длина = len(carry)
+            let n = carry.len().min(s.len().saturating_sub(cf_start));
+            let mut mixed = Vec::with_capacity(n);
+            for k in 0..n {
+                let t = k as f32 / n.max(1) as f32;
+                mixed.push(carry[k] * (1.0 - t) + s[cf_start + k] * t);
+            }
+            out_voc.write(&mixed).map_err(SepError::Wav)?;
+            cf_start + n
+        };
+        if i + 1 < n_win {
+            // Тело до начала кроссфейд-зоны следующего шва; хвост от неё — в carry.
+            let next_cut = f((i + 1) as f64 * SEP_WIN_SECS) - f(SEP_OVERLAP_SECS / 2.0);
+            let tail_start = to_local(next_cut).saturating_sub(cf * ch as usize / 2).max(body_start_local);
+            out_voc.write(&s[body_start_local..tail_start]).map_err(SepError::Wav)?;
+            carry = s[tail_start..(tail_start + cf * ch as usize).min(s.len())].to_vec();
+        } else {
+            out_voc.write(&s[body_start_local..]).map_err(SepError::Wav)?;
+        }
+    }
+    out_voc.finalize().map_err(SepError::Wav)?;
+
+    // Инструментал = mix − vocals, окнами по 10 мин (без перекрытий — оба файла уже выровнены).
+    let mut out_inst = wav::StreamWriter::create(&instrumental, sr, ch).map_err(SepError::Wav)?;
+    let step = f(600.0);
+    let mut pos: u32 = 0;
+    while pos < total_frames {
+        let n = step.min(total_frames - pos);
+        let mut m = wav::read_f32_range(mix_wav, pos, n).map_err(SepError::Wav)?;
+        let v = wav::read_f32_range(&vocals, pos, n).map_err(SepError::Wav)?;
+        let k = m.data.len().min(v.data.len());
+        for (o, vv) in m.data[..k].iter_mut().zip(&v.data[..k]) {
+            *o -= *vv;
+        }
+        out_inst.write(&m.data).map_err(SepError::Wav)?;
+        pos += n;
+    }
+    out_inst.finalize().map_err(SepError::Wav)?;
     Ok(SepResult { vocals, instrumental })
 }
 
