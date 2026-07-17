@@ -413,6 +413,7 @@ impl AsrEngine for WhisperAsr {
     /// репликам (по середине слова во временном окне реплики; слово вне всех окон -> ближайшая реплика),
     /// внутри каждой — обычная сегментация. Времена уже абсолютные.
     fn transcribe_turns(&mut self, wav: &Path, turns: &[Turn], lang: &str) -> Result<Vec<SpeakerSegment>, AsrError> {
+        eprintln!("[asr] Whisper transcribe_turns: {} реплик, wav={}", turns.len(), wav.display());
         let words = self.run_words_auto(wav, lang)?;
         if turns.is_empty() {
             // нет реплик -> single-speaker (0), как fallback

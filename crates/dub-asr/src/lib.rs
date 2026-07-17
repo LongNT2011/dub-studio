@@ -382,6 +382,7 @@ impl Asr {
         wav: impl AsRef<Path>,
         turns: &[Turn],
     ) -> Result<Vec<SpeakerSegment>, AsrError> {
+        eprintln!("[asr] Parakeet transcribe_turns: {} реплик, wav={}", turns.len(), wav.as_ref().display());
         let (audio, sr) = load_wav_16k_mono(wav.as_ref())?;
         let min_len = (0.2 * sr as f64) as usize;
         let mut out = Vec::new();
