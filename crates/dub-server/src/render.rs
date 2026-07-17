@@ -298,6 +298,17 @@ fn qc_similarity(expected: &str, heard: &str) -> f64 {
     if a.is_empty() && b.is_empty() {
         return 1.0;
     }
+    // Односложный обрывок («При...», «Не»): точное словное сравнение даёт ложный брак на правильном
+    // синтезе («Пре-», «Ниии...») и жжёт пересинтезы. Сравниваем ПРЕФИКСЫ (3 буквы); совсем короткое
+    // (≤2 букв) с пустым ASR — «сомнительно» (0.5), не брак: VAD системно молчит на клипах <0.5с,
+    // а настоящую тишину ловит акустический префильтр (synth_defect).
+    if a.len() == 1 && a[0].chars().count() <= 6 {
+        if b.is_empty() {
+            return if a[0].chars().count() <= 2 { 0.5 } else { 0.0 };
+        }
+        let ap: String = a[0].chars().take(3).collect();
+        return if b.iter().any(|w| w.starts_with(ap.as_str())) { 1.0 } else { 0.0 };
+    }
     if a.is_empty() || b.is_empty() {
         return 0.0;
     }
@@ -601,6 +612,9 @@ fn build_dub(
         // («скидывалось»). Смена голоса и так метит все сегменты dirty (op_recast/op_segment), так что
         // dirty-флага достаточно: не-dirty сегменты переиспользуют свой seg_XXX.wav между рендерами.
         let need_synth = (regen_dub && s.dirty) || !raw.is_file();
+        // Полный провал лестницы на КОРОТКОМ сегменте -> оригинальная реплика вместо артефакта
+        // (объявлен на уровне итерации: ниже гейтит и ASR-QC этого сегмента).
+        let mut kept_original = false;
         if need_synth {
             // Реф: сначала пробуем per-segment ЭМОЦ-реф (обрезок vocals16 самой этой чистой реплики ≥2.5с)
             // — клон наследует эмоцию оригинала в этот момент. Не подошёл (грязная/короткая реплика/пак) ->
@@ -679,6 +693,18 @@ fn build_dub(
                             best_bad = Some((samples, sr, rng));
                         }
                         if attempt >= MAX_TTS_ATTEMPTS {
+                            // Короткий выкрик/хор (типовой неспасаемый случай: у спикера только
+                            // хоровые реплики -> любой реф даёт вой) — как в проф. дубляже: песни и
+                            // выкрики НЕ дублируются, оставляем оригинальную реплику. QC-факт R5:
+                            // весь остаточный брак = сегменты <=1.4с интро-хора.
+                            if s.end - s.start <= 2.5 {
+                                media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
+                                kept_original = true;
+                                emit(progress, "tts", &format!(
+                                    "сегмент {fi}: все {MAX_TTS_ATTEMPTS} попыток с дефектом ({kind}) — оставлена оригинальная реплика (выкрик/хор не дублируем)"
+                                ));
+                                break (Vec::new(), sr);
+                            }
                             let (sm, r, rng) = best_bad.take().unwrap();
                             emit(progress, "tts", &format!(
                                 "⚠ сегмент {fi}: все {MAX_TTS_ATTEMPTS} попыток с дефектом ({kind}) — взята наименее плохая (размах {rng:.0} дБ)"
@@ -692,8 +718,10 @@ fn build_dub(
                     }
                 }
             };
-            let wav = AudiocppEngine::encode_wav(&samples, sr, 1);
-            std::fs::write(&raw, &wav).map_err(|e| format!("запись seg{fi}: {e}"))?;
+            if !kept_original {
+                let wav = AudiocppEngine::encode_wav(&samples, sr, 1);
+                std::fs::write(&raw, &wav).map_err(|e| format!("запись seg{fi}: {e}"))?;
+            }
             // Много ретраев подряд/суммарно = систем. проблема (стенд/VRAM или реф-клипы) → стоп с ошибкой.
             if retried {
                 consec += 1;
@@ -716,7 +744,9 @@ fn build_dub(
         cursor = at + media::duration(&fit)?;
         placed.push((at, fit));
         // В QC — только реально синтезированное в этом прогоне (кэш уже проверялся в своём прогоне).
-        if need_synth && !s.tgt_text.trim().is_empty() {
+        // kept_original (оригинальная реплика вместо неспасаемого выкрика) НЕ сверяем: там исходный
+        // язык, ASR-QC счёл бы его браком и пересинтезировал обратно в артефакт.
+        if need_synth && !kept_original && !s.tgt_text.trim().is_empty() {
             qc_list.push((
                 fi,
                 placed.len() - 1,
