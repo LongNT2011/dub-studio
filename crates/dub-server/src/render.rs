@@ -306,6 +306,12 @@ fn qc_similarity(expected: &str, heard: &str) -> f64 {
         if b.is_empty() {
             return if a[0].chars().count() <= 2 { 0.5 } else { 0.0 };
         }
+        // Вой-паттерн: услышанное кратно длиннее ожидания («Ну» -> «Нуууу…», «О,» -> «ОООО…») —
+        // префикс совпадает, но это артефакт, не речь.
+        let total_b: usize = b.iter().map(|w| w.chars().count()).sum();
+        if total_b > a[0].chars().count() * 3 + 4 {
+            return 0.0;
+        }
         let ap: String = a[0].chars().take(3).collect();
         return if b.iter().any(|w| w.starts_with(ap.as_str())) { 1.0 } else { 0.0 };
     }
@@ -770,10 +776,8 @@ fn build_dub(
         let heard = qc_asr.transcribe_many(&files, &proj.tgt_lang);
         let mut bad_idx: Vec<usize> = Vec::new();
         for (i, q) in qc_list.iter().enumerate() {
-            let chars = q.3.chars().filter(|c| c.is_alphanumeric()).count();
-            if chars < 4 {
-                continue; // междометия ASR путает законно
-            }
+            // Междометия НЕ пропускаем: вой «О,»->«ОООО…» жил именно на них (QC-скан R5b);
+            // ложные капризы ASR на коротких гасит префикс-режим qc_similarity (0.5 на пустом ASR).
             let h = heard.get(i).and_then(|x| x.as_deref()).unwrap_or("");
             if qc_similarity(&q.3, h) < 0.35 {
                 bad_idx.push(i);
@@ -829,12 +833,31 @@ fn build_dub(
             let files2: Vec<PathBuf> = bad_idx.iter().map(|&i| qc_list[i].2.clone()).collect();
             let heard2 = qc_asr.transcribe_many(&files2, &proj.tgt_lang);
             let mut still = 0usize;
+            let mut kept = 0usize;
             for (j, &i) in bad_idx.iter().enumerate() {
                 let h = heard2.get(j).and_then(|x| x.as_deref()).unwrap_or("");
                 if qc_similarity(&qc_list[i].3, h) < 0.35 {
+                    let (fi, pidx, raw, _, _, room, fitp) = &qc_list[i];
+                    let s = &proj.segments[*fi];
+                    // Короткий выкрик/хор, который не спасли ни лестница, ни пересинтез (типовой
+                    // случай: у спикера только хоровые реплики) — как в проф. дубляже, НЕ дублируем:
+                    // оригинальная реплика вместо подтверждённого артефакта.
+                    if s.end - s.start <= 2.5
+                        && media::trim(&vocals, raw, s.start, s.end, 24_000).is_ok()
+                    {
+                        if let Ok(nf) = fit_to_slot(raw, *room, fitp, paths.max_stretch) {
+                            placed[*pidx].1 = nf;
+                            kept += 1;
+                            emit(progress, "tts", &format!("QC: сегмент {fi} — оставлена оригинальная реплика (выкрик/хор не дублируем)"));
+                            continue;
+                        }
+                    }
                     still += 1;
                     emit(progress, "tts", &format!("⚠ QC: сегмент {} всё ещё не совпадает — отмечен", qc_list[i].0));
                 }
+            }
+            if kept > 0 {
+                emit(progress, "tts", &format!("QC: {kept} коротких выкриков оставлены оригиналом"));
             }
             emit(progress, "tts", &format!("QC итог: исправлено {}/{}, осталось помеченных {}", bad_idx.len() - still, bad_idx.len(), still));
         } else {
