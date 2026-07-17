@@ -306,53 +306,6 @@ fn qc_similarity(expected: &str, heard: &str) -> f64 {
     hit as f64 / a.len().max(b.len()) as f64
 }
 
-/// Альтернативный identity-реф спикера — ВТОРАЯ по длине реплика (ступени 4-5 лестницы ретраев:
-/// смена рефа выбивает вырожденный гул там, где вариация сэмплинга бессильна). Спикер с одной
-/// репликой альтернативы не имеет (не входит в карту).
-fn build_alt_speaker_refs(
-    segs: &[(usize, &dub_core::Segment)],
-    vocals16: &Path,
-    wd: &Path,
-    ref_secs: f64,
-) -> std::collections::BTreeMap<String, (PathBuf, Option<String>)> {
-    let mut out = std::collections::BTreeMap::new();
-    let mut speakers: Vec<String> =
-        segs.iter().map(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into())).collect();
-    speakers.sort();
-    speakers.dedup();
-    for spk in speakers {
-        let mut mine: Vec<&dub_core::Segment> = segs
-            .iter()
-            .filter(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into()) == spk)
-            .map(|(_, s)| *s)
-            .collect();
-        if mine.len() < 2 {
-            continue;
-        }
-        mine.sort_by(|a, b| (b.end - b.start).partial_cmp(&(a.end - a.start)).unwrap_or(std::cmp::Ordering::Equal));
-        // Вторая из ВЛЕЗАЮЩИХ в ref_secs (точный src_text, см. фикс выбора main-рефа); фолбэк — вторая
-        // по длине вообще.
-        let fitting: Vec<&dub_core::Segment> = mine
-            .iter()
-            .copied()
-            .filter(|s| (s.end - s.start) <= ref_secs + 0.05 && (s.end - s.start) >= 2.5)
-            .collect();
-        let cand = if fitting.len() >= 2 { fitting[1] } else { mine[1] };
-        let ref_wav = wd.join(format!("ref_alt_spk{spk}.wav"));
-        if media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + ref_secs), 16_000).is_err() {
-            continue;
-        }
-        let t = cand.src_text.trim();
-        let txt = if !t.is_empty() && (cand.end - cand.start) <= ref_secs + 0.05 {
-            Some(t.to_string())
-        } else {
-            None
-        };
-        out.insert(spk, (ref_wav, txt));
-    }
-    out
-}
-
 /// Динамический размах фразы (дБ, peak↔trough покадрового RMS 25мс) — скалярный «скор чистоты» для
 /// выбора наименее плохой попытки, когда ВСЕ ретраи с артефактом: речь ~53дБ, гул 3-11дБ (та же
 /// эмпирика, что у is_hum_artifact). Невалидный/короткий клип -> 0.0 (хуже всех).
@@ -515,23 +468,19 @@ fn build_dub(
     // ref_texts: расшифровка реф-клипа НА СПИКЕРА (Higgs клонирует качественнее с ref_text). Клон-режим —
     // src_text выбранного сегмента; пак-режим — АВТОТРАНСКРИПЦИЯ 12с-клипа (как Higgs build_speaker_reference;
     // пак-.txt = полный 3-мин транскрипт, к 12с не подходит). ASR best-effort: сбой -> None (не хуже прежнего).
-    let (spk_refs, mut ref_texts) = if use_pack {
-        (std::collections::BTreeMap::new(), std::collections::BTreeMap::new())
+    let (spk_refs, mut ref_texts, alt_refs) = if use_pack {
+        (std::collections::BTreeMap::new(), std::collections::BTreeMap::new(), std::collections::BTreeMap::new())
     } else {
-        build_speaker_refs(&segs, &vocals16, wd, paths.ref_secs)?
+        // Скоринг кандидатов + REF-QC (транскрипт каждого кандидата сверяется с его src_text,
+        // брак -> следующий) — ref_text выставляется ВНУТРИ по фактически услышанному.
+        let mut asr = crate::models::build_engine(&paths.asr);
+        build_speaker_refs(&segs, &vocals16, wd, paths.ref_secs, asr.as_mut(), progress)?
     };
     if use_pack {
         // Реф-транскрипция выбранным движком (Parakeet/Whisper), а НЕ захардкоженным Parakeet — иначе у
         // Whisper-only юзера (без Parakeet-модели) ref_text молча не считался бы. build_engine сам решает.
         let mut asr = crate::models::build_engine(&paths.asr);
         fill_ref_texts(asr.as_mut(), &pack_refs, &mut ref_texts);
-    }
-    // КЛОН: реф-клипы, обрезанные из-за уменьшенного ref_secs (в build_speaker_refs текст НЕ выставлен),
-    // ПЕРЕтранскрибируем — чтобы ref_text совпал с укороченным реф-аудио (иначе клон рассинхронится).
-    // Реф не обрезан (текст уже есть) -> не трогаем, поведение по умолчанию (12с) неизменно.
-    if !use_pack {
-        let mut asr = crate::models::build_engine(&paths.asr);
-        fill_ref_texts(asr.as_mut(), &spk_refs, &mut ref_texts);
     }
     let first_ref = pack_refs
         .values()
@@ -621,12 +570,8 @@ fn build_dub(
     let mut consec = 0usize;
     let mut total_retries = 0usize;
     let retry_budget = ((total / 10.0).ceil() as usize).max(20);
-    // Альтернативные рефы спикеров (вторая по длине чистая реплика) — ступени 4-5 лестницы ретраев.
-    let alt_refs = if use_pack {
-        std::collections::BTreeMap::new()
-    } else {
-        build_alt_speaker_refs(&segs, &vocals16, wd, paths.ref_secs)
-    };
+    // Альтернативные рефы спикеров (ступени 4-5 лестницы ретраев) — из того же скоринга/REF-QC,
+    // что и main-рефы (alt_refs построены выше в build_speaker_refs).
     // QC-список синтезированных в этом прогоне фраз: (fi, индекс в placed, raw-wav, tgt-текст, спикер,
     // room слота, путь fit-файла) — после цикла сверяем транскрипцией и пересинтезируем несовпавшие.
     let mut qc_list: Vec<(usize, usize, PathBuf, String, String, f64, PathBuf)> = Vec::new();
@@ -946,6 +891,8 @@ fn build_dub(
 type SpkRefs = (
     std::collections::BTreeMap<String, PathBuf>,
     std::collections::BTreeMap<String, String>,
+    // альт-рефы (ступени 4-5 лестницы): {спикер -> (wav, ref_text)} — из того же скоринга/REF-QC.
+    std::collections::BTreeMap<String, (PathBuf, Option<String>)>,
 );
 
 /// Идеальная длина identity-рефа спикера: 7-12с — модель клонирует стабильнее, чем на очень коротком
@@ -1061,57 +1008,177 @@ fn build_speaker_refs(
     vocals16: &Path,
     wd: &Path,
     ref_secs: f64,
+    asr: &mut dyn dub_asr::AsrEngine,
+    progress: &Progress,
 ) -> Result<SpkRefs, String> {
     let mut refs: std::collections::BTreeMap<String, PathBuf> = std::collections::BTreeMap::new();
-    // ref_text клона = src_text выбранного сегмента (сегменты ≤8с -> совпадает с ≤12с реф-клипом).
     let mut texts: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    let mut alts: std::collections::BTreeMap<String, (PathBuf, Option<String>)> =
+        std::collections::BTreeMap::new();
     let mut speakers: Vec<String> =
         segs.iter().map(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into())).collect();
     speakers.sort();
     speakers.dedup();
-    for spk in speakers {
-        if EMO_VOICE_REF {
-            // НОВЫЙ выбор (#81): окно 7-12с, ±1с обрезка, дроп первой реплики. ТОЛЬКО под флагом.
+    if EMO_VOICE_REF {
+        // НОВЫЙ выбор (#81): окно 7-12с, ±1с обрезка, дроп первой реплики. ТОЛЬКО под флагом.
+        for spk in speakers {
             let Some(pick) = pick_ref_window(&spk, segs, ref_secs) else { continue };
             let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
             media::trim(vocals16, &ref_wav, pick.start, pick.end.max(pick.start + 0.05), 16_000)?;
             refs.insert(spk.clone(), ref_wav);
-            // ref_text только если окно = вся реплика (иначе перетранскрипция в fill_ref_texts).
             if pick.exact_cover && !pick.src_text.is_empty() {
                 texts.insert(spk, pick.src_text);
             }
+        }
+        return Ok((refs, texts, alts));
+    }
+
+    // Скоринг кандидата в identity-рефы: ПЛОТНОСТЬ РЕЧИ (симв/с из готового транскрипта) ×
+    // близость к Higgs-оптимуму 5-9с. REF-QC-факт (прогон 2026-07-17): «длиннейшая реплика»
+    // выбирала мусор — 9.7с крика с одним «No!», хоровой выкрик интро, клип, где ASR слышит
+    // тишину; клоны от таких рефов выли «Ааааа» вместо коротких фраз. Нормальная речь ~12-16
+    // симв/с, крик/вой/шум — единицы.
+    let cps = |s: &dub_core::Segment| -> f64 {
+        s.src_text.trim().chars().count() as f64 / (s.end - s.start).max(0.1)
+    };
+    let score = |s: &dub_core::Segment| -> f64 {
+        let dur = s.end - s.start;
+        let cps_score = (1.0 - (cps(s) - 14.0).abs() / 14.0).clamp(0.0, 1.0);
+        let dur_score = if (5.0..=9.0).contains(&dur) {
+            1.0
+        } else if dur < 5.0 {
+            0.5 + (dur - 2.5) / 5.0
         } else {
-            // Реф спикера: ДЛИННЕЙШАЯ ИЗ ВЛЕЗАЮЩИХ в ref_secs реплика (аудио целиком + src_text ТОЧНЫЙ,
-            // без перетранскрипции). Фолбэк — абсолютно длиннейшая (как в питоне), только если ни одна
-            // не влезает. QC-факт (прогон 2026-07-17): у спикера с рефом 14.4с > cap 12с (обрезка →
-            // ASR-перетранскрипт) битых фраз 47%, у спикеров с влезающими рефами — 4-7%.
-            let mine: Vec<&dub_core::Segment> = segs
-                .iter()
-                .filter(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into()) == spk)
-                .map(|(_, s)| *s)
-                .collect();
+            1.0 - (dur - 9.0) / 6.0
+        };
+        cps_score * dur_score.clamp(0.3, 1.0)
+    };
+    // Топ-3 кандидата на спикера + ОДНА пакетная транскрипция всех кандидатов (Whisper = один
+    // сабпроцесс на список; Parakeet in-process и так быстр).
+    let mut cand_map: std::collections::BTreeMap<String, Vec<&dub_core::Segment>> = Default::default();
+    let mut batch: Vec<PathBuf> = Vec::new();
+    let mut batch_pos: std::collections::BTreeMap<String, usize> = Default::default();
+    for spk in &speakers {
+        let mine: Vec<&dub_core::Segment> = segs
+            .iter()
+            .filter(|(_, s)| s.speaker.clone().unwrap_or_else(|| "0".into()) == *spk)
+            .map(|(_, s)| *s)
+            .collect();
+        let mut good: Vec<&dub_core::Segment> = mine
+            .iter()
+            .copied()
+            .filter(|s| {
+                let d = s.end - s.start;
+                (2.5..=ref_secs + 0.05).contains(&d) && cps(s) >= 6.0
+            })
+            .collect();
+        good.sort_by(|a, b| score(b).partial_cmp(&score(a)).unwrap_or(std::cmp::Ordering::Equal));
+        good.truncate(3);
+        if good.is_empty() {
+            // Фолбэк (мало данных у спикера): длиннейшая влезающая, затем длиннейшая вообще.
+            let by_dur = |a: &&dub_core::Segment, b: &&dub_core::Segment| {
+                (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap_or(std::cmp::Ordering::Equal)
+            };
             let fitting = mine
                 .iter()
                 .copied()
-                .filter(|s| (s.end - s.start) <= ref_secs + 0.05 && (s.end - s.start) >= 2.5)
-                .max_by(|a, b| (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap_or(std::cmp::Ordering::Equal));
-            let cand = fitting.or_else(|| {
-                mine.iter().copied().max_by(|a, b| {
-                    (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap_or(std::cmp::Ordering::Equal)
-                })
-            });
-            let Some(cand) = cand else { continue };
-            let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
-            media::trim(vocals16, &ref_wav, cand.start, cand.end.min(cand.start + ref_secs), 16_000)?;
-            refs.insert(spk.clone(), ref_wav);
-            // ref_text = src_text ТОЛЬКО если реф не обрезан капом (иначе текст описывает больше аудио).
-            let t = cand.src_text.trim();
-            if !t.is_empty() && (cand.end - cand.start) <= ref_secs + 0.05 {
-                texts.insert(spk, t.to_string());
+                .filter(|s| (2.5..=ref_secs + 0.05).contains(&(s.end - s.start)))
+                .max_by(by_dur);
+            if let Some(c) = fitting.or_else(|| mine.iter().copied().max_by(by_dur)) {
+                good.push(c);
             }
         }
+        batch_pos.insert(spk.clone(), batch.len());
+        for (i, c) in good.iter().enumerate() {
+            let p = wd.join(format!("ref_cand_spk{spk}_{i}.wav"));
+            media::trim(vocals16, &p, c.start, c.end.min(c.start + ref_secs), 16_000)?;
+            batch.push(p);
+        }
+        cand_map.insert(spk.clone(), good);
     }
-    Ok((refs, texts))
+    // REF-QC: транскрипт каждого кандидата сверяем с его src_text — реф обязан ЗВУЧАТЬ как его
+    // текст (кривой реф = кривой ref_text = каскад брака в клоне). Сбой ASR -> None -> кандидат
+    // принимается без сверки (не хуже прежнего поведения).
+    let heard: Vec<Option<String>> = asr.transcribe_many(&batch, "auto");
+    for spk in &speakers {
+        let cands = &cand_map[spk];
+        if cands.is_empty() {
+            continue;
+        }
+        let base = batch_pos[spk];
+        // (кандидат, услышанное, прошёл ли сверку)
+        let verdict: Vec<(usize, Option<&str>, bool)> = cands
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let h = heard.get(base + i).and_then(|o| o.as_deref());
+                let ok = match h {
+                    Some(t) => qc_similarity(&c.src_text, t) >= 0.5,
+                    None => true, // ASR молчит про сбой — доверяем скорингу
+                };
+                (i, h, ok)
+            })
+            .collect();
+        let passed: Vec<&(usize, Option<&str>, bool)> = verdict.iter().filter(|v| v.2).collect();
+        let (main_i, main_heard) = match passed.first() {
+            Some((i, h, _)) => (*i, *h),
+            None => {
+                let h0 = verdict[0].1.unwrap_or("");
+                emit(
+                    progress,
+                    "tts",
+                    &format!("⚠ спикер {spk}: все реф-кандидаты не прошли сверку (слышно: «{}») — беру лучший по скору", h0.chars().take(60).collect::<String>()),
+                );
+                (0, verdict[0].1)
+            }
+        };
+        let main_seg = cands[main_i];
+        let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
+        std::fs::rename(wd.join(format!("ref_cand_spk{spk}_{main_i}.wav")), &ref_wav)
+            .map_err(|e| format!("реф спикера {spk}: {e}"))?;
+        refs.insert(spk.clone(), ref_wav);
+        // ref_text: прошёл сверку -> УСЛЫШАННОЕ (точно соответствует звуку клипа); иначе src_text.
+        let t = main_heard
+            .filter(|h| !h.trim().is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| main_seg.src_text.trim().to_string());
+        if !t.is_empty() {
+            texts.insert(spk.clone(), t);
+        }
+        // Альт-реф (ступени 4-5 лестницы ретраев): следующий ПРОШЕДШИЙ сверку кандидат; фолбэк —
+        // просто следующий по скору. Спикер с одним кандидатом остаётся без альтернативы.
+        let alt = passed
+            .iter()
+            .find(|(i, _, _)| *i != main_i)
+            .map(|(i, h, _)| (*i, *h))
+            .or_else(|| verdict.iter().find(|(i, _, _)| *i != main_i).map(|(i, h, _)| (*i, *h)));
+        if let Some((ai, ah)) = alt {
+            let alt_wav = wd.join(format!("ref_alt_spk{spk}.wav"));
+            if std::fs::rename(wd.join(format!("ref_cand_spk{spk}_{ai}.wav")), &alt_wav).is_ok() {
+                let at = ah
+                    .filter(|h| !h.trim().is_empty())
+                    .map(str::to_string)
+                    .or_else(|| Some(cands[ai].src_text.trim().to_string()).filter(|s| !s.is_empty()));
+                alts.insert(spk.clone(), (alt_wav, at));
+            }
+        }
+        // Прибрать невостребованных кандидатов.
+        for (i, _) in cands.iter().enumerate() {
+            let _ = std::fs::remove_file(wd.join(format!("ref_cand_spk{spk}_{i}.wav")));
+        }
+        emit(
+            progress,
+            "tts",
+            &format!(
+                "реф спикера {spk}: «{}» ({:.1}с, {} кандидата, сверка {})",
+                texts.get(spk).map(|s| s.chars().take(50).collect::<String>()).unwrap_or_default(),
+                main_seg.end - main_seg.start,
+                cands.len(),
+                if passed.is_empty() { "⚠ не пройдена" } else { "ok" }
+            ),
+        );
+    }
+    Ok((refs, texts, alts))
 }
 
 /// Ускорить дубль под target_dur, если он длиннее (никогда не замедлять). Порт assemble.fit_to_slot.

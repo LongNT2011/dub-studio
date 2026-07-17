@@ -219,12 +219,48 @@ fn run_ffmpeg(
         cmd.arg(a);
     }
     cmd.arg(out);
-    let o = cmd.output().map_err(|e| format!("ffmpeg запуск: {e}"))?;
+    let o = output_with_timeout(cmd, BURN_TIMEOUT_SECS)?;
     if !o.status.success() {
         let tail = stderr_tail(&o.stderr);
         return Err(format!("ffmpeg caption burn failed:\n{tail}"));
     }
     Ok(())
+}
+
+/// Потолок бёрна: NVENC жуёт часовое видео за минуты; 30 мин не хватает только когда ffmpeg
+/// мёртво завис (наблюдалось: cmd.output() без таймаута вешал единственный воркер джоб навсегда).
+const BURN_TIMEOUT_SECS: u64 = 30 * 60;
+
+/// Command::output() с жёстким таймаутом. stdout/stderr читаются фоновыми потоками (иначе полный
+/// пайп блокирует ffmpeg и это превращается в вечное взаимное ожидание); по истечении — kill +
+/// ошибка с хвостом stderr. Никакой внешней зависимости: try_wait в цикле с шагом 250мс.
+fn output_with_timeout(mut cmd: Command, secs: u64) -> Result<std::process::Output, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    eprintln!("[burn] ffmpeg: {cmd:?}");
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| format!("ffmpeg запуск: {e}"))?;
+    let mut so = child.stdout.take().expect("piped stdout");
+    let mut se = child.stderr.take().expect("piped stderr");
+    let th_out = std::thread::spawn(move || { let mut b = Vec::new(); let _ = so.read_to_end(&mut b); b });
+    let th_err = std::thread::spawn(move || { let mut b = Vec::new(); let _ = se.read_to_end(&mut b); b });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let tail = th_err.join().map(|b| stderr_tail(&b)).unwrap_or_default();
+                return Err(format!("ffmpeg не завершился за {secs}с — убит (зависание).\n{tail}"));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(250)),
+            Err(e) => return Err(format!("ffmpeg wait: {e}")),
+        }
+    };
+    let stdout = th_out.join().unwrap_or_default();
+    let stderr = th_err.join().unwrap_or_default();
+    Ok(std::process::Output { status, stdout, stderr })
 }
 
 /// ОДИН превью-кадр в момент t: тот же блюр+ASS граф, но input-seek + декод одного кадра в PNG. Порт
@@ -300,7 +336,9 @@ pub fn burn_frame(
         cmd.arg(a);
     }
     cmd.args(["-frames:v", "1", "-update", "1"]).arg(out_png);
-    let o = cmd.output().map_err(|e| format!("ffmpeg запуск: {e}"))?;
+    // Кадр превью обязан отдаваться за секунды; 120с — только против мёртвого зависания ffmpeg,
+    // которое иначе навечно занимает единственный воркер джоб (превью всех проектов -> 504).
+    let o = output_with_timeout(cmd, 120)?;
     if !o.status.success() {
         let tail = stderr_tail(&o.stderr);
         return Err(format!("ffmpeg preview frame failed:\n{tail}"));
