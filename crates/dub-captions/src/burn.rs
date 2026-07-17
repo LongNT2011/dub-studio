@@ -229,7 +229,7 @@ fn run_ffmpeg(
         cmd.arg(a);
     }
     cmd.arg(out);
-    let o = output_with_timeout(cmd, BURN_TIMEOUT_SECS)?;
+    let o = output_with_timeout(cmd, BURN_TIMEOUT_SECS, true)?;
     if !o.status.success() {
         let tail = stderr_tail(&o.stderr);
         return Err(format!("ffmpeg caption burn failed:\n{tail}"));
@@ -244,16 +244,33 @@ const BURN_TIMEOUT_SECS: u64 = 30 * 60;
 /// Command::output() с жёстким таймаутом. stdout/stderr читаются фоновыми потоками (иначе полный
 /// пайп блокирует ffmpeg и это превращается в вечное взаимное ожидание); по истечении — kill +
 /// ошибка с хвостом stderr. Никакой внешней зависимости: try_wait в цикле с шагом 250мс.
-fn output_with_timeout(mut cmd: Command, secs: u64) -> Result<std::process::Output, String> {
+/// `log_cmd` — печатать cmdline в stderr: полный burn да (диагностика долгих джоб), превью-кадр
+/// нет (иначе каждый тик плеера спамит лог строкой на 37КБ).
+fn output_with_timeout(mut cmd: Command, secs: u64, log_cmd: bool) -> Result<std::process::Output, String> {
     use std::io::Read;
     use std::process::Stdio;
-    eprintln!("[burn] ffmpeg: {cmd:?}");
+    if log_cmd {
+        eprintln!("[burn] ffmpeg: {cmd:?}");
+    }
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| format!("ffmpeg запуск: {e}"))?;
     let mut so = child.stdout.take().expect("piped stdout");
     let mut se = child.stderr.take().expect("piped stderr");
     let th_out = std::thread::spawn(move || { let mut b = Vec::new(); let _ = so.read_to_end(&mut b); b });
     let th_err = std::thread::spawn(move || { let mut b = Vec::new(); let _ = se.read_to_end(&mut b); b });
+    // join c дедлайном: EOF пайпа может не прийти, если write-хэндл унаследован пережившим ffmpeg
+    // процессом — не даём читателям заблокировать единственный воркер джоб (ревью: и success-, и
+    // kill-путь висли бы на join). Не дождались — поток остаётся detached, пустой буфер.
+    let drain = |th: std::thread::JoinHandle<Vec<u8>>, secs: u64| -> Vec<u8> {
+        let dl = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+        while !th.is_finished() {
+            if std::time::Instant::now() >= dl {
+                return Vec::new();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        th.join().unwrap_or_default()
+    };
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
     let status = loop {
         match child.try_wait() {
@@ -261,15 +278,16 @@ fn output_with_timeout(mut cmd: Command, secs: u64) -> Result<std::process::Outp
             Ok(None) if std::time::Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                let tail = th_err.join().map(|b| stderr_tail(&b)).unwrap_or_default();
+                let tail = stderr_tail(&drain(th_err, 10));
+                drain(th_out, 1);
                 return Err(format!("ffmpeg не завершился за {secs}с — убит (зависание).\n{tail}"));
             }
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(250)),
             Err(e) => return Err(format!("ffmpeg wait: {e}")),
         }
     };
-    let stdout = th_out.join().unwrap_or_default();
-    let stderr = th_err.join().unwrap_or_default();
+    let stdout = drain(th_out, 15);
+    let stderr = drain(th_err, 15);
     Ok(std::process::Output { status, stdout, stderr })
 }
 
@@ -356,7 +374,8 @@ pub fn burn_frame(
     cmd.args(["-frames:v", "1", "-update", "1"]).arg(out_png);
     // Кадр превью обязан отдаваться за секунды; 120с — только против мёртвого зависания ffmpeg,
     // которое иначе навечно занимает единственный воркер джоб (превью всех проектов -> 504).
-    let o = output_with_timeout(cmd, 120)?;
+    // log_cmd=false: кадр дёргается на каждый тик плеера — cmdline-строка спамила бы лог.
+    let o = output_with_timeout(cmd, 120, false)?;
     if !o.status.success() {
         let tail = stderr_tail(&o.stderr);
         return Err(format!("ffmpeg preview frame failed:\n{tail}"));

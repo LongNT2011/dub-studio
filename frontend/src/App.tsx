@@ -421,10 +421,11 @@ function StatusBar() {
   const activities = useStore((s) => s.activities);
   const progress = useStore((s) => s.progress);
   const rendering = useStore((s) => s.rendering);
+  const jobSteps = useStore((s) => s.jobSteps);
   const [open, setOpen] = useState(false);
   const last = activities[activities.length - 1];
   const busy = rendering || progress.pct != null || (!!progress.stage && !["", "done", "error"].includes(progress.stage));
-  const text = busy ? (stageLabel(progress.stage, t) || progress.msg || last?.text || t("status.working")) : (last?.text || t("status.idle"));
+  const text = busy ? (stageLabel(progress.stage, t, jobSteps) || progress.msg || last?.text || t("status.working")) : (last?.text || t("status.idle"));
   const errored = !busy && last?.kind === "error";
   const fmt = (ms: number) => new Date(ms).toLocaleTimeString();
   return (
@@ -540,23 +541,26 @@ function DropZone() {
   const [tgt, setTgt] = useState<string>((i18n.language as string) || "ru");   // translate TO (default = UI lang)
   const [src, setSrc] = useState("auto");                                       // translate FROM (auto-detect)
   const [asrNote, setAsrNote] = useState<string | null>(null);                  // «Parakeet не знает язык → переключили на Whisper»
-  // Текущий ASR-движок — из ФАКТИЧЕСКОГО выбора бэкенда (active.json через capabilities.selection):
-  // нота и авто-переключение уместны только когда реально выбран Parakeet.
-  const [asrEngine, setAsrEngine] = useState<string>("parakeet");
-  useEffect(() => { api.capabilities().then((c) => setAsrEngine(c.selection?.asr_engine ?? "parakeet")).catch(() => {}); }, []);
   // Выбор источника: если язык вне 25 европейских Parakeet — авто-переключаем ASR на Whisper (99 языков)
-  // с уведомлением. «auto» и европейские оставляют быстрый Parakeet.
+  // с уведомлением. Текущий движок спрашиваем у бэкенда В МОМЕНТ выбора (не кэш с маунта): юзер мог
+  // сменить движок в «Моделях», DropZone при этом не ремаунтится — кэш дал бы решение по устаревшему
+  // значению и Parakeet молча поехал бы по языку, которого не знает (ревью-находка).
   function pickSrc(lang: string) {
     setSrc(lang);
-    // Parakeet знает только 25 европейских. Авто-переключаем на Whisper И показываем ноту ТОЛЬКО если
-    // текущий движок — Parakeet. У кого Whisper по умолчанию — переключать/предупреждать не о чем.
-    if (lang !== "auto" && !PARAKEET_LANGS.has(lang) && asrEngine === "parakeet") {
-      api.setSelection("asr_engine", "whisper").catch(() => {});
-      setAsrEngine("whisper");
-      setAsrNote(DUB_LANGS.find((l) => l.code === lang)?.name ?? lang);
-    } else {
+    if (lang === "auto" || PARAKEET_LANGS.has(lang)) {
       setAsrNote(null);
+      return;
     }
+    api.capabilities()
+      .then((c) => {
+        if ((c.selection?.asr_engine ?? "parakeet") === "parakeet") {
+          api.setSelection("asr_engine", "whisper").catch(() => {});
+          setAsrNote(DUB_LANGS.find((l) => l.code === lang)?.name ?? lang);
+        } else {
+          setAsrNote(null);
+        }
+      })
+      .catch(() => setAsrNote(null));
   }
   const [file, setFile] = useState<File | null>(null);                          // staged video — analyzed on Start, not on drop
   const [subsFile, setSubsFile] = useState<File | null>(null);                  // опц. готовые субтитры (SRT/ASS) -> текст+тайминг вместо ASR
@@ -614,13 +618,18 @@ function DropZone() {
     // Шаги степпера — только те, что реально будут в ЭТОЙ джобе (жалоба: «Находим текст на экране»
     // при выключенной детекции; «Переводим/Генерируем озвучку» в режиме транскрипта).
     {
-      const wantTranslate = audio === "dub" || audio === "voiceover" || (!audioOnly && subs === "translate") || (funnyOn && !!funny.trim());
+      // subs здесь — ЭФФЕКТИВНЫЙ (как eSubs ниже): transcribe-режим форсит субтитры оригинала,
+      // перевода в нём нет, что бы ни стояло в сыром стейте селектора.
+      const effSubs = audioOnly ? "none" : audio === "transcribe" ? "transcribe" : subs;
+      const wantTranslate = audio === "dub" || audio === "voiceover" || effSubs === "translate" || (funnyOn && !!funny.trim());
       const wantVoice = audio === "dub" || audio === "voiceover";
       const steps = ["download", "separating", "diarizing", "recognizing"];
       if (wantTranslate) steps.push("translating");
       if (wantVoice) steps.push("voicing");
       if (!audioOnly && detectText) steps.push("locating");
-      steps.push("assembling");
+      // «Собираем видео» — только когда run() реально гонит рендер (dub/voiceover); в остальных
+      // режимах сборка происходит позже на Экспорте, и шаг висел бы серым навсегда (ревью).
+      if (wantVoice) steps.push("assembling");
       s.setJobSteps(steps);
     }
     s.setProgress("", "", null);             // fresh stepper for this run
@@ -875,10 +884,15 @@ const ANALYZE_STEPS: { key: string; stages: string[] }[] = [
 const STAGE_TO_STEPKEY: Record<string, string> = Object.fromEntries(
   ANALYZE_STEPS.flatMap((s) => s.stages.map((st) => [st, s.key])),
 );
-function stageLabel(stage: string | undefined, t: (k: string) => string): string | null {
+// `allowed` — ключи шагов ТЕКУЩЕЙ джобы: стадия отфильтрованного шага (напр. ocr_detect при
+// выключенной детекции) не должна подписываться его ярлыком в статус-строке — вернём null, и
+// строка покажет сырое сообщение бэкенда («детекция вшитого текста отключена»), а не фантомный шаг.
+function stageLabel(stage: string | undefined, t: (k: string) => string, allowed?: string[] | null): string | null {
   if (!stage) return null;
   const k = STAGE_TO_STEPKEY[stage];
-  return k ? t(`analyze.${k}`) : null;
+  if (!k) return null;
+  if (allowed && !allowed.includes(k)) return null;
+  return t(`analyze.${k}`);
 }
 
 function AnalyzeProgress() {
@@ -918,7 +932,7 @@ function AnalyzeProgress() {
             ? <div className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-300" style={{ width: `${Math.max(2, Math.min(100, pct))}%` }} />
             : <div className="h-full w-1/3 rounded-full bg-[var(--color-accent)] animate-pulse" />}
         </div>
-        <div className="mt-2 min-h-4 text-center mono text-[12px] text-[var(--color-muted)] break-words">{stageLabel(progress.stage, t) || progress.msg}</div>
+        <div className="mt-2 min-h-4 text-center mono text-[12px] text-[var(--color-muted)] break-words">{stageLabel(progress.stage, t, jobSteps) || progress.msg}</div>
       </div>
     </div>
   );

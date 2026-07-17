@@ -105,9 +105,15 @@ pub enum AsrChoice {
 
 impl AsrChoice {
     /// Строка для лога `[models]` — видно, каким движком реально пойдёт транскрипция.
+    /// ВАЖНО: участвует в param_hash ASR-стадии (analyze.rs) — только СТАБИЛЬНЫЕ токены (вариант
+    /// каталога, не абсолютный путь), иначе кэш/чекпоинты инвалидируются от переноса репо между
+    /// машинами/папками (ревью-находка).
     pub fn describe(&self) -> String {
         match self {
-            AsrChoice::Parakeet(d) => format!("Parakeet ({})", d.display()),
+            AsrChoice::Parakeet(d) => {
+                let variant = d.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "tdt".into());
+                format!("Parakeet ({variant})")
+            }
             AsrChoice::Whisper { model, compute, device, .. } => {
                 format!("Whisper {model} (compute={compute}, device={device})")
             }
@@ -346,10 +352,16 @@ mod resolve_live_tests {
         let choice = resolve_asr_choice(repo, &mroot, &sel);
         eprintln!("sel = {sel}");
         eprintln!("resolved = {}", choice.describe());
-        if pick(&sel, "asr_engine") == Some("whisper") {
+        // Ассертим Whisper только когда он РЕАЛЬНО установлен: резолв по контракту тихо откатывается
+        // на Parakeet без бинаря/модели (ревью: иначе тест ложно валится на машине без whisper).
+        let whisper_ready = whisper_bin(repo).is_file()
+            && ["large-v3-turbo", "large-v3", "medium", "small", "base", "tiny"]
+                .iter()
+                .any(|m| whisper_model_installed(&mroot, m));
+        if pick(&sel, "asr_engine") == Some("whisper") && whisper_ready {
             assert!(
                 choice.describe().starts_with("Whisper"),
-                "active.json просит whisper, но резолв дал: {}", choice.describe()
+                "active.json просит whisper (и он установлен), но резолв дал: {}", choice.describe()
             );
         }
     }
