@@ -28,7 +28,7 @@ fn lang_name(code: &str, default: &str) -> String {
 }
 
 /// _name(code, default="the source language").
-fn name_src(code: &str) -> String {
+pub(crate) fn name_src(code: &str) -> String {
     lang_name(code, "the source language")
 }
 
@@ -77,13 +77,15 @@ fn translate_one(
         .join(" "))
 }
 
-/// _glossary — запиннить повторяющиеся собственные ИМЕНА (заглавные + повторяющиеся) для консистентности.
-fn glossary<'a>(
+/// _glossary — собрать пары (имя_src -> имя_tgt) для повторяющихся собственных ИМЁН (заглавные +
+/// повторяющиеся) для консистентности. Разовый проход: один короткий Gemma-вызов на термин. Общий для
+/// плоского MT (translate.rs) и батч-перевода длинного скрипта (ctx.rs #82) — там же term-lock-подстановка.
+pub(crate) fn glossary_pairs<'a>(
     llm: &ChatClient,
     texts: impl Iterator<Item = &'a str>,
     src: &str,
     tgt: &str,
-) -> Result<String, TranslateError> {
+) -> Result<Vec<(String, String)>, TranslateError> {
     // counts по \b[A-Z][a-z]{2,}\b
     let re = Regex::new(r"\b[A-Z][a-z]{2,}\b").unwrap();
     let mut counts: HashMap<String, usize> = HashMap::new();
@@ -116,12 +118,27 @@ fn glossary<'a>(
             gloss.push((w, v));
         }
     }
+    Ok(gloss)
+}
+
+/// " Keep these names consistent: A=a, B=b." — суффикс для промпта из пар глоссария. Пусто, если пар нет.
+pub(crate) fn glossary_suffix(gloss: &[(String, String)]) -> String {
     if gloss.is_empty() {
-        Ok(String::new())
+        String::new()
     } else {
         let joined = gloss.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(", ");
-        Ok(format!(" Keep these names consistent: {joined}."))
+        format!(" Keep these names consistent: {joined}.")
     }
+}
+
+/// _glossary — суффикс-строка глоссария (обёртка над glossary_pairs + glossary_suffix для translate.rs).
+fn glossary<'a>(
+    llm: &ChatClient,
+    texts: impl Iterator<Item = &'a str>,
+    src: &str,
+    tgt: &str,
+) -> Result<String, TranslateError> {
+    Ok(glossary_suffix(&glossary_pairs(llm, texts, src, tgt)?))
 }
 
 /// Индексы непустых сегментов + число уникальных спикеров среди них (общий шаг run/rewrite).

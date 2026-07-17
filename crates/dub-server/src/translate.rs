@@ -116,6 +116,10 @@ pub fn stage(
         })
         .collect();
 
+    // VISION-layout нужен только когда его выход (sub_style/titles/brands) реально попадёт на экран:
+    // вжигание включено И субтитры не «none». Иначе (например «Дубляж без субтитров») это 10-20
+    // vision-вызовов Gemma впустую — на длинном видео минуты (баг-репорт юзера).
+    let want_layout = proj.subs.burn && proj.subs.mode != "none";
     let cfg = CtxConfig {
         input: paths.input.clone(),
         work_dir: paths.work_dir.clone(),
@@ -123,6 +127,7 @@ pub fn stage(
         vocals16: if vocals16.is_file() { Some(vocals16.to_path_buf()) } else { None },
         vh: vh as f64,
         total,
+        want_layout,
     };
 
     emit(progress, "vision", "ctx-проход: vision layout/scene + перевод транскрипта");
