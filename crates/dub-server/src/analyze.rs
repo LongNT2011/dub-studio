@@ -273,6 +273,8 @@ pub struct AnalyzeArgs {
                            // в режиме без субтитров/блюра не нужна — галочка в UI, дефолт true.
     pub casting: bool,     // кастинг персонажей (#115): SCRFD+LVFace-скан кадров. ВЫКЛ по умолчанию —
                            // при false НИ ОДНОГО кадра не сканируется (галочка в UI, как detect_text).
+    pub casting_ref: String, // slug профиля из app-библиотеки кастингов (#115): применить к этому ролику
+                             // (загрузить как prev, матчить кластеры по face+voice). Пусто = без применения.
     pub import_translated: bool, // импортированные субтитры УЖЕ на языке перевода -> MT/vision пропустить,
                                  // tgt = импортированный текст, Даб Студио только озвучивает. Работает лишь с import_subs.
 }
@@ -281,6 +283,7 @@ pub struct AnalyzeArgs {
 pub struct AnalyzePaths {
     pub input: std::path::PathBuf,   // исходное видео (source.txt)
     pub work_dir: std::path::PathBuf, // workspace/<pid>
+    pub repo_root: std::path::PathBuf, // корень репо (для app-библиотеки кастингов: <repo>/casting_library)
     pub asr: crate::models::AsrChoice, // выбранный ASR-движок (Parakeet/Whisper) на эту джобу
     pub sortformer_onnx: std::path::PathBuf, // sortformer .onnx
     pub llama_bin: std::path::PathBuf, // llama-server(.exe) — сайдкар перевода/vision
@@ -792,7 +795,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     proj.casting_enabled = args.casting;
     bench.stage("casting");
     if args.casting && meta.width > 0 && meta.height > 0 {
-        crate::casting::stage(paths, &proj, progress);
+        crate::casting::stage(paths, &proj, &args.casting_ref, progress);
     } else if args.casting {
         emit(progress, "casting", "аудио-режим: без видео, кастинг персонажей не нужен");
     }

@@ -9,6 +9,7 @@
 mod analyze;
 mod bench;
 mod casting;
+mod casting_library;
 mod compose;
 mod endpoints;
 mod f0;
@@ -32,7 +33,7 @@ use axum::extract::{Multipart, Path as AxPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use dub_core::{EngineOpts, Project};
 use futures_util::stream::Stream;
@@ -83,6 +84,7 @@ pub fn verify_captions_e2e(
         burn: proj.subs.burn,
         detect_text: true,
         casting: false, // verify-путь: только капшены/OCR, кастинг не нужен
+        casting_ref: String::new(),
         import_translated: false,
     };
     let sel = models::load_selection(&mroot);
@@ -90,6 +92,7 @@ pub fn verify_captions_e2e(
     let paths = analyze::AnalyzePaths {
         input: input_video.to_path_buf(),
         work_dir: work_dir.to_path_buf(),
+        repo_root: repo_root.to_path_buf(),
         asr: models::AsrChoice::Parakeet(unused.clone()), // ocr::stage не трогает ASR (verify-путь)
         sortformer_onnx: unused.clone(),
         llama_bin: dub_llm::resolve_llama_bin(&repo_root.join("tools").join("llama")),
@@ -327,6 +330,11 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects/{pid}/voice-slots", post(voice_slots_assign))
         .route("/projects/{pid}/casting", get(casting_get).post(casting_save))
         .route("/projects/{pid}/casting/avatar", get(casting_avatar))
+        .route("/projects/{pid}/casting/voice", get(casting_voice))
+        .route("/casting/library", get(casting_library_list))
+        .route("/projects/{pid}/casting/library", post(casting_library_save))
+        .route("/casting/library/{slug}", delete(casting_library_delete))
+        .route("/casting/library/{slug}/avatar", get(casting_library_avatar))
         .route("/fonts", get(endpoints::fonts))
         .route("/voices", get(voices_list))
         .route("/presets", get(endpoints::presets))
@@ -701,16 +709,24 @@ async fn voice_slots_assign(
 // ─── Кастинг персонажей (#115) ──────────────────────────────────────────────
 
 /// Единый шейп персонажа для фронта (тип Character в api.ts): id/name/gender/voice/speaker_ids/
-/// line_count/sample_frame_url. Возвращают ОБА эндпоинта (get + save) — фронт кладёт результат в один
-/// стейт Character[]. `voice` = dub_voice бэка; line_count = число сегментов проекта у speaker_ids
-/// персонажа; sample_frame_url nullable (закадровый персонаж без кадра -> null, фронт рисует заглушку).
-fn character_json(c: &dub_faces::Character, pid: &str, proj: &Project) -> Value {
+/// line_count/sample_frame_url/voice_sample_url. Возвращают ОБА эндпоинта (get + save) — фронт кладёт
+/// результат в один стейт Character[]. `voice` = dub_voice бэка; line_count = число сегментов проекта у
+/// speaker_ids персонажа; sample_frame_url nullable (закадровый персонаж без кадра -> null); voice_sample_url
+/// nullable (нет образца голоса -> null). `proj_dir` — workspace/<pid> для проверки наличия wav-образца.
+fn character_json(c: &dub_faces::Character, pid: &str, proj: &Project, proj_dir: &Path) -> Value {
     let ids: std::collections::HashSet<&str> = c.speaker_ids.iter().map(|s| s.as_str()).collect();
     let line_count = proj
         .segments
         .iter()
         .filter(|s| ids.contains(s.speaker.as_deref().unwrap_or("0")))
         .count();
+    // Образец голоса: casting/char_<i>_voice.wav по имени персонажа (char_<i>). Есть файл -> URL, иначе null.
+    let voice_rel = char_voice_rel(&c.id);
+    let voice_sample_url = if voice_rel.as_ref().map(|r| proj_dir.join(r).is_file()).unwrap_or(false) {
+        Value::from(format!("/projects/{pid}/casting/voice?id={}", c.id))
+    } else {
+        Value::Null
+    };
     json!({
         "id": c.id,
         "name": c.name,
@@ -725,7 +741,19 @@ fn character_json(c: &dub_faces::Character, pid: &str, proj: &Project) -> Value 
         } else {
             Value::from(format!("/projects/{pid}/casting/avatar?id={}", c.id))
         },
+        // URL проигрываемого образца голоса. Нет голоса -> null.
+        "voice_sample_url": voice_sample_url,
     })
+}
+
+/// Относительный путь к wav-образцу голоса персонажа внутри work_dir по его id (char_<i> -> casting/
+/// char_<i>_voice.wav). Нестандартный id -> None (voice_sample_url = null).
+fn char_voice_rel(char_id: &str) -> Option<String> {
+    // id формата char_<i>; допускаем только безопасные символы (без traversal).
+    if char_id.is_empty() || !char_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    Some(format!("casting/{char_id}_voice.wav"))
 }
 
 /// GET /projects/{pid}/casting — карточки персонажей из casting.json в шейпе фронта (см. character_json).
@@ -746,7 +774,7 @@ async fn casting_get(State(st): State<AppState>, AxPath(pid): AxPath<String>) ->
     let chars: Vec<Value> = casting
         .characters
         .iter()
-        .map(|c| character_json(c, &pid, &proj))
+        .map(|c| character_json(c, &pid, &proj, &dir))
         .collect();
     Json(json!({ "version": casting.version, "characters": chars })).into_response()
 }
@@ -777,6 +805,129 @@ async fn casting_avatar(
         return (StatusCode::BAD_REQUEST, "bad path").into_response();
     }
     let p = dir.join(&ch.sample_frame);
+    if !p.is_file() {
+        return (StatusCode::NOT_FOUND, "avatar file missing").into_response();
+    }
+    serve_file_range(&p, req, None).await
+}
+
+/// GET /projects/{pid}/casting/voice?id=<char_id> — проигрываемый образец голоса персонажа (WAV, с Range).
+/// Из casting/char_<i>_voice.wav (кладёт casting.rs). Нет файла -> 404 (voice_sample_url и так был null).
+async fn casting_voice(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let id = q.get("id").map(|s| s.as_str()).unwrap_or("");
+    // Существует ли такой персонаж (id из casting.json) — иначе 404, не раскрываем ФС.
+    let Some(casting) = dub_faces::load_casting(&dir.join("casting.json")) else {
+        return (StatusCode::NOT_FOUND, "casting not run").into_response();
+    };
+    if !casting.characters.iter().any(|c| c.id == id) {
+        return (StatusCode::NOT_FOUND, "character not found").into_response();
+    }
+    let Some(rel) = char_voice_rel(id) else {
+        return (StatusCode::BAD_REQUEST, "bad id").into_response();
+    };
+    let p = dir.join(&rel);
+    if !p.is_file() {
+        return (StatusCode::NOT_FOUND, "no voice sample").into_response();
+    }
+    serve_file_range(&p, req, None).await
+}
+
+// ─── App-библиотека кастингов (#115): профили, переносимые между роликами ─────
+
+/// GET /casting/library -> {"casts":[{"slug","name","char_count"}]} — список сохранённых профилей.
+async fn casting_library_list(State(st): State<AppState>) -> Response {
+    let repo_root = st.repo_root.clone();
+    let profiles = tokio::task::spawn_blocking(move || casting_library::list_profiles(&repo_root))
+        .await
+        .unwrap_or_default();
+    let casts: Vec<Value> = profiles
+        .into_iter()
+        .map(|(slug, m)| json!({ "slug": slug, "name": m.name, "char_count": m.char_count }))
+        .collect();
+    Json(json!({ "casts": casts })).into_response()
+}
+
+/// POST /projects/{pid}/casting/library {name, created?} -> {"slug"} — сохранить текущий casting проекта
+/// в библиотеку (casting.json + аватарки + образцы голоса). slug из name (транслит/kebab, уникализируется).
+async fn casting_library_save(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    if name.is_empty() {
+        return (StatusCode::BAD_REQUEST, "name required").into_response();
+    }
+    // created — из тела запроса (Date::now в Rust не используем); пусто допустимо.
+    let created = body.get("created").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let repo_root = st.repo_root.clone();
+    let res = tokio::task::spawn_blocking(move || {
+        let base = casting_library::slugify(&name);
+        let slug = casting_library::unique_slug(&repo_root, &base);
+        casting_library::save_profile(&repo_root, &dir, &slug, &name, &created).map(|_| slug)
+    })
+    .await;
+    match res {
+        Ok(Ok(slug)) => Json(json!({ "slug": slug })).into_response(),
+        Ok(Err(e)) => (StatusCode::CONFLICT, e).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// DELETE /casting/library/{slug} -> {"ok":true} — удалить профиль библиотеки.
+async fn casting_library_delete(
+    State(st): State<AppState>,
+    AxPath(slug): AxPath<String>,
+) -> Response {
+    if !casting_library::is_safe_slug(&slug) {
+        return (StatusCode::BAD_REQUEST, "bad slug").into_response();
+    }
+    let repo_root = st.repo_root.clone();
+    let res = tokio::task::spawn_blocking(move || casting_library::delete_profile(&repo_root, &slug)).await;
+    match res {
+        Ok(Ok(())) => Json(json!({ "ok": true })).into_response(),
+        Ok(Err(e)) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+/// GET /casting/library/{slug}/avatar?id=<char_id> — аватарка персонажа профиля (PNG, с Range).
+async fn casting_library_avatar(
+    State(st): State<AppState>,
+    AxPath(slug): AxPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Response {
+    if !casting_library::is_safe_slug(&slug) {
+        return (StatusCode::BAD_REQUEST, "bad slug").into_response();
+    }
+    let id = q.get("id").map(|s| s.as_str()).unwrap_or("");
+    // id формата char_<i>; берём аватарку avatars/char_<i>.png (эндпоинт резолвит по id персонажа).
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return (StatusCode::BAD_REQUEST, "bad id").into_response();
+    }
+    let dir = casting_library::profile_dir(&st.repo_root, &slug);
+    // Проверяем, что такой персонаж есть в профиле (не раскрываем ФС при мусорном id).
+    let Some(casting) = casting_library::load_profile_casting(&st.repo_root, &slug) else {
+        return (StatusCode::NOT_FOUND, "profile not found").into_response();
+    };
+    if !casting.characters.iter().any(|c| c.id == id) {
+        return (StatusCode::NOT_FOUND, "character not found").into_response();
+    }
+    let p = dir.join("avatars").join(format!("{id}.png"));
     if !p.is_file() {
         return (StatusCode::NOT_FOUND, "avatar file missing").into_response();
     }
@@ -890,7 +1041,7 @@ async fn casting_save(
     let chars: Vec<Value> = casting
         .characters
         .iter()
-        .map(|c| character_json(c, &pid, &proj))
+        .map(|c| character_json(c, &pid, &proj, &dir))
         .collect();
     Json(json!({ "ok": true, "characters": chars })).into_response()
 }
@@ -1171,6 +1322,8 @@ async fn analyze_project(
         detect_text: qget("detect", "1") != "0",
         // кастинг персонажей (#115): ВЫКЛ по умолчанию (дорогой скан кадров SCRFD/LVFace).
         casting: qget("casting", "0") == "1",
+        // slug профиля app-библиотеки кастингов (#115): применить к этому ролику. Пусто = без применения.
+        casting_ref: qget("casting_ref", ""),
         // «сабы уже на языке перевода» — эффективно только если сабы реально импортированы.
         import_translated: import_subs.is_some() && qget("import_translated", "0") == "1",
     };
@@ -1183,6 +1336,7 @@ async fn analyze_project(
     let paths = analyze::AnalyzePaths {
         input,
         work_dir: dir.clone(),
+        repo_root: st.repo_root.clone(),
         asr,
         sortformer_onnx: st.sortformer_onnx.clone(),
         llama_bin: st.llama_bin.clone(),

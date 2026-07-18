@@ -55,6 +55,7 @@ export type JobEvent = { type: "progress" | "done" | "error"; stage?: string; pc
 export type Character = {
   id: string; name: string; gender: string; voice: string | null;
   speaker_ids: string[]; sample_frame_url: string | null; line_count: number;   // null -> нет кадра (закадровый), фронт рисует инициал
+  voice_sample_url: string | null;   // проигрываемый wav образца голоса (null -> нет образца, кнопки ▶ нет)
 };
 
 // «Первый запуск»: статус внешних компонентов (модели/движки/системные библиотеки) + автозакачка.
@@ -132,13 +133,20 @@ export const api = {
     if (subs) fd.append("subs", subs);   // готовые субтитры (SRT/ASS) -> analyze возьмёт текст+тайминг вместо ASR
     return fetch(`${BASE}/projects`, { method: "POST", body: fd }).then(j<{ project_id: string; imported_subs?: boolean }>);
   },
-  analyze: (pid: string, tgt_lang: string, mode = "auto", src_lang = "auto", subs = "auto", rewrite = "", burn = true, detect = true, importTranslated = false, translateStyle = "", casting = false) =>
-    fetch(`${BASE}/projects/${pid}/analyze?tgt_lang=${tgt_lang}&mode=${mode}&src_lang=${src_lang}&subs=${subs}&rewrite=${encodeURIComponent(rewrite)}&burn=${burn ? 1 : 0}&detect=${detect ? 1 : 0}&import_translated=${importTranslated ? 1 : 0}&translate_style=${encodeURIComponent(translateStyle)}&casting=${casting ? 1 : 0}`, { method: "POST" }).then(j<{ job_id: string }>),
+  analyze: (pid: string, tgt_lang: string, mode = "auto", src_lang = "auto", subs = "auto", rewrite = "", burn = true, detect = true, importTranslated = false, translateStyle = "", casting = false, castingRef = "") =>
+    fetch(`${BASE}/projects/${pid}/analyze?tgt_lang=${tgt_lang}&mode=${mode}&src_lang=${src_lang}&subs=${subs}&rewrite=${encodeURIComponent(rewrite)}&burn=${burn ? 1 : 0}&detect=${detect ? 1 : 0}&import_translated=${importTranslated ? 1 : 0}&translate_style=${encodeURIComponent(translateStyle)}&casting=${casting ? 1 : 0}&casting_ref=${encodeURIComponent(castingRef)}`, { method: "POST" }).then(j<{ job_id: string }>),
   // Кастинг персонажей (#115): список найденных персонажей (аватар+пол+голос+реплики) / сохранение правок.
   casting: (pid: string) => getJson<{ characters: Character[] }>(`/projects/${pid}/casting`),
   castingAvatarUrl: (pid: string, id: string) => `${BASE}/projects/${pid}/casting/avatar?id=${encodeURIComponent(id)}`,
+  castingVoiceUrl: (pid: string, id: string) => `${BASE}/projects/${pid}/casting/voice?id=${encodeURIComponent(id)}`,   // wav образца голоса персонажа (<audio>/new Audio)
   setCasting: (pid: string, characters: { id: string; name: string; speech_note: string; dub_voice: string | null }[]) =>
     postJson<{ ok: boolean; characters: Character[] }>(`/projects/${pid}/casting`, { characters }),
+  // Библиотека кастингов (#115): сохранить текущий кастинг проекта как именованный профиль и применить его
+  // к другому ролику через analyze(..., casting_ref=<slug>). Профили переживают проекты (общая база актёров).
+  castingLibrary: () => getJson<{ casts: { slug: string; name: string; char_count: number }[] }>("/casting/library"),
+  saveCastingToLibrary: (pid: string, name: string) => postJson<{ slug: string }>(`/projects/${pid}/casting/library`, { name }),
+  deleteCastingLibrary: (slug: string) => fetch(`${BASE}/casting/library/${encodeURIComponent(slug)}`, { method: "DELETE" }).then(j<{ ok: boolean }>),
+  castingLibraryAvatarUrl: (slug: string, id: string) => `${BASE}/casting/library/${encodeURIComponent(slug)}/avatar?id=${encodeURIComponent(id)}`,
   listProjects: () => getJson<{ projects: ProjectSummary[] }>("/projects"),   // недавние/сохранённые проекты для экрана «Открыть»
   getProject: (pid: string) => getJson<Project>(`/projects/${pid}`),
   deleteProject: (pid: string) => fetch(`${BASE}/projects/${pid}`, { method: "DELETE" }).then(j<{ ok: boolean }>),   // удалить проект (стирает workspace/<pid>) — кнопка в «Недавних»

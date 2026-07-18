@@ -475,5 +475,20 @@
       "female": "Feminino",
       "unknown": "—"
     }
+  },
+  "castingLib": {
+    "save": "Save cast to library",
+    "saveHint": "Save the current cast as a profile to apply to another video",
+    "savedShort": "Saved",
+    "namePlaceholder": "Cast name",
+    "savedToast": "Cast \"{{name}}\" saved to library",
+    "playSample": "Play voice sample",
+    "stopSample": "Stop",
+    "applyLabel": "Apply saved cast",
+    "none": "— none —",
+    "profileOption": "{{name}} ({{n}} chars)",
+    "empty": "Library is empty — save a cast from the editor.",
+    "delete": "Delete profile",
+    "deleteConfirm": "Delete this cast profile?"
   }
 }

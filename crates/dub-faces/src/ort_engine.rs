@@ -83,6 +83,33 @@ impl OnnxModel {
         Ok(outs.swap_remove(0))
     }
 
+    /// Прогнать тензор ПРОИЗВОЛЬНОЙ формы (row-major flat) -> первый выход (shape, данные). Нужен для
+    /// WeSpeaker: вход [1,T,80] (3-D, не 4-D как у SCRFD/LVFace). shape задаёт вызывающий.
+    pub fn run_shape(
+        &mut self,
+        shape: &[usize],
+        data: Vec<f32>,
+    ) -> Result<(Vec<usize>, Vec<f32>), String> {
+        let dims: Vec<i64> = shape.iter().map(|&d| d as i64).collect();
+        let tensor = TensorRef::from_array_view((dims, data.as_slice()))
+            .map_err(|e| format!("tensor: {e}"))?;
+        let outputs = self
+            .session
+            .run(ort::inputs![tensor])
+            .map_err(|e| format!("run: {e}"))?;
+        let (_name, v) = outputs.iter().next().ok_or_else(|| "нет выходов".to_string())?;
+        let (oshape, odata) = v
+            .try_extract_tensor::<f32>()
+            .map_err(|e| format!("extract: {e}"))?;
+        let oshape: Vec<usize> = oshape.iter().map(|&d| d as usize).collect();
+        Ok((oshape, odata.to_vec()))
+    }
+
+    /// Удобная обёртка над run_shape для 3-D входа [b,t,mel] (WeSpeaker).
+    pub fn run_3d(&mut self, shape: &[usize; 3], data: Vec<f32>) -> Result<(Vec<usize>, Vec<f32>), String> {
+        self.run_shape(shape, data)
+    }
+
     /// Прогнать [N,3,H,W] f32 -> ВСЕ выходы в ПОЗИЦИОННОМ порядке модели [(shape, данные), …].
     /// SCRFD: outputs[0..2]=scores, [3..5]=bbox, [6..8]=kps (фиксированный порядок InsightFace).
     pub fn run(&mut self, input: Array4<f32>) -> Result<Vec<(Vec<usize>, Vec<f32>)>, String> {

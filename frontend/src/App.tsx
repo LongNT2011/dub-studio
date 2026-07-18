@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
-import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine, ChevronDown, ScrollText, Clock, Keyboard } from "lucide-react";
+import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine, ChevronDown, ScrollText, Clock, Keyboard, Save } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useFloatable, dockSlot } from "./lib/useFloatable";
 import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent, type ProjectSummary, type Character } from "./lib/api";
@@ -675,6 +675,14 @@ function DropZone() {
   // персонажей с аватарами/голосами. Опционально, дорого на длинном видео -> ПО УМОЛЧАНИЮ ВЫКЛ. Персист.
   const [castingOn, setCastingOn] = useState<boolean>(() => localStorage.getItem("dub-casting") === "1");
   const setCastingSaved = (v: boolean) => { setCastingOn(v); localStorage.setItem("dub-casting", v ? "1" : "0"); };
+  // Готовый кастинг из библиотеки (#115): slug профиля -> уходит в analyze(casting_ref=). Пусто = не применять.
+  // Персист как глобальный дефолт (как стиль перевода/громкость) — чтобы серию роликов дубить одним кастингом.
+  const [castingRef, setCastingRef] = useState<string>(() => localStorage.getItem("dub-casting-ref") ?? "");
+  const setCastingRefSaved = (v: string) => { setCastingRef(v); localStorage.setItem("dub-casting-ref", v); };
+  // Список профилей библиотеки — грузим лениво, когда галка кастинга включена (не засорять UI при выкл.).
+  const [castLib, setCastLib] = useState<{ slug: string; name: string; char_count: number }[]>([]);
+  const refreshCastLib = () => api.castingLibrary().then((r) => setCastLib(r.casts)).catch(() => {});
+  useEffect(() => { if (castingOn) refreshCastLib(); }, [castingOn]);
   const [funnyOn, setFunnyOn] = useState(false);
   const [funny, setFunny] = useState("");                                       // Gemma rewrite instruction (тема ремикса)
   // Громкость оригинала под переводом (voiceover), стартовый выбор -> применяется ко всем создаваемым проектам.
@@ -787,7 +795,9 @@ function DropZone() {
       // #115: кастинг только при видео-дубляже (как showCasting на старте); иначе персист castingOn=1
       // ушёл бы с analyze в nodub/subtitles/transcribe и бэк впустую гонял бы детект лиц.
       const effCasting = !audioOnly && (audio === "dub" || audio === "voiceover") && castingOn;
-      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated, trStyleText, effCasting);
+      // Готовый кастинг из библиотеки применяем только когда кастинг реально включён (та же видимость, что у галки).
+      const effCastingRef = effCasting ? castingRef : "";
+      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated, trStyleText, effCasting, effCastingRef);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       if (audio === "voiceover") await api.patch(project_id, { op: "voiceover_gain", gain_db: voGain });   // громкость оригинала со старта -> рендер ниже подхватит
       // Сохранить оригинальную дорожку (#113): 2-я аудиодорожка при mux рендера. Только dub/voiceover, не аудио-режим.
@@ -1079,6 +1089,35 @@ function DropZone() {
                         {t("comp.casting")}
                         <span title={t("comp.castingHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
                       </label>
+                    )}
+                    {/* ПРИМЕНИТЬ ГОТОВЫЙ КАСТИНГ (#115): профиль из библиотеки -> analyze(casting_ref=). Виден только при вкл. кастинге. */}
+                    {showCasting && castingOn && (
+                      <div className="mt-1.5">
+                        <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("castingLib.applyLabel")}</div>
+                        <div className="flex items-center gap-1.5">
+                          <select value={castLib.some((c) => c.slug === castingRef) ? castingRef : ""} onChange={(e) => setCastingRefSaved(e.target.value)}
+                            className="flex-1 min-w-0 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[12px] focus:border-[var(--color-accent)] focus:outline-none">
+                            <option value="">{t("castingLib.none")}</option>
+                            {castLib.map((c) => (
+                              <option key={c.slug} value={c.slug}>{t("castingLib.profileOption", { name: c.name, n: c.char_count })}</option>
+                            ))}
+                          </select>
+                          {castingRef && castLib.some((c) => c.slug === castingRef) && (
+                            <button type="button" title={t("castingLib.delete")}
+                              onClick={async () => {
+                                if (!window.confirm(t("castingLib.deleteConfirm"))) return;
+                                const slug = castingRef;
+                                setCastingRefSaved("");                       // снять выбор оптимистично
+                                try { await api.deleteCastingLibrary(slug); } catch { /* вернётся при рефреше */ }
+                                refreshCastLib();
+                              }}
+                              className="shrink-0 p-1.5 rounded-lg border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-danger,#ef4444)] hover:border-[var(--color-danger,#ef4444)] transition">
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                        {!castLib.length && <p className="mt-1 text-[10px] text-[var(--color-muted)] leading-tight">{t("castingLib.empty")}</p>}
+                      </div>
                     )}
                     {/* ШУТОЧНЫЙ РЕМИКС — сочетается с дубляжом/закадром. */}
                     {showFunny && (
@@ -1490,6 +1529,37 @@ function CastingPanel({ pid, characters, voices, onChange }: {
     } catch (e) { useStore.getState().pushActivity(String(e), "error"); playSfx("error"); }
     finally { setSaving(false); }
   }
+  // Прослушка образца голоса персонажа: одна играет за раз (стоп предыдущей). null -> ничего не играет.
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const sampleAudio = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => () => { sampleAudio.current?.pause(); }, []);   // размонтаж -> стоп звука
+  const toggleSample = (id: string) => {
+    const cur = sampleAudio.current;
+    if (playingId === id) { cur?.pause(); setPlayingId(null); return; }   // повторный клик = стоп
+    cur?.pause();
+    const a = new Audio(api.castingVoiceUrl(pid, id));
+    sampleAudio.current = a;
+    a.onended = () => setPlayingId(null);
+    a.play().then(() => setPlayingId(id)).catch(() => setPlayingId(null));
+  };
+  // Сохранить кастинг в библиотеку (#115): именованный профиль -> применяется к другим роликам через casting_ref.
+  // Имя вводится инлайн-инпутом (DS-паттерн, как переименование записанного голоса) — без window.prompt.
+  const [naming, setNaming] = useState(false);
+  const [libName, setLibName] = useState("");
+  const [libBusy, setLibBusy] = useState(false);
+  const [libSaved, setLibSaved] = useState(false);
+  async function saveToLibrary() {
+    const name = libName.trim();
+    if (!name) { setNaming(false); return; }
+    setLibBusy(true);
+    try {
+      await api.saveCastingToLibrary(pid, name);
+      setNaming(false); setLibName(""); setLibSaved(true); playSfx("success");
+      useStore.getState().pushActivity(t("castingLib.savedToast", { name }), "work");
+      window.setTimeout(() => setLibSaved(false), 2000);
+    } catch (e) { useStore.getState().pushActivity(String(e), "error"); playSfx("error"); }
+    finally { setLibBusy(false); }
+  }
   return (
     <div className="w-full h-full flex flex-col rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
       <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-[var(--color-border)]">
@@ -1497,6 +1567,29 @@ function CastingPanel({ pid, characters, voices, onChange }: {
         <span className="text-[13px] font-semibold">{t("casting.title")}</span>
         <span className="text-[11px] text-[var(--color-muted)]">{t("casting.count", { n: characters.length })}</span>
         <div className="flex-1" />
+        {/* СОХРАНИТЬ КАСТИНГ В БИБЛИОТЕКУ (#115): инлайн-ввод имени (DS-паттерн), затем POST. */}
+        {naming ? (
+          <div className="flex items-center gap-1.5">
+            <input value={libName} onChange={(e) => setLibName(e.target.value)} autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter") saveToLibrary(); else if (e.key === "Escape") { setNaming(false); setLibName(""); } }}
+              placeholder={t("castingLib.namePlaceholder")}
+              className="w-44 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[12px] focus:border-[var(--color-accent)] focus:outline-none" />
+            <button onClick={saveToLibrary} disabled={libBusy || !libName.trim()} title={t("castingLib.save")}
+              className="shrink-0 px-2.5 py-1.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[12px] font-semibold disabled:opacity-50">
+              {libBusy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            </button>
+            <button onClick={() => { setNaming(false); setLibName(""); }} title={t("common.cancel")}
+              className="shrink-0 p-1.5 rounded-lg border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]">
+              <X size={14} />
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setNaming(true)} title={t("castingLib.saveHint")}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] text-[12px] font-medium hover:text-[var(--color-text)] hover:border-[#3a414c] transition">
+            {libSaved ? <Check size={14} className="text-[var(--color-accent-2)]" /> : <Save size={14} />}
+            {libSaved ? t("castingLib.savedShort") : t("castingLib.save")}
+          </button>
+        )}
         <button onClick={apply} disabled={saving}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[12px] font-semibold disabled:opacity-60 hover:brightness-105 transition">
           {saving ? <Loader2 size={14} className="animate-spin" /> : saved ? <Check size={14} /> : <Users size={14} />}
@@ -1529,6 +1622,14 @@ function CastingPanel({ pid, characters, voices, onChange }: {
                     <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[color-mix(in_oklab,var(--color-surface)_75%,transparent)] backdrop-blur text-[var(--color-text)]">
                       {t(`casting.gender.${c.gender}`, c.gender)}
                     </span>
+                  )}
+                  {/* Образец голоса (#115): играть/стоп wav. Кнопка только если бэк отдал voice_sample_url. */}
+                  {c.voice_sample_url && (
+                    <button type="button" onClick={() => toggleSample(c.id)}
+                      title={playingId === c.id ? t("castingLib.stopSample") : t("castingLib.playSample")}
+                      className="absolute bottom-1.5 left-1.5 inline-flex items-center justify-center w-7 h-7 rounded-full bg-[color-mix(in_oklab,var(--color-surface)_75%,transparent)] backdrop-blur text-[var(--color-text)] hover:text-[var(--color-accent)] transition">
+                      {playingId === c.id ? <Square size={12} /> : <Play size={12} />}
+                    </button>
                   )}
                 </div>
                 <div className="p-2.5 flex flex-col gap-2">

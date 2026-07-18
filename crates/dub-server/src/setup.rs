@@ -487,6 +487,30 @@ pub fn manifest() -> Vec<Component> {
             markers: &[Marker { rel: "models/bsroformer/voc_fv6-Q4_0.gguf", expect: 139_168_096 }],
             external_url: None,
         },
+        // ── КАСТИНГ ПЕРСОНАЖЕЙ: голосовой эмбеддер (#115) ────────────────────
+        // WeSpeaker ResNet34-LM (256-d speaker embedding) — cross-episode матч голосов + образец-фраза.
+        // На Xet-CAS (cas-bridge.xethub.hf.co): probe_size/download_range через ureq+Range уже Xet-aware
+        // (см. POOL_SLOTS/RANGE_RETRIES). Резолвится dub_faces::wespeaker_path (<models>/faces/wespeaker/…).
+        // SCRFD/LVFace (лица) в манифест НЕ добавлены (их источник-истины не зафиксирован в репо) — этот
+        // компонент отвечает только за ГОЛОС; при отсутствии кастинг по лицу деградирует gracefully.
+        Component {
+            id: "wespeaker",
+            name: "WeSpeaker ResNet34-LM (голос кастинга)",
+            purpose: "Голосовой эмбеддинг персонажа (кастинг #115): матч спикеров между эпизодами",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 26_530_309,
+            files: &[
+                FileSpec {
+                    url: "https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM/resolve/main/voxceleb_resnet34_LM.onnx",
+                    dest_rel: "models/faces/wespeaker/voxceleb_resnet34_LM.onnx",
+                    size: 26_530_309,
+                    extract: Extract::None,
+                },
+            ],
+            markers: &[Marker { rel: "models/faces/wespeaker/voxceleb_resnet34_LM.onnx", expect: 26_530_309 }],
+            external_url: None,
+        },
         // ── СAЙДКАРЫ / ДВИЖКИ ───────────────────────────────────────────────
         Component {
             id: "bsroformer-engine",

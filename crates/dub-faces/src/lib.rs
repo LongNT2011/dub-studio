@@ -16,6 +16,7 @@ mod embed;
 mod frames;
 mod link;
 mod ort_engine;
+mod voice;
 
 pub use asd::AsdScorer;
 pub use cast::{
@@ -28,6 +29,7 @@ pub use frames::{
     DEFAULT_FPS,
 };
 pub use link::{link_faces_to_speakers, Linkage, SpeakerTurn};
+pub use voice::{voice_cos_threshold, wespeaker_path, VoiceEmbedder, VOICE_DIM};
 
 use std::path::Path;
 
@@ -148,6 +150,14 @@ pub fn max_faces_cap() -> usize {
 /// DUB_FACES_MIN_CLUSTER.
 pub fn min_cluster_members() -> usize {
     std::env::var("DUB_FACES_MIN_CLUSTER").ok().and_then(|s| s.trim().parse().ok()).unwrap_or(2)
+}
+
+/// Мин. суммарное время НА ЭКРАНЕ (сек), чтобы НЕговорящий кластер стал персонажем. Требование юзера:
+/// «не вставлять лица, которые появляются на долю секунды и не говорят». Кластер, привязанный к спикеру
+/// (говорит), проходит ВСЕГДА, независимо от этого порога. Время = число кадров кластера / casting_fps.
+/// Env DUB_FACES_MIN_ONSCREEN_SEC. 0 -> фильтр по времени выключен (только по «говорит»).
+pub fn min_onscreen_secs() -> f64 {
+    std::env::var("DUB_FACES_MIN_ONSCREEN_SEC").ok().and_then(|s| s.trim().parse().ok()).unwrap_or(3.0)
 }
 
 /// Статистика отбраковки лиц (для лога — правило «no silent caps»).
@@ -324,9 +334,11 @@ pub fn frontality(face: &Face) -> f32 {
 }
 
 /// Один прогон кастинга: кадры (SCRFD detect + LVFace embed) уже собраны в `faces`. Здесь — кластеризация
-/// в персонажей, связка с голосами (со-встречаемость), сборка Casting БЕЗ аватарок на диске (avatar-путь
-/// проставляет вызывающий, сохраняя кадр). voice_embeddings: speaker_id -> эмбеддинг голоса (#83), может
-/// быть пуст. Возвращает (Casting, кластеры) — кластеры нужны вызывающему для выбора кадра-аватарки.
+/// в персонажей, связка с голосами (со-встречаемость), ФИЛЬТР «только говорящие/существенные», сборка
+/// Casting БЕЗ аватарок на диске (avatar-путь проставляет вызывающий, сохраняя кадр). voice_embeddings:
+/// speaker_id -> эмбеддинг голоса, может быть пуст. `fps` — частота семплинга кадров кастинга (для перевода
+/// «кадров кластера» -> «секунд на экране» в фильтре). Возвращает (Casting, кластеры, отброшено) —
+/// кластеры синхронны characters по индексу (нужны вызывающему для аватарок); отброшено — для лога.
 pub fn build_casting(
     faces: &[FrameFace],
     turns: &[SpeakerTurn],
@@ -334,10 +346,12 @@ pub fn build_casting(
     voice_embeddings: &std::collections::HashMap<String, Vec<f32>>,
     genders: &std::collections::HashMap<String, String>,
     cos_threshold: f32,
-) -> (Casting, Vec<FaceCluster>) {
-    let clusters = cluster_faces(faces, cos_threshold);
+    fps: f64,
+    min_onscreen_sec: f64,
+) -> (Casting, Vec<FaceCluster>, usize) {
+    let all_clusters = cluster_faces(faces, cos_threshold);
     // времена кадров каждого кластера (для со-встречаемости).
-    let frame_times: Vec<Vec<f64>> = clusters
+    let frame_times: Vec<Vec<f64>> = all_clusters
         .iter()
         .map(|c| {
             let mut ts: Vec<f64> = c.members.iter().map(|&i| faces[i].t).collect();
@@ -347,9 +361,33 @@ pub fn build_casting(
         .collect();
     let linkage = link_faces_to_speakers(&frame_times, turns, speakers);
 
+    // ФИЛЬТР (требование юзера): персонаж = кластер, который ЛИБО говорит (привязан к спикеру), ЛИБО
+    // суммарно на экране >= порога. Не говорит И мелькнул на долю секунды -> отбросить (не персонаж).
+    // Фильтруем ДО сборки Character, чтобы casting.characters и возвращаемые clusters оставались синхронны
+    // по индексу (вызывающий берёт clusters[ci] для аватарки character[ci]). Порог/fps передаёт вызывающий
+    // (env читается на уровне casting.rs, не в этой функции — детерминизм тестов).
+    let min_secs = min_onscreen_sec;
+    let fps = if fps > 0.0 { fps } else { DEFAULT_FPS };
+    let mut clusters: Vec<FaceCluster> = Vec::with_capacity(all_clusters.len());
+    let mut linked: Vec<Option<String>> = Vec::with_capacity(all_clusters.len());
+    let mut dropped = 0usize;
+    for (ci, cl) in all_clusters.into_iter().enumerate() {
+        let speaker = linkage.get(&ci).cloned();
+        let onscreen = cl.members.len() as f64 / fps;
+        let keep = speaker.is_some() || min_secs <= 0.0 || onscreen >= min_secs;
+        if keep {
+            linked.push(speaker);
+            clusters.push(cl);
+        } else {
+            dropped += 1;
+        }
+    }
+
+    // id переприсваиваем ПО ОТФИЛЬТРОВАННОМУ порядку (char_0..char_n без дыр) — единый источник для
+    // аватарок char_<i>.png и фронтовых ссылок.
     let mut casting = Casting::default();
     for (ci, cl) in clusters.iter().enumerate() {
-        let speaker = linkage.get(&ci).cloned();
+        let speaker = linked[ci].clone();
         let voice_emb = speaker
             .as_ref()
             .and_then(|s| voice_embeddings.get(s))
@@ -372,7 +410,7 @@ pub fn build_casting(
             sample_frame: String::new(), // проставит вызывающий после сохранения кадра
         });
     }
-    (casting, clusters)
+    (casting, clusters, dropped)
 }
 
 #[cfg(test)]
@@ -432,16 +470,71 @@ mod tests {
         voice_emb.insert("0".to_string(), l2_normalize(vec![0.0, 1.0]));
         let mut genders = std::collections::HashMap::new();
         genders.insert("0".to_string(), "male".to_string());
-        let (casting, clusters) =
-            build_casting(&faces, &turns, &speakers, &voice_emb, &genders, 0.5);
+        let (casting, clusters, dropped) =
+            build_casting(&faces, &turns, &speakers, &voice_emb, &genders, 0.5, DEFAULT_FPS, 3.0);
         assert_eq!(clusters.len(), 1);
         assert_eq!(casting.characters.len(), 1);
+        assert_eq!(dropped, 0, "говорящий кластер не отбрасывается");
         let c = &casting.characters[0];
         assert_eq!(c.speaker_ids, vec!["0".to_string()], "лицо связано со спикером 0");
         assert_eq!(c.gender, "male");
         assert_eq!(c.face_embedding.len(), 3);
         assert_eq!(c.voice_embedding.len(), 2, "voice_embedding перенесён от спикера");
         assert_eq!(c.dub_voice, "clone", "дефолт — клонирование");
+    }
+
+    #[test]
+    fn filter_drops_silent_brief_cluster() {
+        // Порог 3с (передаём параметром — без env, детерминизм в parallel-тестах); fps=1.
+        // Кластер A — 4 кадра (4с на экране), НЕ говорит -> проходит по времени.
+        // Кластер B — 2 кадра (2с < 3с), НЕ говорит -> отброшен. (2 члена, чтобы пережить min_cluster=2.)
+        // Спикеров/реплик нет — оба кластера молчат, решает только время на экране.
+        let faces = vec![
+            ff(0.0, vec![1.0, 0.0, 0.0]),
+            ff(1.0, vec![0.99, 0.02, 0.0]),
+            ff(2.0, vec![0.98, 0.03, 0.0]),
+            ff(3.0, vec![0.99, 0.01, 0.0]),
+            ff(4.0, vec![0.0, 1.0, 0.0]), // кластер B
+            ff(5.0, vec![0.02, 0.99, 0.0]), // кластер B
+        ];
+        let turns: Vec<SpeakerTurn> = vec![];
+        let speakers: Vec<String> = vec![];
+        let voice_emb = std::collections::HashMap::new();
+        let genders = std::collections::HashMap::new();
+        // fps=1 -> A=4с (>=3, kept), B=2с (<3, не говорит -> dropped).
+        let (casting, clusters, dropped) =
+            build_casting(&faces, &turns, &speakers, &voice_emb, &genders, 0.5, 1.0, 3.0);
+        assert_eq!(dropped, 1, "молчащий кратковременный кластер отброшен");
+        assert_eq!(casting.characters.len(), 1, "остался только существенный");
+        assert_eq!(clusters.len(), 1, "clusters синхронны characters");
+    }
+
+    #[test]
+    fn filter_keeps_speaking_even_if_brief() {
+        // Кластер говорит (со-встречаемость со спикером "0") — проходит ВСЕГДА, хотя на экране <порога 10с.
+        let faces = vec![ff(0.5, vec![1.0, 0.0, 0.0]), ff(1.0, vec![0.99, 0.01, 0.0])];
+        let turns = vec![SpeakerTurn { start: 0.0, end: 2.0, speaker: "0".into() }];
+        let speakers = vec!["0".to_string()];
+        let voice_emb = std::collections::HashMap::new();
+        let genders = std::collections::HashMap::new();
+        let (casting, _clusters, dropped) =
+            build_casting(&faces, &turns, &speakers, &voice_emb, &genders, 0.5, 1.0, 10.0);
+        assert_eq!(dropped, 0, "говорящий не отброшен даже при малом времени на экране");
+        assert_eq!(casting.characters.len(), 1);
+    }
+
+    #[test]
+    fn filter_disabled_when_threshold_zero() {
+        // Порог 0 -> фильтр по времени выключен: молчащий кластер тоже остаётся персонажем.
+        let faces = vec![ff(0.0, vec![1.0, 0.0, 0.0]), ff(1.0, vec![0.99, 0.01, 0.0])];
+        let turns: Vec<SpeakerTurn> = vec![];
+        let speakers: Vec<String> = vec![];
+        let voice_emb = std::collections::HashMap::new();
+        let genders = std::collections::HashMap::new();
+        let (casting, _clusters, dropped) =
+            build_casting(&faces, &turns, &speakers, &voice_emb, &genders, 0.5, 1.0, 0.0);
+        assert_eq!(dropped, 0);
+        assert_eq!(casting.characters.len(), 1);
     }
 
     #[test]

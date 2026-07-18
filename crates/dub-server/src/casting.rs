@@ -36,7 +36,10 @@ fn casting_fps() -> f64 {
 
 /// Прогнать стадию кастинга. proj уже собран транскрипт-стадией (segments + speaker). Пишет casting.json
 /// в work_dir и аватарки в work_dir/casting/. Ничего не возвращает — результат в файле (эндпоинт отдаёт).
-pub fn stage(paths: &AnalyzePaths, proj: &Project, progress: &Progress) {
+/// `casting_ref` — slug профиля app-библиотеки (#115): если задан, грузим его как prev и переносим
+/// имена/голоса/заметки на новые кластеры по face+voice similarity. Пусто = без применения библиотеки
+/// (fallback на соседний prev_casting.json / env, как раньше).
+pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, progress: &Progress) {
     // Вторая линия защиты гейта нулевого оверхеда (#115): вызывающий проверяет casting_enabled, но
     // страхуемся здесь — при выключенном кастинге НИ ОДНОГО кадра не сканируем.
     if !proj.casting_enabled {
@@ -176,18 +179,35 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, progress: &Progress) {
 
     // Пол спикеров по F0 (переиспользуем f0 на чистом вокале, если он есть). Пустой — без пола.
     let genders = speaker_genders(paths, proj, &speakers);
-    // Эмбеддинги голоса (#83 speaker_global) — движок эмбеддера пока заглушка (NullEmbedder), поэтому
-    // карта ПУСТА. Следствие: cross-episode матчинг работает ТОЛЬКО для персонажей С ЛИЦОМ (по face-
-    // эмбеддингу). Чисто голосовые/закадровые персонажи (лица нет И voice-эмбеддинга нет) имеют
-    // similarity=-1 и между эпизодами НЕ матчатся — это ожидаемо, не падаем. Полноценный voice-эмбеддер —
-    // отдельная задача; тогда голос добавится в матчинг автоматически (character_similarity уже готов).
-    let voice_embeddings: HashMap<String, Vec<f32>> = HashMap::new();
+    // Эмбеддинги голоса (WeSpeaker ResNet34-LM #115): для КАЖДОГО спикера извлекаем образец-фразу
+    // (длиннейшая чистая реплика) на чистом вокале, режем wav casting/char-*_voice.wav, считаем 256-d.
+    // Модели нет / вокала нет -> карта пуста (кастинг по лицу работает; cross-episode по голосу отключён,
+    // но не падаем). Сами wav-образцы (для проигрывания в UI) кладём ПОЗЖЕ, по индексу персонажа.
+    let (voice_embeddings, speaker_samples) = speaker_voices(paths, proj, &speakers, progress);
 
-    // 4) кластеризация + связка лицо↔голос -> Casting (стадия cast_speaker).
+    // 4) кластеризация + связка лицо↔голос + ФИЛЬТР «только говорящие/существенные» -> Casting.
     emit(progress, "cast_speaker", "связка лицо↔голос");
     let cos = dub_faces::cluster_cos_threshold();
-    let (mut casting, clusters) =
-        build_casting(&faces, &turns, &speakers, &voice_embeddings, &genders, cos);
+    let min_onscreen = dub_faces::min_onscreen_secs();
+    let (mut casting, clusters, dropped) = build_casting(
+        &faces,
+        &turns,
+        &speakers,
+        &voice_embeddings,
+        &genders,
+        cos,
+        casting_fps(),
+        min_onscreen,
+    );
+    if dropped > 0 {
+        emit(
+            progress,
+            "cast_speaker",
+            &format!(
+                "отброшено кластеров-статистов (не говорят и <{min_onscreen:.1}с на экране): {dropped}"
+            ),
+        );
+    }
     emit(progress, "cast_speaker", &format!("персонажей (кластеров лиц): {}", casting.characters.len()));
 
     // 5) аватарки: сохранить кадр-аватарку каждого кластера в casting/char_<i>.png.
@@ -225,9 +245,23 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, progress: &Progress) {
         }
     }
 
-    // 6) cross-episode: если рядом есть casting.json прошлого эпизода (env DUB_FACES_PREV_CASTING или
-    //    соседний …/prev_casting.json), матчим и переносим имена/голоса/speech_note.
-    if let Some(prev) = load_prev_casting(paths) {
+    // 5b) образцы голоса: для каждого персонажа с привязанным спикером кладём проигрываемый wav
+    // casting/char_<i>_voice.wav (тот же клип, что дал voice_embedding). Фронт отдаёт его через
+    // /casting/voice?id=; отсутствие файла -> voice_sample_url:null (персонаж без голоса/закадровый).
+    for (ci, ch) in casting.characters.iter().enumerate() {
+        let Some(spk) = ch.speaker_ids.first() else { continue };
+        let Some(src) = speaker_samples.get(spk) else { continue };
+        let dst = cast_dir.join(format!("char_{ci}_voice.wav"));
+        if let Err(e) = std::fs::copy(src, &dst) {
+            emit(progress, "cast_speaker", &format!("образец голоса char_{ci} не сохранён: {e}"));
+        }
+    }
+
+    // 6) cross-episode / применение библиотеки: приоритет — профиль app-библиотеки (casting_ref), иначе
+    //    соседний prev_casting.json / env DUB_FACES_PREV_CASTING. Матчим по face+voice similarity и
+    //    переносим имена/голоса/speech_note (match_cross_episode). Голос теперь участвует в матче —
+    //    voice_embedding наполнен выше (WeSpeaker), character_similarity сам берёт обе модальности.
+    if let Some(prev) = load_prev_casting(paths, casting_ref, progress) {
         let mt = dub_faces::match_cos_threshold();
         casting.characters = match_cross_episode(&casting.characters, &prev, mt);
         let carried = casting.characters.iter().filter(|c| !c.name.is_empty()).count();
@@ -308,9 +342,130 @@ fn speaker_genders(paths: &AnalyzePaths, proj: &Project, speakers: &[String]) ->
     out
 }
 
-/// casting.json прошлого эпизода для cross-episode матчинга: env DUB_FACES_PREV_CASTING (явный путь),
-/// иначе work_dir/prev_casting.json (кладёт вызывающий/UI при выборе предыдущего эпизода). None если нет.
-fn load_prev_casting(paths: &AnalyzePaths) -> Option<dub_faces::Casting> {
+/// Границы длины образца-фразы для голосового эмбеддера (сек). RESEARCH: чистый вокал 16к, длиннейшая
+/// реплика спикера, 2-6с; короче 1с — шумнее, но ок. Кап сверху 6с (дольше не улучшает эмбеддинг, но
+/// раздувает fbank), пол — 1с (короче — совсем ненадёжно).
+const VOICE_SAMPLE_MAX_SEC: f64 = 6.0;
+const VOICE_SAMPLE_MIN_SEC: f64 = 1.0;
+
+/// Голосовые эмбеддинги + wav-образцы для КАЖДОГО спикера. Для каждого спикера берём длиннейшую реплику
+/// (build_speaker_refs-логика: устойчивый образец) на ЧИСТОМ вокале, режем в casting/char-<spk>_voice.wav
+/// (16к моно), считаем 256-d WeSpeaker-эмбеддинг. Модели нет / вокала нет / клип короче 1с -> спикер без
+/// голоса (кастинг по лицу всё равно работает; cross-episode по голосу отключён для него — не падаем).
+/// Возвращает (speaker_id -> эмбеддинг, speaker_id -> путь к wav-образцу).
+fn speaker_voices(
+    paths: &AnalyzePaths,
+    proj: &Project,
+    speakers: &[String],
+    progress: &Progress,
+) -> (HashMap<String, Vec<f32>>, HashMap<String, std::path::PathBuf>) {
+    let mut embs: HashMap<String, Vec<f32>> = HashMap::new();
+    let mut samples: HashMap<String, std::path::PathBuf> = HashMap::new();
+
+    // Чистый вокал (тот же приоритет, что speaker_genders/build_speaker_refs). Нет вокала -> без голоса.
+    let vocals = {
+        let clean = paths.work_dir.join("vocals16_clean.wav");
+        let raw = paths.work_dir.join("vocals16.wav");
+        if clean.is_file() {
+            clean
+        } else if raw.is_file() {
+            raw
+        } else {
+            emit(progress, "cast_speaker", "голосовой эмбеддинг пропущен: нет чистого вокала");
+            return (embs, samples);
+        }
+    };
+
+    // Модель WeSpeaker (по образцу SCRFD/LVFace: <models_root>/faces/wespeaker/…). Нет модели -> без
+    // голоса (fail-safe: кастинг по лицу работает). Env DUB_FACES_WESPEAKER — явный путь (портатив).
+    let onnx = std::env::var("DUB_FACES_WESPEAKER")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| dub_faces::wespeaker_path(&paths.models_root));
+    if !onnx.is_file() {
+        emit(
+            progress,
+            "cast_speaker",
+            &format!("голосовой эмбеддинг пропущен: нет модели WeSpeaker ({})", onnx.display()),
+        );
+        return (embs, samples);
+    }
+    let mut embedder = match dub_faces::VoiceEmbedder::load(&onnx) {
+        Ok(e) => e,
+        Err(e) => {
+            emit(progress, "cast_speaker", &format!("WeSpeaker не загрузился: {e}; голос пропущен"));
+            return (embs, samples);
+        }
+    };
+
+    let cast_dir = paths.work_dir.join("casting");
+    let _ = std::fs::create_dir_all(&cast_dir);
+    for spk in speakers {
+        // Длиннейшая реплика спикера — устойчивый образец (та же эвристика, что build_speaker_refs fallback).
+        let cand = proj
+            .segments
+            .iter()
+            .filter(|s| s.speaker.as_deref().unwrap_or("0") == spk)
+            .max_by(|a, b| {
+                (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap_or(std::cmp::Ordering::Equal)
+            });
+        let Some(seg) = cand else { continue };
+        if (seg.end - seg.start) < VOICE_SAMPLE_MIN_SEC {
+            continue; // короче 1с — ненадёжно, пропускаем (лучше без голоса, чем шум)
+        }
+        // Образец = wav для проигрывания И для эмбеддинга. Имя по спикеру; персонажу его копирует step 5b.
+        let wav = cast_dir.join(format!("char-{}_voice.wav", sanitize(spk)));
+        let end = seg.end.min(seg.start + VOICE_SAMPLE_MAX_SEC).max(seg.start + 0.05);
+        if let Err(e) = crate::media::trim(&vocals, &wav, seg.start, end, 16_000) {
+            emit(progress, "cast_speaker", &format!("образец голоса спикера {spk}: обрезка не удалась: {e}"));
+            continue;
+        }
+        match embedder.embed_wav(&wav) {
+            Ok(v) => {
+                embs.insert(spk.clone(), v);
+                samples.insert(spk.clone(), wav);
+            }
+            Err(e) => {
+                emit(progress, "cast_speaker", &format!("голос спикера {spk}: эмбеддинг не удался: {e}"));
+                // wav-образец всё равно оставляем (проигрывание в UI не требует эмбеддинга).
+                samples.insert(spk.clone(), wav);
+            }
+        }
+    }
+    if !embs.is_empty() {
+        emit(progress, "cast_speaker", &format!("голосовых эмбеддингов: {}", embs.len()));
+    }
+    (embs, samples)
+}
+
+/// casting.json для cross-episode матчинга. Приоритет:
+///   1) `casting_ref` — slug профиля app-библиотеки (<repo>/casting_library/<slug>/casting.json);
+///   2) env DUB_FACES_PREV_CASTING (явный путь);
+///   3) work_dir/prev_casting.json (кладёт вызывающий/UI при выборе предыдущего эпизода).
+/// None если ничего нет. Невалидный/несуществующий slug логируем и продолжаем без применения (не падаем).
+fn load_prev_casting(
+    paths: &AnalyzePaths,
+    casting_ref: &str,
+    progress: &Progress,
+) -> Option<dub_faces::Casting> {
+    let slug = casting_ref.trim();
+    if !slug.is_empty() {
+        // Тот же safe-slug контракт, что у эндпоинтов библиотеки (без traversal).
+        let safe = slug.len() <= 128
+            && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            && !slug.contains("..");
+        let prof = if safe {
+            paths.repo_root.join("casting_library").join(slug).join("casting.json")
+        } else {
+            std::path::PathBuf::new()
+        };
+        if safe {
+            if let Some(c) = load_casting(&prof) {
+                emit(progress, "cast_speaker", &format!("применяю профиль библиотеки: {slug}"));
+                return Some(c);
+            }
+        }
+        emit(progress, "cast_speaker", &format!("профиль библиотеки «{slug}» не найден — без применения"));
+    }
     if let Some(p) = std::env::var_os("DUB_FACES_PREV_CASTING") {
         if let Some(c) = load_casting(Path::new(&p)) {
             return Some(c);

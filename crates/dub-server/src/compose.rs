@@ -940,6 +940,7 @@ mod tests {
         AnalyzePaths {
             input: p.clone(),
             work_dir: p.clone(),
+            repo_root: p.clone(),
             asr: crate::models::AsrChoice::Parakeet(p.clone()),
             sortformer_onnx: p.clone(),
             llama_bin: p.clone(),
