@@ -604,6 +604,31 @@ function VoiceSlotList({ title, voices, slots, onChange }: {
   );
 }
 
+// Аккордеон стартового экрана (#118): свёрнутая по умолчанию секция вторичных опций. Заголовок-кнопка
+// в стиле секций (uppercase 11px) + краткий статус справа и шеврон, поворот на 180° при раскрытии.
+// Плавность высоты через grid-rows 0fr→1fr (без ручного замера max-height); контент рендерится всегда,
+// чтобы стейты внутри не сбрасывались при сворачивании.
+function Accordion({ title, subtitle, defaultOpen = false, children }: {
+  title: string; subtitle?: string; defaultOpen?: boolean; children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="mt-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2 px-2.5 py-2 text-left">
+        <span className="text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] shrink-0">{title}</span>
+        {subtitle && !open && <span className="text-[11px] text-[var(--color-muted)]/70 truncate min-w-0 flex-1">{subtitle}</span>}
+        <ChevronDown size={15} className={`ml-auto shrink-0 text-[var(--color-muted)] transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
+      </button>
+      <div className={`grid transition-[grid-template-rows] duration-200 ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+        <div className="overflow-hidden">
+          <div className="px-2.5 pb-2.5 pt-0.5">{children}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DropZone() {
   const { t, i18n } = useTranslation();
   const s = useStore();
@@ -930,111 +955,142 @@ function DropZone() {
                 <Icon size={14} />{key.includes(".") ? t(key) : t(`comp.${key}`)}</button>
             ))}
           </div>
-          {/* ШУТОЧНЫЙ РЕМИКС — сочетается с дубляжом/закадром (и с выбранными голосами в редакторе) */}
-          {(audio === "dub" || audio === "voiceover") && (
-            <label className="mt-2 flex items-center gap-2 text-[12px] cursor-pointer select-none">
-              <input type="checkbox" checked={funnyOn} onChange={(e) => setFunnyOn(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
-              <Sparkles size={13} className="text-[var(--color-accent-2)]" />{t("comp.funny")}
-            </label>
-          )}
-          {funnyOn && (audio === "dub" || audio === "voiceover") && (
-            <textarea value={funny} onChange={(e) => setFunny(e.target.value)} rows={2} placeholder={t("remix.placeholder")}
-              className="mt-1.5 w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-2 text-[12px] focus:border-[var(--color-accent)] focus:outline-none resize-none" />
-          )}
-          {/* ГОЛОСА (#114): клон из видео (дефолт) или слоты из библиотеки. Свёрнут в пустом состоянии — одна строка радио. */}
-          {(audio === "dub" || audio === "voiceover") && (
-            <div className="mt-2.5">
-              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("voiceSlots.label")}</div>
-              <div className="grid grid-cols-2 gap-1.5">
-                {(["clone", "library"] as const).map((m) => (
-                  <button key={m} onClick={() => setVoiceSrcSaved(m)}
-                    className={`px-2 py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${voiceSrc === m ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
-                    {t(m === "clone" ? "voiceSlots.clone" : "voiceSlots.library")}</button>
-                ))}
-              </div>
-              {voiceSrc === "library" && (
-                <div className="mt-1.5 space-y-2">
-                  <p className="text-[10px] text-[var(--color-muted)] leading-tight">{t("voiceSlots.priorityHint")}</p>
-                  <VoiceSlotList title={t("voiceSlots.male")} voices={voiceLib} slots={slotsM} onChange={setSlotsMSaved} />
-                  <VoiceSlotList title={t("voiceSlots.female")} voices={voiceLib} slots={slotsF} onChange={setSlotsFSaved} />
-                </div>
-              )}
-            </div>
-          )}
-          {/* СОХРАНИТЬ ОРИГИНАЛ (#113): 2-я аудиодорожка в выводе + контейнер. Только dub/voiceover, не аудио-режим. */}
-          {(audio === "dub" || audio === "voiceover") && !audioOnly && (
-            <div className="mt-2">
-              <label className="flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit" title={t("keepOrig.hint")}>
-                <input type="checkbox" checked={keepOrig} onChange={(e) => setKeepOrigSaved(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
-                {t("keepOrig.label")}
-                <span title={t("keepOrig.hint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
-              </label>
-              {keepOrig && (
-                <div className="mt-1.5 flex rounded-lg border border-[var(--color-border)] overflow-hidden text-[11px] w-fit">
-                  {(["mp4", "mkv"] as const).map((c) => (
-                    <button key={c} onClick={() => setContainerSaved(c)} title={t(c === "mp4" ? "keepOrig.mp4Hint" : "keepOrig.mkvHint")}
-                      className={`px-2.5 py-1 transition-colors ${container === c ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
-                      {t(c === "mp4" ? "keepOrig.mp4" : "keepOrig.mkv")}</button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {/* СТИЛЬ ПЕРЕВОДА (#112): доп-регистр для Геммы. Виден при дубляже/закадре ИЛИ переводных субтитрах. */}
-          {(audio === "dub" || audio === "voiceover" || subs === "translate") && (
-            <div className="mt-2.5">
-              <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("trStyle.label")}</div>
-              <select value={trStyle} onChange={(e) => setTrStyleSaved(e.target.value)}
-                className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[12px] focus:border-[var(--color-accent)] focus:outline-none">
-                <option value="">{t("trStyle.normal")}</option>
-                <option value="technical">{t("trStyle.technical")}</option>
-                <option value="literary">{t("trStyle.literary")}</option>
-                <option value="casual">{t("trStyle.casual")}</option>
-                <option value="custom">{t("trStyle.custom")}</option>
-              </select>
-              {trStyle === "custom" && (
-                <textarea value={trStyleCustom} onChange={(e) => setTrStyleCustomSaved(e.target.value)} rows={2} placeholder={t("trStyle.customPlaceholder")}
-                  className="mt-1.5 w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-2 text-[12px] focus:border-[var(--color-accent)] focus:outline-none resize-none" />
-              )}
-            </div>
-          )}
-          {/* ЗАКАДРОВЫЙ: громкость оригинала под переводом — глобальный дефолт, применяется ко всем создаваемым проектам */}
-          {audio === "voiceover" && (
-            <div className="mt-2">
-              <div className="flex items-center justify-between text-[11px] mb-1">
-                <span className="text-[var(--color-muted)]">{t("comp.origGain")}</span>
-                <span className="mono text-[11px] text-[var(--color-text)]">{voGain.toFixed(1)} dB</span>
-              </div>
-              <input type="range" min={-24} max={0} step={0.5} value={voGain}
-                onChange={(e) => setVoGainSaved(parseFloat(e.target.value))}
-                className="w-full accent-[var(--color-accent)]" />
-            </div>
-          )}
-          {/* СУБТИТРЫ (независимо от аудио) */}
-          {audio !== "transcribe" && !audioOnly && (
-            <>
-              <div className="mt-3 flex items-center gap-1.5 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("comp.subsLabel")}<span title={t("comp.optionsHelp")} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span></div>
-              <div className="grid grid-cols-3 gap-1.5">
-                {([["none", "subsNone", "comp.subsNoneHint"], ["transcribe", "subsOriginal", "comp.subsOriginalHint"], ["translate", "subsTranslate", "comp.subsTranslateHint"]] as const).map(([sv, key, hint]) => (
-                  <button key={sv} onClick={() => setSubs(sv)} title={t(hint)}
-                    className={`px-2 py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${subs === sv ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
-                    {t(`comp.${key}`)}</button>
-                ))}
-              </div>
-              {subs !== "none" && (
-                <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit">
-                  <input type="checkbox" checked={burn} onChange={(e) => setBurn(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
-                  {t("comp.burn")}
-                  <span title={t("comp.burnHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
-                </label>
-              )}
-              <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit">
-                <input type="checkbox" checked={detectText} onChange={(e) => setDetectText(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
-                {t("comp.detect")}
-                <span title={t("comp.detectHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
-              </label>
-            </>
-          )}
+          {/* Прогрессивное раскрытие (#118): вторичные опции — в свёрнутых аккордеонах, только релевантные режиму.
+              Все стейты/обработчики/условия те же, изменилась лишь группировка разметки. */}
+          {(() => {
+            const isVoiced = audio === "dub" || audio === "voiceover";
+            const showSubs = audio !== "transcribe" && !audioOnly;
+            // Статусы для свёрнутых заголовков.
+            const voicesStatus = voiceSrc === "clone"
+              ? t("voiceSlots.clone")
+              : t("accordion.voicesLib", { n: slotsM.length + slotsF.length });
+            const subsStatus = t(`comp.subs${subs === "none" ? "None" : subs === "transcribe" ? "Original" : "Translate"}`);
+            // «Дополнительно» показываем только если при текущем режиме внутри есть хоть один пункт.
+            // стиль перевода — только там, где перевод реально идёт (не в транскрипт-режиме).
+            const showTrStyle = audio === "dub" || audio === "voiceover" || (subs === "translate" && audio !== "transcribe");
+            const showKeepOrig = isVoiced && !audioOnly;
+            const showDetect = showSubs;
+            const showFunny = isVoiced;
+            const showVoGain = audio === "voiceover";
+            const showAdvanced = showTrStyle || showKeepOrig || showDetect || showFunny || showVoGain;
+            return (
+              <>
+                {/* ГОЛОСА (#114): клон из видео (дефолт) или слоты из библиотеки. */}
+                {isVoiced && (
+                  <Accordion title={t("accordion.voices")} subtitle={voicesStatus}>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {(["clone", "library"] as const).map((m) => (
+                        <button key={m} onClick={() => setVoiceSrcSaved(m)}
+                          className={`px-2 py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${voiceSrc === m ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+                          {t(m === "clone" ? "voiceSlots.clone" : "voiceSlots.library")}</button>
+                      ))}
+                    </div>
+                    {voiceSrc === "library" && (
+                      <div className="mt-1.5 space-y-2">
+                        <p className="text-[10px] text-[var(--color-muted)] leading-tight">{t("voiceSlots.priorityHint")}</p>
+                        <VoiceSlotList title={t("voiceSlots.male")} voices={voiceLib} slots={slotsM} onChange={setSlotsMSaved} />
+                        <VoiceSlotList title={t("voiceSlots.female")} voices={voiceLib} slots={slotsF} onChange={setSlotsFSaved} />
+                      </div>
+                    )}
+                  </Accordion>
+                )}
+                {/* СУБТИТРЫ (независимо от аудио) */}
+                {showSubs && (
+                  <Accordion title={t("accordion.subs")} subtitle={subsStatus}>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {([["none", "subsNone", "comp.subsNoneHint"], ["transcribe", "subsOriginal", "comp.subsOriginalHint"], ["translate", "subsTranslate", "comp.subsTranslateHint"]] as const).map(([sv, key, hint]) => (
+                        <button key={sv} onClick={() => setSubs(sv)} title={t(hint)}
+                          className={`px-2 py-1.5 rounded-lg border text-[11px] font-medium transition-colors ${subs === sv ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_12%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+                          {t(`comp.${key}`)}</button>
+                      ))}
+                    </div>
+                    {subs !== "none" && (
+                      <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit">
+                        <input type="checkbox" checked={burn} onChange={(e) => setBurn(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
+                        {t("comp.burn")}
+                        <span title={t("comp.burnHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
+                      </label>
+                    )}
+                  </Accordion>
+                )}
+                {/* ДОПОЛНИТЕЛЬНО: стиль перевода / оригинал-дорожка / детекция текста / шуточный ремикс / громкость оригинала. */}
+                {showAdvanced && (
+                  <Accordion title={t("accordion.advanced")}>
+                    {/* СТИЛЬ ПЕРЕВОДА (#112): доп-регистр для Геммы. */}
+                    {showTrStyle && (
+                      <div>
+                        <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("trStyle.label")}</div>
+                        <select value={trStyle} onChange={(e) => setTrStyleSaved(e.target.value)}
+                          className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-1.5 text-[12px] focus:border-[var(--color-accent)] focus:outline-none">
+                          <option value="">{t("trStyle.normal")}</option>
+                          <option value="technical">{t("trStyle.technical")}</option>
+                          <option value="literary">{t("trStyle.literary")}</option>
+                          <option value="casual">{t("trStyle.casual")}</option>
+                          <option value="custom">{t("trStyle.custom")}</option>
+                        </select>
+                        {trStyle === "custom" && (
+                          <textarea value={trStyleCustom} onChange={(e) => setTrStyleCustomSaved(e.target.value)} rows={2} placeholder={t("trStyle.customPlaceholder")}
+                            className="mt-1.5 w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-2 text-[12px] focus:border-[var(--color-accent)] focus:outline-none resize-none" />
+                        )}
+                      </div>
+                    )}
+                    {/* СОХРАНИТЬ ОРИГИНАЛ (#113): 2-я аудиодорожка в выводе + контейнер. */}
+                    {showKeepOrig && (
+                      <div className={showTrStyle ? "mt-2.5" : ""}>
+                        <label className="flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit" title={t("keepOrig.hint")}>
+                          <input type="checkbox" checked={keepOrig} onChange={(e) => setKeepOrigSaved(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
+                          {t("keepOrig.label")}
+                          <span title={t("keepOrig.hint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
+                        </label>
+                        {keepOrig && (
+                          <div className="mt-1.5 flex rounded-lg border border-[var(--color-border)] overflow-hidden text-[11px] w-fit">
+                            {(["mp4", "mkv"] as const).map((c) => (
+                              <button key={c} onClick={() => setContainerSaved(c)} title={t(c === "mp4" ? "keepOrig.mp4Hint" : "keepOrig.mkvHint")}
+                                className={`px-2.5 py-1 transition-colors ${container === c ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+                                {t(c === "mp4" ? "keepOrig.mp4" : "keepOrig.mkv")}</button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {/* ДЕТЕКЦИЯ ВШИТОГО ТЕКСТА (OCR). */}
+                    {showDetect && (
+                      <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit">
+                        <input type="checkbox" checked={detectText} onChange={(e) => setDetectText(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
+                        {t("comp.detect")}
+                        <span title={t("comp.detectHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
+                      </label>
+                    )}
+                    {/* ШУТОЧНЫЙ РЕМИКС — сочетается с дубляжом/закадром. */}
+                    {showFunny && (
+                      <>
+                        <label className="mt-2 flex items-center gap-2 text-[12px] cursor-pointer select-none">
+                          <input type="checkbox" checked={funnyOn} onChange={(e) => setFunnyOn(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
+                          <Sparkles size={13} className="text-[var(--color-accent-2)]" />{t("comp.funny")}
+                        </label>
+                        {funnyOn && (
+                          <textarea value={funny} onChange={(e) => setFunny(e.target.value)} rows={2} placeholder={t("remix.placeholder")}
+                            className="mt-1.5 w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-2.5 py-2 text-[12px] focus:border-[var(--color-accent)] focus:outline-none resize-none" />
+                        )}
+                      </>
+                    )}
+                    {/* ЗАКАДРОВЫЙ: громкость оригинала под переводом — глобальный дефолт. */}
+                    {showVoGain && (
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between text-[11px] mb-1">
+                          <span className="text-[var(--color-muted)]">{t("comp.origGain")}</span>
+                          <span className="mono text-[11px] text-[var(--color-text)]">{voGain.toFixed(1)} dB</span>
+                        </div>
+                        <input type="range" min={-24} max={0} step={0.5} value={voGain}
+                          onChange={(e) => setVoGainSaved(parseFloat(e.target.value))}
+                          className="w-full accent-[var(--color-accent)]" />
+                      </div>
+                    )}
+                  </Accordion>
+                )}
+              </>
+            );
+          })()}
           <button onClick={run} disabled={!file || (funnyOn && (audio === "dub" || audio === "voiceover") && !funny.trim())}
             className="mt-2.5 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-40 hover:brightness-105 transition">
             {t("drop.start")} <ArrowRight size={16} /></button>

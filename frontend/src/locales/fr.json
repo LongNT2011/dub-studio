@@ -446,5 +446,11 @@
     "remove": "Retirer",
     "priorityHint": "Ordre = priorité : l'emplacement 1 est le locuteur qui parle le plus de ce genre, puis en rotation. Liste vide = ce genre est cloné.",
     "assigned": "Voix attribuées : {{n}} locuteur(s)"
+  },
+  "accordion": {
+    "voices": "Voix",
+    "voicesLib": "Depuis la bibliothèque : {{n}} voix",
+    "subs": "Sous-titres",
+    "advanced": "Plus d'options"
   }
 }

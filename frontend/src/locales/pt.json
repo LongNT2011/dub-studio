@@ -446,5 +446,11 @@
     "remove": "Remover",
     "priorityHint": "Ordem = prioridade: o slot 1 é o falante que mais fala desse gênero, depois em rodízio. Lista vazia = esse gênero é clonado.",
     "assigned": "Vozes atribuídas: {{n}} falante(s)"
+  },
+  "accordion": {
+    "voices": "Vozes",
+    "voicesLib": "Da biblioteca: {{n}} voz(es)",
+    "subs": "Legendas",
+    "advanced": "Mais opções"
   }
 }

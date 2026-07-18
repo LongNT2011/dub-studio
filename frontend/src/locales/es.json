@@ -446,5 +446,11 @@
     "remove": "Quitar",
     "priorityHint": "Orden = prioridad: la ranura 1 es el hablante que más habla de ese género, luego en ciclo. Lista vacía = ese género se clona.",
     "assigned": "Voces asignadas: {{n}} hablante(s)"
+  },
+  "accordion": {
+    "voices": "Voces",
+    "voicesLib": "De la biblioteca: {{n}} voz(ces)",
+    "subs": "Subtítulos",
+    "advanced": "Más opciones"
   }
 }

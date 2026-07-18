@@ -446,5 +446,11 @@
     "remove": "Remove",
     "priorityHint": "Order = priority: slot 1 is the most-speaking speaker of that gender, then round-robin. Empty list = that gender is cloned.",
     "assigned": "Voices assigned: {{n}} speaker(s)"
+  },
+  "accordion": {
+    "voices": "Voices",
+    "voicesLib": "From library: {{n}} voice(s)",
+    "subs": "Subtitles",
+    "advanced": "More options"
   }
 }
