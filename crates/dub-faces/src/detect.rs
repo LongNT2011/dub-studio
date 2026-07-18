@@ -158,7 +158,7 @@ impl Scrfd {
 }
 
 /// IoU двух лиц (по bbox).
-fn iou(a: &Face, b: &Face) -> f32 {
+pub(crate) fn iou(a: &Face, b: &Face) -> f32 {
     let xx1 = a.x1.max(b.x1);
     let yy1 = a.y1.max(b.y1);
     let xx2 = a.x2.min(b.x2);
@@ -175,7 +175,7 @@ fn iou(a: &Face, b: &Face) -> f32 {
 }
 
 /// Greedy NMS по score (по убыванию). Детерминированный tie-break по позиции.
-fn nms(mut faces: Vec<Face>, thresh: f32) -> Vec<Face> {
+pub(crate) fn nms(mut faces: Vec<Face>, thresh: f32) -> Vec<Face> {
     faces.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     let mut keep: Vec<Face> = Vec::new();
     'outer: for f in faces {

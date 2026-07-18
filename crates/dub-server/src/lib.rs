@@ -85,6 +85,7 @@ pub fn verify_captions_e2e(
         detect_text: true,
         casting: false, // verify-путь: только капшены/OCR, кастинг не нужен
         casting_ref: String::new(),
+        content_type: String::new(),
         import_translated: false,
     };
     let sel = models::load_selection(&mroot);
@@ -1324,6 +1325,8 @@ async fn analyze_project(
         casting: qget("casting", "0") == "1",
         // slug профиля app-библиотеки кастингов (#115): применить к этому ролику. Пусто = без применения.
         casting_ref: qget("casting_ref", ""),
+        // тип контента кастинга (#115): "real" (SCRFD+LVFace) | "anime" (детектор рисованных лиц + CCIP).
+        content_type: qget("content_type", "real"),
         // «сабы уже на языке перевода» — эффективно только если сабы реально импортированы.
         import_translated: import_subs.is_some() && qget("import_translated", "0") == "1",
     };

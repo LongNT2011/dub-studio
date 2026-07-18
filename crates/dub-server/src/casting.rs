@@ -39,11 +39,16 @@ fn casting_fps() -> f64 {
 /// `casting_ref` — slug профиля app-библиотеки (#115): если задан, грузим его как prev и переносим
 /// имена/голоса/заметки на новые кластеры по face+voice similarity. Пусто = без применения библиотеки
 /// (fallback на соседний prev_casting.json / env, как раньше).
-pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, progress: &Progress) {
+pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_type: &str, progress: &Progress) {
     // Вторая линия защиты гейта нулевого оверхеда (#115): вызывающий проверяет casting_enabled, но
     // страхуемся здесь — при выключенном кастинге НИ ОДНОГО кадра не сканируем.
     if !proj.casting_enabled {
         return;
+    }
+    // WIP: speaker-driven путь (аватар из говорящих кадров) + аниме-детектор — в переписке (см. handoff).
+    // Пока content_type пробрасывается, но stage ещё использует старый скан+кластеризацию (real).
+    if content_type.eq_ignore_ascii_case("anime") {
+        emit(progress, "cast_detect", "аниме-режим кастинга ещё подключается — текущий прогон реальным детектором");
     }
     let models = FacesModels::resolve(&paths.models_root);
     if !models.available() {

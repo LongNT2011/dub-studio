@@ -9,8 +9,10 @@
 //! onnxruntime.dll 1.24.2 в рантайме — как dub-asr/dub-ocr). LR-ASD ОПЦИОНАЛЕН: без экспортированного
 //! ONNX связка работает только на со-встречаемости (см. asd.rs, документированный фолбэк).
 
+mod anime_detect;
 mod asd;
 mod cast;
+mod ccip;
 mod detect;
 mod embed;
 mod frames;
@@ -18,10 +20,12 @@ mod link;
 mod ort_engine;
 mod voice;
 
+pub use anime_detect::AnimeFaceDetector;
 pub use asd::AsdScorer;
 pub use cast::{
     load_casting, match_cross_episode, save_casting, Casting, Character, CASTING_VERSION,
 };
+pub use ccip::{ccip_path, ccip_threshold, character_crop_bbox, l2_distance, CcipEmbedder, CCIP_DIM};
 pub use detect::{Face, Scrfd};
 pub use embed::{align_112, l2_normalize, LvFace};
 pub use frames::{

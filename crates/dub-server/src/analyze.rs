@@ -275,6 +275,8 @@ pub struct AnalyzeArgs {
                            // при false НИ ОДНОГО кадра не сканируется (галочка в UI, как detect_text).
     pub casting_ref: String, // slug профиля из app-библиотеки кастингов (#115): применить к этому ролику
                              // (загрузить как prev, матчить кластеры по face+voice). Пусто = без применения.
+    pub content_type: String, // тип контента для кастинга: "real" (SCRFD+LVFace) | "anime" (детектор
+                              // рисованных лиц + CCIP). Пусто = "real". Аниме-путь ловит мульт/аниме лица.
     pub import_translated: bool, // импортированные субтитры УЖЕ на языке перевода -> MT/vision пропустить,
                                  // tgt = импортированный текст, Даб Студио только озвучивает. Работает лишь с import_subs.
 }
@@ -795,7 +797,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     proj.casting_enabled = args.casting;
     bench.stage("casting");
     if args.casting && meta.width > 0 && meta.height > 0 {
-        crate::casting::stage(paths, &proj, &args.casting_ref, progress);
+        crate::casting::stage(paths, &proj, &args.casting_ref, &args.content_type, progress);
     } else if args.casting {
         emit(progress, "casting", "аудио-режим: без видео, кастинг персонажей не нужен");
     }
