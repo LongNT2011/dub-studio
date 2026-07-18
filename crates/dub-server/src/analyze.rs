@@ -267,6 +267,7 @@ pub struct AnalyzeArgs {
     pub src_lang: String,
     pub subs: String,   // auto | none | translate | transcribe
     pub rewrite: String,
+    pub translate_style: String, // доп-инструкция стиля перевода (#112); пусто = без стиля
     pub burn: bool,     // вжигать ли субтитры/титры на видео (композируемость; дефолт true)
     pub detect_text: bool, // OCR-детекция вшитого текста (блюр + локализация титров). Дорогая (минуты на 4K);
                            // в режиме без субтитров/блюра не нужна — галочка в UI, дефолт true.
@@ -711,10 +712,12 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         );
     }
     let mut proj = Project::default();
-    // Стиль перевода (#112) фронт патчит ДО analyze, поэтому переносим его из уже сохранённого
-    // project.json в свежий Project (иначе default затирает фичу). Только это поле: остальной audio
-    // analyze настраивает сам; voiceover_gain/keep_original правятся ПОСЛЕ analyze.
-    if let Ok(text) = std::fs::read_to_string(paths.work_dir.join("project.json")) {
+    // Стиль перевода (#112): ОСНОВНОЙ путь — параметр analyze (со стартового экрана; patch ДО analyze
+    // невозможен — project.json ещё не создан). Фолбэк — перенос из существующего project.json, чтобы
+    // стиль, выставленный в редакторе, пережил ре-анализ (там project.json уже есть).
+    if !args.translate_style.is_empty() {
+        proj.audio.translate_style = args.translate_style.clone();
+    } else if let Ok(text) = std::fs::read_to_string(paths.work_dir.join("project.json")) {
         if let Ok(prev) = Project::from_json(&text) {
             proj.audio.translate_style = prev.audio.translate_style;
         }

@@ -738,9 +738,9 @@ function DropZone() {
     try {
       const { project_id } = await api.createProject(file, isAudioFile(file) ? null : subsFile);   // сабы — только для видео
       s.setPid(project_id);
-      // Стиль перевода (#112): читается стадией перевода ВНУТРИ analyze -> патчим ДО analyze (не как voiceover_gain).
+      // Стиль перевода (#112): передаём ПАРАМЕТРОМ analyze (patch до analyze невозможен — project.json ещё
+      // не создан; стиль читается стадией перевода ВНУТРИ analyze).
       const trStyleText = resolveTrStyle(trStyle, trStyleCustom);
-      if (trStyleText) await api.patch(project_id, { op: "translate_style", style: trStyleText });
       // subtitles = ОРИГИНАЛ: исходная дорожка + субтитры на языке оригинала (без дубляжа, без перевода);
       // voiceover = закадровый (перевод+TTS, оригинал слышно приглушённым); transcribe = транскрипт+диаризация.
       // Композируемо: аудио-выход, содержимое субтитров, шуточный ремикс — независимы.
@@ -752,7 +752,7 @@ function DropZone() {
       // «Вжигать» для transcribe скрыт, поэтому форсируем burn=true, не полагаясь на его прежнее значение.
       // Аудио-режим: субтитры/бёрн/OCR не нужны (нет видео) -> off.
       const eBurn = audioOnly ? false : audio === "transcribe" ? true : burn;
-      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated);
+      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated, trStyleText);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       if (audio === "voiceover") await api.patch(project_id, { op: "voiceover_gain", gain_db: voGain });   // громкость оригинала со старта -> рендер ниже подхватит
       // Сохранить оригинальную дорожку (#113): 2-я аудиодорожка при mux рендера. Только dub/voiceover, не аудио-режим.
@@ -2809,13 +2809,12 @@ function BatchView() {
         const ao = isAudioFile(bf);                                // этот файл — аудио (без видео)?
         const { project_id } = await api.createProject(bf);
         upd({ pid: project_id });
-        // Стиль перевода (#112): читается стадией перевода ВНУТРИ analyze -> патчим ДО analyze КАЖДОГО файла.
-        if (trStyle) await api.patch(project_id, { op: "translate_style", style: trStyle });
         // Транскрипт всегда вжигает субтитры (иначе транскрипт-режим дал бы видео без текста); аудио-файл ->
         // субтитры/бёрн/OCR off (нет видео) -> на выходе озвученный WAV.
         const fSubs = ao ? "none" : eSubs;
         const fBurn = ao ? false : audio === "transcribe" ? true : burn;
-        const { job_id } = await api.analyze(project_id, tgt, eMode, src, fSubs, eRewrite, fBurn, ao ? false : detectText);
+        // Стиль перевода (#112) — параметром analyze (patch до analyze невозможен: project.json ещё нет).
+        const { job_id } = await api.analyze(project_id, tgt, eMode, src, fSubs, eRewrite, fBurn, ao ? false : detectText, false, trStyle);
         await api.watchJob(job_id, (e) => { if (e.type === "progress") upd({ pct: e.pct ?? 0, detail: e.msg || undefined }); });
         if (audio === "voiceover") await api.patch(project_id, { op: "voiceover_gain", gain_db: voGain });   // громкость оригинала со старта -> общий для всех проектов батча
         // Сохранить оригинальную дорожку (#113): 2-я дорожка при mux. Только dub/voiceover, не аудио-файл.

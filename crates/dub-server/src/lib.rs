@@ -78,6 +78,7 @@ pub fn verify_captions_e2e(
         src_lang: "auto".into(),
         subs: proj.subs.mode.clone(),
         rewrite: String::new(),
+        translate_style: proj.audio.translate_style.clone(),
         burn: proj.subs.burn,
         detect_text: true,
         import_translated: false,
@@ -964,6 +965,7 @@ async fn analyze_project(
         src_lang: qget("src_lang", "auto"),
         subs: qget("subs", "auto"),
         rewrite: qget("rewrite", ""),
+        translate_style: qget("translate_style", ""),
         burn: qget("burn", "1") != "0",
         detect_text: qget("detect", "1") != "0",
         // «сабы уже на языке перевода» — эффективно только если сабы реально импортированы.
