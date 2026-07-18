@@ -59,7 +59,9 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
     emit(progress, "cast_detect", &format!("персонажей-спикеров: {} (ранжированы по времени речи)", ranked.len()));
 
     // 2) Пол (F0) + голос (WeSpeaker: 256-d эмбеддинг + образец-фраза) — per-speaker, аудио.
-    let genders = speaker_genders(paths, proj, &ids);
+    // Пол по F0 — только для РЕАЛЬНОГО контента. На мультях/аниме стилизованные голоса дают неверный F0
+    // (напр. все «female»), а пол в UI — факт: лучше «неизвестно», чем гадать (see never-guess).
+    let genders = if anime { HashMap::new() } else { speaker_genders(paths, proj, &ids) };
     let (voice_embeddings, speaker_samples) = speaker_voices(paths, proj, &ids, progress);
 
     // 3) Детектор+эмбеддер ЛИЦА по типу контента (только для аватара). Нет моделей -> без аватаров.
