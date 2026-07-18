@@ -1330,6 +1330,18 @@ fn find_output(dir: &std::path::Path) -> std::path::PathBuf {
     dir.join("output.mp4")
 }
 
+/// Выход ДЛЯ СОХРАНЕНИЯ юзеру: mkv приоритетнее mp4 (юзер выбрал mkv ради мультитрека; mp4 — лишь
+/// playable-компаньон для встроенного плеера, #116). Порядок mkv->mp4->wav.
+fn find_output_save(dir: &std::path::Path) -> std::path::PathBuf {
+    for name in ["output.mkv", "output.mp4", "output.wav"] {
+        let p = dir.join(name);
+        if p.is_file() {
+            return p;
+        }
+    }
+    dir.join("output.mp4")
+}
+
 async fn output(
     State(st): State<AppState>,
     AxPath(pid): AxPath<String>,
@@ -1371,7 +1383,7 @@ async fn save_output(State(st): State<AppState>, AxPath(pid): AxPath<String>, Js
         Ok(d) => d,
         Err(resp) => return resp,
     };
-    let src = find_output(&dir);
+    let src = find_output_save(&dir); // сохраняем богатый файл: mkv приоритетнее playable-mp4 (#116)
     if !src.is_file() {
         return (StatusCode::NOT_FOUND, "not rendered").into_response();
     }
@@ -1412,7 +1424,7 @@ async fn open_output(State(st): State<AppState>, AxPath(pid): AxPath<String>) ->
         Ok(d) => d,
         Err(r) => return r,
     };
-    let f = find_output(&dir);
+    let f = find_output_save(&dir); // системный плеер (VLC и т.п.) тянет богатый mkv, если он есть
     if !f.is_file() {
         return (StatusCode::NOT_FOUND, "not rendered").into_response();
     }
@@ -1457,7 +1469,11 @@ async fn reveal_file(State(st): State<AppState>, AxPath(pid): AxPath<String>, Js
     };
     let name = body.get("name").and_then(|v| v.as_str()).unwrap_or("output.mp4");
     let safe: String = name.chars().filter(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-')).collect();
-    let f = dir.join(&safe);
+    let mut f = dir.join(&safe);
+    // Запрошенного имени нет (фронт просил output.mkv, а mux откатился на mp4, #116) — резолвим фактический.
+    if !f.is_file() && safe.starts_with("output.") {
+        f = find_output_save(&dir);
+    }
     if !f.is_file() {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     }

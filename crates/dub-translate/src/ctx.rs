@@ -192,18 +192,19 @@ fn chunk_bounds(line_texts: &[String]) -> Vec<(usize, usize)> {
 /// Плотность речи для бюджета длины (#107): ~14 символов/сек комфортной дикции. Бюджет строки =
 /// round(14 × длительность_сек); длительность ≤0 (нет таймингов) -> None (без лимита).
 const CHARS_PER_SEC: f64 = 14.0;
+const MIN_BUDGET: usize = 12; // пол бюджета (#116): «(≤3)» на междометиях искажает перевод
 pub(crate) fn char_budget(dur: f64) -> Option<usize> {
     if dur > 0.0 {
-        Some((dur * CHARS_PER_SEC).round().max(1.0) as usize)
+        Some(((dur * CHARS_PER_SEC).round() as usize).max(MIN_BUDGET))
     } else {
         None
     }
 }
 
-/// Вычистить маркер лимита «(≤NN)» (или «(<=NN)»), если модель протащила его в перевод. Только ведущий
-/// маркер + окружающие пробелы — цифры/скобки в самом переводе не трогаем.
+/// Вычистить ведущий маркер лимита «(≤NN)» из перевода. Устойчиво (#116): пробелы после «(» и перед
+/// числом, варианты ≤/<=/=<. Цифры/скобки в самом переводе не трогаем.
 pub(crate) fn strip_budget_marker(s: &str) -> String {
-    let re = Regex::new(r"^\s*\((?:\u{2264}|<=)\s*\d+\)\s*").unwrap();
+    let re = Regex::new(r"^\s*\(\s*(?:\u{2264}|<=|=<)\s*\d+\s*\)\s*").unwrap();
     re.replace(s, "").into_owned()
 }
 

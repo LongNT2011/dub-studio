@@ -574,7 +574,9 @@ function VoiceSlotList({ title, voices, slots, onChange }: {
     if (playing === i) { setPlaying(null); return; }              // повторный клик = стоп
     if (!name) return;
     const a = new Audio(api.voiceSampleUrl(name)); audioRef.current = a; setPlaying(i);
-    a.onended = () => setPlaying(null); a.play().then(() => setPlaying(i)).catch(() => setPlaying(null));
+    // Отложенные колбэки старого аудио не должны трогать playing после старта нового — сверяемся с текущим.
+    a.onended = () => { if (audioRef.current === a) setPlaying(null); };
+    a.play().then(() => { if (audioRef.current === a) setPlaying(i); }).catch(() => { if (audioRef.current === a) setPlaying(null); });
   };
   const opts = voices.map((v) => ({ value: v, label: prettyVoice(v), search: v }));
   const setAt = (i: number, v: string) => onChange(slots.map((s, j) => (j === i ? v : s)));
@@ -665,8 +667,9 @@ function DropZone() {
   const setContainerSaved = (v: "mp4" | "mkv") => { setContainer(v); localStorage.setItem("dub-container", v); };
   // Голоса из библиотеки (#114): режим клон|library + два списка слотов (порядок = приоритет). Персист.
   const [voiceSrc, setVoiceSrc] = useState<"clone" | "library">(() => (localStorage.getItem("dub-voice-src") === "library" ? "library" : "clone"));
-  const [slotsM, setSlotsM] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("dub-voice-slots-m") ?? "[]"); } catch { return []; } });
-  const [slotsF, setSlotsF] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem("dub-voice-slots-f") ?? "[]"); } catch { return []; } });
+  // JSON.parse может вернуть валидный не-массив (число/объект) — фильтруем до string[], иначе .map упадёт.
+  const [slotsM, setSlotsM] = useState<string[]>(() => { try { const p = JSON.parse(localStorage.getItem("dub-voice-slots-m") ?? "[]"); return Array.isArray(p) ? p.filter((x) => typeof x === "string") : []; } catch { return []; } });
+  const [slotsF, setSlotsF] = useState<string[]>(() => { try { const p = JSON.parse(localStorage.getItem("dub-voice-slots-f") ?? "[]"); return Array.isArray(p) ? p.filter((x) => typeof x === "string") : []; } catch { return []; } });
   const setVoiceSrcSaved = (v: "clone" | "library") => { setVoiceSrc(v); localStorage.setItem("dub-voice-src", v); };
   const setSlotsMSaved = (v: string[]) => { setSlotsM(v); localStorage.setItem("dub-voice-slots-m", JSON.stringify(v)); };
   const setSlotsFSaved = (v: string[]) => { setSlotsF(v); localStorage.setItem("dub-voice-slots-f", JSON.stringify(v)); };
@@ -760,7 +763,9 @@ function DropZone() {
       if (voiceSrc === "library" && (audio === "dub" || audio === "voiceover") && (slotsM.length || slotsF.length)) {
         try {
           const r = await api.voiceSlots(project_id, { male: slotsM, female: slotsF });
-          useStore.getState().pushActivity(t("voiceSlots.assigned", { n: Object.keys(r.speakers || {}).length }), "done");
+          // Считаем только реально назначенных из библиотеки (voice != null) — спикеры без слота уйдут в клон.
+          const nAssigned = Object.values(r.speakers || {}).filter((s) => s && s.voice).length;
+          useStore.getState().pushActivity(t("voiceSlots.assigned", { n: nAssigned }), "done");
         } catch (e) { useStore.getState().pushActivity(String(e), "error"); }
       }
       s.setProject(await api.getProject(project_id));
@@ -1267,9 +1272,13 @@ function useMediaHotkeys(opts: {
         case "End":
           e.preventDefault(); seek(clamp(duration)); break;
         case "ArrowUp":
-          if (setVol) { e.preventDefault(); setVol(Math.min(1, (vol ?? 1) + 0.05)); } break;
-        case "ArrowDown":
-          if (setVol) { e.preventDefault(); setVol(Math.max(0, (vol ?? 1) - 0.05)); } break;
+        case "ArrowDown": {
+          // ↑/↓ = громкость, но НЕ когда фокус в скроллируемом списке — там стрелки должны прокручивать.
+          const el = e.target as HTMLElement;
+          if (el.closest("[data-kb-scroll]")) return;
+          if (setVol) { e.preventDefault(); setVol(Math.max(0, Math.min(1, (vol ?? 1) + (e.key === "ArrowUp" ? 0.05 : -0.05)))); }
+          break;
+        }
         case "f": case "F":
           e.preventDefault(); toggleElemFullscreen(previewRef.current); break;
         case "F10":
@@ -1614,6 +1623,7 @@ function Editor() {
       // Раскрыть реальный выход в проводнике: контейнер может быть output.mkv (#113, сохранена ориг. дорожка) —
       // не хардкодим .mp4. Расширение из project.json (keep_original_track + container), иначе .mp4.
       const outName = p.audio.keep_original_track && p.audio.container === "mkv" ? "output.mkv" : "output.mp4";
+      // Если имя всё же не совпало (редкий рассинхрон настроек), бэкенд сам резолвит выход через find_output — не гадаем здесь.
       api.reveal(pid, outName).catch(() => {});   // открыть проводник с выделенным готовым файлом — юзер видит, куда сохранилось
       pushActivity(`${t("compare.result")}: ${name}`, "done"); playSfx("success");
       setRendered(true); setDubRev(Date.now());   // /dub now serves the freshly rendered output.mp4 -> reload <audio>
@@ -1672,7 +1682,7 @@ function Editor() {
           </div>
         </div>
         {/* Скролл-тело: скроллится только список, шапка выше зафиксирована. */}
-        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 pb-4">
+        <div data-kb-scroll className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-4 pb-4">
         {lane === "subs" && (
         <div className="space-y-2">
           {(() => {
@@ -2056,7 +2066,7 @@ function Editor() {
         </div>
       </main>
 
-      <aside className="border-l border-[var(--color-border)] overflow-y-auto p-4 bg-[var(--color-surface)] text-sm">
+      <aside data-kb-scroll className="border-l border-[var(--color-border)] overflow-y-auto p-4 bg-[var(--color-surface)] text-sm">
         <SectionLabel>{t("preset.title")}</SectionLabel>
         <div className="grid grid-cols-2 gap-1.5 mb-5 max-h-52 overflow-y-auto pr-1">
           <button onClick={() => branch("preset", { name: "" })}
@@ -3105,7 +3115,7 @@ function TranscriptView() {
           </div>
           <WaveformTimeline pid={pid} duration={p.meta.duration || 0} scrub={scrub} segments={p.segments} onSeek={seek} />
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1.5">
+        <div data-kb-scroll className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-1.5">
           {rows.map((s) => {
             const spk = s.speaker ?? "0";
             const active = s.id === activeId;

@@ -133,6 +133,13 @@ pub fn run(
     if vw <= 0 || vh <= 0 {
         let out_wav = paths.output.with_extension("wav");
         media::to_wav(&new_audio, &out_wav)?;
+        // Прибрать stale output.mp4/.mkv от прошлого прогона: find_output отдаёт их приоритетнее wav (#116).
+        for ext in ["mp4", "mkv"] {
+            let stale = paths.output.with_extension(ext);
+            if stale.is_file() {
+                let _ = std::fs::remove_file(&stale);
+            }
+        }
         emit(progress, "done", &format!("готово (только аудио) -> {}", out_wav.display()));
         return Ok(RenderResult { output: out_wav });
     }
@@ -180,10 +187,13 @@ pub fn run(
     // (в nodub/transcribe оригинал уже основной — вторая дорожка ни к чему). Контейнер mp4|mkv из настроек.
     // Выход — output.<container>; при ошибке мультитрек-mux — фолбэк на обычный одинодорожечный mux.
     let mut out_path = paths.output.clone();
-    let two_track = is_dub && proj.audio.keep_original_track;
+    // voiceover тоже может нести оригинал 2-й дорожкой: 1-я = микс (перевод поверх приглушённого ориг.),
+    // 2-я = ЧИСТЫЙ оригинал без перевода — своя ценность, НЕ дубль (бай-дизайн). Требует аудио в источнике.
+    let two_track = is_dub && proj.audio.keep_original_track && media::has_audio(&paths.input);
+    let mkv = two_track && proj.audio.container == "mkv";
     let mut muxed = false;
     if two_track {
-        let container = if proj.audio.container == "mkv" { "mkv" } else { "mp4" };
+        let container = if mkv { "mkv" } else { "mp4" };
         out_path = paths.output.with_extension(container);
         let dub_lang = media::iso639_1_to_2(&proj.tgt_lang);
         let src_code = proj
@@ -215,11 +225,20 @@ pub fn run(
             media::mux(&captioned, &paths.input, &out_path)?;
         }
     }
-    // Убрать STALE выход другого контейнера от прошлого экспорта — иначе раздача (find_output) отдала бы
-    // устаревший output.mp4 вместо свежего output.mkv (и наоборот).
-    let stale = out_path.with_extension(if out_path.extension().and_then(|e| e.to_str()) == Some("mkv") { "mp4" } else { "mkv" });
-    if stale != out_path && stale.is_file() {
-        let _ = std::fs::remove_file(&stale);
+    // MKV-компаньон (#116, находка [3]): WebView2 не играет Matroska -> плеер редактора мёртв. Всегда
+    // держим playable output.mp4 (дубляж-дорожка, copy без перекода) РЯДОМ с output.mkv: плеер тянет mp4,
+    // «Сохранить» отдаёт mkv. Успешный mkv-mux -> ремукс лёгкого mp4; иначе mp4 уже основной выход.
+    let mp4_companion = paths.output.with_extension("mp4");
+    if mkv && muxed {
+        if let Err(e) = media::remux_playable_mp4(&out_path, &mp4_companion) {
+            emit(progress, "mux", &format!("mp4-компаньон не собран ({e}) — плеер потянет mkv (VLC ок)"));
+        }
+    } else {
+        // не-mkv выход: прибрать stale output.mkv от прошлого экспорта (find_output отдаёт mkv приоритетнее).
+        let stale_mkv = paths.output.with_extension("mkv");
+        if stale_mkv != out_path && stale_mkv.is_file() {
+            let _ = std::fs::remove_file(&stale_mkv);
+        }
     }
 
     emit(progress, "done", &format!("готово -> {}", out_path.display()));
@@ -633,9 +652,10 @@ fn build_dub(
         )
         .map_err(|e| format!("Higgs load_model: {e}"))?;
 
-    // placed = [(at, wav_path)]. cursor-aware fit (как в питоне). Имя seg-файла и слот next.start —
-    // по индексу fi в ПОЛНОМ списке proj.segments (питон: seg_{i:03d}.wav, nxt = segs[i+1].start).
-    let mut placed: Vec<(f64, PathBuf)> = Vec::with_capacity(segs.len());
+    // placed = [(at, wav_path, dur)]. cursor-aware fit (как в питоне). dur мерится ЗДЕСЬ (в цикле
+    // укладки) и хранится рядом — дакинг-блоки строятся из него БЕЗ повторного ffprobe (перф [22]).
+    // Имя seg-файла и слот next.start — по индексу fi в ПОЛНОМ списке proj.segments.
+    let mut placed: Vec<(f64, PathBuf, f64)> = Vec::with_capacity(segs.len());
     let mut cursor = 0.0f64;
     let n_all = proj.segments.len();
     // Анти-артефактные счётчики на весь ролик: consec — проблемные фразы ПОДРЯД (сброс на чистой);
@@ -652,6 +672,7 @@ fn build_dub(
     // счётчик уложенных — для итоговой доли «слишком быстрого текста».
     let mut fit_total = 0usize;
     let mut fit_over_cap = 0usize;
+    let mut drift_escalations = 0usize; // сегменты, где кап atempo эскалирован для догона синка (#116)
     for &(fi, s) in segs.iter() {
         // Кэш-файл сегмента — ПО ЕГО ID, не по индексу fi. Кэш переиспользуется между рендерами (не-dirty
         // сегменты не ре-синтезируются). При индекс-имени удаление/перестановка сегмента сдвигает индексы —
@@ -667,8 +688,9 @@ fn build_dub(
         if seg_keep(s) {
             media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
             let at = s.start.max(cursor);
-            cursor = at + media::duration(&raw)?;
-            placed.push((at, raw));
+            let d = media::duration(&raw)?;
+            cursor = at + d;
+            placed.push((at, raw, d));
             continue;
         }
         let tgt = s.tgt_text.trim();
@@ -806,21 +828,32 @@ fn build_dub(
         let nxt = if fi + 1 < n_all { proj.segments[fi + 1].start } else { total };
         let room = (nxt - at).max(0.3);
         let fitp = wd.join(format!("seg_{:03}_fit.wav", fi));
-        // Телеметрия укладки (#107): needed — во сколько раз дубль длиннее слота (что потребовалось бы,
-        // чтобы уложить БЕЗ капа). needed>1.25 -> кап atempo сработал, текст пойдёт быстрее нормы.
+        // Кап этого сегмента: общий max_stretch, на коротком слоте (<1.5с) чуть больше (порт fit_to_slot).
+        let seg_cap = if room < 1.5 { paths.max_stretch.max(1.30) } else { paths.max_stretch };
+        // Дрейф-кап (#116, находка [4]): рассинхрон дороже темпа. Кап 1.25 при cursor-ripple копит сдвиг
+        // на плотном диалоге — фразы всё позже. Если дубль уже отстал (cursor > s.start), эскалируем кап
+        // до нужного, чтобы догнать слот (потолок 2.0), ценой временной спешки.
+        let drift = (cursor - s.start).max(0.0);
         let raw_dur = media::duration(&raw).unwrap_or(0.0);
         let needed = if room > 0.05 { raw_dur / room } else { 1.0 };
-        fit_total += 1;
-        if needed > 1.25 {
-            fit_over_cap += 1;
-            let cap = if room < 1.5 { paths.max_stretch.max(1.30) } else { paths.max_stretch };
-            emit(progress, "mix", &format!(
-                "сегмент {fi}: нужно растянуть x{needed:.2} (слот {room:.2}с), кап x{cap:.2} — текст быстрее нормы"
-            ));
+        let eff_cap = if drift > 0.6 { seg_cap.max(needed).min(2.0) } else { seg_cap };
+        if drift > 0.6 && eff_cap > seg_cap {
+            drift_escalations += 1;
         }
-        let fit = fit_to_slot(&raw, room, &fitp, paths.max_stretch)?;
-        cursor = at + media::duration(&fit)?;
-        placed.push((at, fit));
+        // Телеметрия укладки (#107): needed>eff_cap -> дубль не влезает даже с (эскалированным) капом,
+        // текст пойдёт быстрее нормы. raw_dur==0 (сбой duration) -> сегмент не считаем в статистику.
+        if raw_dur > 0.0 {
+            fit_total += 1;
+            if needed > eff_cap {
+                fit_over_cap += 1;
+                emit(progress, "mix", &format!(
+                    "сегмент {fi}: нужно растянуть x{needed:.2} (слот {room:.2}с), кап x{eff_cap:.2} — текст быстрее нормы"
+                ));
+            }
+        }
+        let (fit, d) = fit_to_slot(&raw, room, &fitp, eff_cap)?;
+        cursor = at + d;
+        placed.push((at, fit, d));
         // В QC — только реально синтезированное в этом прогоне (кэш уже проверялся в своём прогоне).
         // kept_original (оригинальная реплика вместо неспасаемого выкрика) НЕ сверяем: там исходный
         // язык, ASR-QC счёл бы его браком и пересинтезировал обратно в артефакт.
@@ -836,11 +869,12 @@ fn build_dub(
             ));
         }
     }
-    // Итоговая доля «слишком быстрого текста» (#107): сколько сегментов не влезли в кап растяжения.
+    // Итоговая доля «слишком быстрого текста» (#107) + дрейф-эскалации (#116).
     if fit_total > 0 {
         let frac = 100.0 * fit_over_cap as f64 / fit_total as f64;
+        let drift = if drift_escalations > 0 { format!(", догон синка на {drift_escalations}") } else { String::new() };
         emit(progress, "mix", &format!(
-            "укладка: {fit_over_cap}/{fit_total} сегментов растянуты выше x1.25 ({frac:.0}%)"
+            "укладка: {fit_over_cap}/{fit_total} сегментов выше капа ({frac:.0}%){drift}"
         ));
     }
 
@@ -895,9 +929,11 @@ fn build_dub(
                     }
                     let wav = AudiocppEngine::encode_wav(&smp, r, 1);
                     if std::fs::write(raw, &wav).is_ok() {
-                        // пере-fit в тот же слот и подмена в placed (позиция at не меняется)
-                        if let Ok(nf) = fit_to_slot(raw, *room, fitp, paths.max_stretch) {
+                        // пере-fit в тот же слот и подмена в placed (позиция at не меняется, длит. обновляем)
+                        let cap = if *room < 1.5 { paths.max_stretch.max(1.30) } else { paths.max_stretch };
+                        if let Ok((nf, nd)) = fit_to_slot(raw, *room, fitp, cap) {
                             placed[*pidx].1 = nf;
+                            placed[*pidx].2 = nd;
                             fixed = true;
                             emit(progress, "tts", &format!("QC: сегмент {fi} пересинтезирован (попытка {})", k + 1));
                             break;
@@ -924,8 +960,10 @@ fn build_dub(
                     if s.end - s.start <= 2.5
                         && media::trim(&vocals, raw, s.start, s.end, 24_000).is_ok()
                     {
-                        if let Ok(nf) = fit_to_slot(raw, *room, fitp, paths.max_stretch) {
+                        let cap = if *room < 1.5 { paths.max_stretch.max(1.30) } else { paths.max_stretch };
+                        if let Ok((nf, nd)) = fit_to_slot(raw, *room, fitp, cap) {
                             placed[*pidx].1 = nf;
+                            placed[*pidx].2 = nd;
                             kept += 1;
                             emit(progress, "tts", &format!("QC: сегмент {fi} — оставлена оригинальная реплика (выкрик/хор не дублируем)"));
                             continue;
@@ -944,13 +982,13 @@ fn build_dub(
         }
     }
 
-    // 5) timeline -> dub_vocals.wav.
+    // 5) timeline -> dub_vocals.wav. Возвращает фактические спаны укладки.
     emit(progress, "mix", "укладка дубляжа на таймлайн");
     let dub = wd.join("dub_vocals.wav");
-    timeline(&placed, total, &dub)?;
-    // Речевые блоки для дакинга (#106) — из ФАКТИЧЕСКИ уложенных сегментов (onset + длит. fit-файла),
-    // а не сырых proj.segments: то, что реально легло в таймлайн (с учётом cursor-сдвига и atempo).
-    let mut speech_blocks = build_speech_blocks(&placed);
+    let laid_spans = timeline(&placed, total, &dub)?;
+    // Речевые блоки для дакинга (#106) — из ФАКТИЧЕСКИХ спанов timeline (единый источник: с учётом
+    // cursor-ripple и QC-пересинтеза), а не из onset'ов placed.
+    let mut speech_blocks = build_speech_blocks(&laid_spans);
     // HARD-гарантия: дубляж не длиннее видео (tempo-fit всей дорожки, если переполз).
     let mut dub = dub;
     let dub_dur = media::duration(&dub)?;
@@ -1338,12 +1376,9 @@ const DUCK_BLOCK_GAP: f64 = 1.6;
 /// Слить уложенные сегменты в речевые блоки для дакинг-огибающей (#106). Границы — по ФАКТУ: onset +
 /// длительность fit-файла (то, что реально легло в таймлайн). Сортируем по onset, объединяем в один блок,
 /// если пауза между концом предыдущего и стартом следующего < DUCK_BLOCK_GAP. Сбой чтения длительности —
-/// пропускаем сегмент (лучше меньше блоков, чем падение микса).
-fn build_speech_blocks(placed: &[(f64, PathBuf)]) -> Vec<media::SpeechBlock> {
-    let mut spans: Vec<(f64, f64)> = placed
-        .iter()
-        .filter_map(|(at, p)| media::duration(p).ok().map(|d| (*at, at + d)))
-        .collect();
+/// Спаны — ФАКТИЧЕСКАЯ укладка из timeline (единый источник правды, без повторного ffprobe [22]/[5]).
+fn build_speech_blocks(spans: &[(f64, f64)]) -> Vec<media::SpeechBlock> {
+    let mut spans: Vec<(f64, f64)> = spans.to_vec();
     spans.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     let mut blocks: Vec<media::SpeechBlock> = Vec::new();
     for (s, e) in spans {
@@ -1356,40 +1391,43 @@ fn build_speech_blocks(placed: &[(f64, PathBuf)]) -> Vec<media::SpeechBlock> {
 }
 
 /// Ускорить дубль под target_dur, если он длиннее (никогда не замедлять). Порт assemble.fit_to_slot.
-/// Кап растяжения — max_stretch, но на КОРОТКИХ слотах (<1.5с вставки) допускаем чуть больше (1.30): там
-/// экономия десятой доли секунды слышна как обрыв, а лёгкий пере-ускор незаметен.
-fn fit_to_slot(seg_wav: &Path, target_dur: f64, work_path: &Path, max_stretch: f64) -> Result<PathBuf, String> {
+/// `cap` — готовый потолок растяжения (считается у вызова: seg_cap + дрейф-эскалация). Возвращает путь
+/// уложенного файла И его фактическую длительность (для дакинг-блоков без повторного ffprobe).
+fn fit_to_slot(seg_wav: &Path, target_dur: f64, work_path: &Path, cap: f64) -> Result<(PathBuf, f64), String> {
     let actual = media::duration(seg_wav)?;
     if target_dur <= 0.05 || actual <= 0.05 {
-        return Ok(seg_wav.to_path_buf());
+        return Ok((seg_wav.to_path_buf(), actual.max(0.0)));
     }
-    // Короткий слот -> кап 1.30 (десятая доли секунды слышна как обрыв); иначе общий max_stretch (1.25).
-    let cap = if target_dur < 1.5 { max_stretch.max(1.30) } else { max_stretch };
     let mut factor = actual / target_dur;
     factor = factor.min(cap).max(1.0);
     if factor <= 1.02 {
-        return Ok(seg_wav.to_path_buf());
+        return Ok((seg_wav.to_path_buf(), actual));
     }
     media::time_stretch(seg_wav, work_path, factor)?;
-    Ok(work_path.to_path_buf())
+    let d = media::duration(work_path).unwrap_or(actual / factor);
+    Ok((work_path.to_path_buf(), d))
 }
 
 /// Уложить сегменты на полную дорожку по таймкодам, без перекрытия/обрезки. Порт assemble.timeline.
-fn timeline(placed: &[(f64, PathBuf)], total_dur: f64, out_wav: &Path) -> Result<(), String> {
+/// Возвращает ФАКТИЧЕСКИЕ спаны укладки [(start,end)] — единый источник правды для дакинг-огибающей
+/// (#116, находка [5]): у timeline свой cursor-ripple по РЕАЛЬНОЙ длине сэмплов, и после QC-пересинтеза
+/// он может отличаться от onset'ов в placed; строим блоки из этих спанов, а не из placed.
+fn timeline(placed: &[(f64, PathBuf, f64)], total_dur: f64, out_wav: &Path) -> Result<Vec<(f64, f64)>, String> {
     if placed.is_empty() {
         // тишина total_dur @ 24000.
         let n = (total_dur * 24000.0) as usize;
         wavio::write_mono_f32(out_wav, &vec![0.0f32; n], 24000)?;
-        return Ok(());
+        return Ok(Vec::new());
     }
-    let mut placed: Vec<(f64, PathBuf)> = placed.to_vec();
+    let mut placed: Vec<(f64, PathBuf, f64)> = placed.to_vec();
     placed.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
     // sr берём из первого файла.
     let first = wavio::read_mono_f32(&placed[0].1)?;
     let sr = first.1;
     let mut laid: Vec<(f64, Vec<f32>)> = Vec::with_capacity(placed.len());
+    let mut spans: Vec<(f64, f64)> = Vec::with_capacity(placed.len());
     let mut cursor = 0.0f64;
-    for (start, wav) in &placed {
+    for (start, wav, _) in &placed {
         let (mut s, ssr) = if *wav == placed[0].1 {
             (first.0.clone(), first.1)
         } else {
@@ -1397,7 +1435,9 @@ fn timeline(placed: &[(f64, PathBuf)], total_dur: f64, out_wav: &Path) -> Result
         };
         normalize_voice(&mut s, ssr); // все фразы/спикеры к одной громкости
         let at = start.max(cursor);
-        cursor = at + s.len() as f64 / sr as f64;
+        let end = at + s.len() as f64 / sr as f64;
+        cursor = end;
+        spans.push((at, end));
         laid.push((at, s));
     }
     let len = ((total_dur.max(cursor) + 0.5) * sr as f64) as usize;
@@ -1416,7 +1456,7 @@ fn timeline(placed: &[(f64, PathBuf)], total_dur: f64, out_wav: &Path) -> Result
         *x = x.clamp(-0.985, 0.985);
     }
     wavio::write_mono_f32(out_wav, &track, sr)?;
-    Ok(())
+    Ok(spans)
 }
 
 /// Выровнять ОДНУ фразу к общей громкости, чтобы все спикеры звучали одинаково громко (dialog-gated

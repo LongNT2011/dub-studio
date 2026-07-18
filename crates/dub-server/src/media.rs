@@ -156,6 +156,47 @@ fn run_ff(args: &[&std::ffi::OsStr]) -> Result<(), String> {
     Ok(())
 }
 
+/// run_ff с ЖЁСТКИМ таймаутом — для дорогих графов (mix_env volume:eval=frame на длинном файле мог
+/// зависнуть навечно и заблокировать единственный воркер джоб, как burn #105). Drain-потоки с дедлайном
+/// (паттерн dub-captions::burn::output_with_timeout).
+fn run_ff_timeout(args: &[&std::ffi::OsStr], secs: u64) -> Result<(), String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    let mut child = Command::new(FFMPEG)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("ffmpeg запуск: {e}"))?;
+    let mut se = child.stderr.take().expect("piped stderr");
+    let th_err = std::thread::spawn(move || {
+        let mut b = Vec::new();
+        let _ = se.read_to_end(&mut b);
+        b
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(st)) => break st,
+            Ok(None) if std::time::Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("ffmpeg не завершился за {secs}с — убит (зависание)"));
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(250)),
+            Err(e) => return Err(format!("ffmpeg wait: {e}")),
+        }
+    };
+    if !status.success() {
+        let err = th_err.join().unwrap_or_default();
+        let s = String::from_utf8_lossy(&err);
+        let tail: String = s.chars().rev().take(1500).collect::<String>().chars().rev().collect();
+        return Err(format!("ffmpeg код {:?}:\n{tail}", status.code()));
+    }
+    Ok(())
+}
+
 use std::ffi::OsStr;
 
 /// Извлечь аудио в WAV sr/ac (порт media.extract_audio). Для сепарации: sr=44100, ac=2.
@@ -294,7 +335,10 @@ fn duck_volume_expr(blocks: &[SpeechBlock]) -> String {
             )
         })
         .collect();
-    format!("1-{d:.4}*({sum})", d = 1.0 - g, sum = traps.join("+"))
+    // clip суммы в [0,1] (#116, находка [0]): при большом tempo-fit границы блоков делятся, а фейд-константы
+    // нет — соседние трапеции могут пересечься, sum>1 дало бы gain<g и даже <0 (инверсия фазы). clip держит
+    // gain в [g,1].
+    format!("1-{d:.4}*clip({sum},0,1)", d = 1.0 - g, sum = traps.join("+"))
 }
 
 /// Сведение диалог+фон с ДЕТЕРМИНИРОВАННОЙ ОГИБАЮЩЕЙ дакинга (#106). Фон приглушается по кусочно-линейной
@@ -313,12 +357,16 @@ pub fn mix_env(voice: &Path, music: &Path, blocks: &[SpeechBlock], out: &Path) -
     // Граф — в файл: выражение огибающей на сотнях блоков раздувает cmdline за лимит CreateProcess.
     let script = out.with_extension("envfilter");
     std::fs::write(&script, &fc).map_err(|e| format!("env filter-скрипт: {e}"))?;
-    run_ff(&[
+    // Таймаут пропорционален длине музыки (eval=frame дорог на многочасовом): max(600с, 2×длит.).
+    let secs = (duration(music).unwrap_or(0.0) * 2.0).max(600.0) as u64;
+    let r = run_ff_timeout(&[
         OsStr::new("-y"), OsStr::new("-i"), voice.as_os_str(), OsStr::new("-i"), music.as_os_str(),
         OsStr::new("-filter_complex_script"), script.as_os_str(),
         OsStr::new("-map"), OsStr::new("[a]"),
         OsStr::new("-c:a"), OsStr::new("aac"), OsStr::new("-b:a"), OsStr::new("192k"), out.as_os_str(),
-    ])
+    ], secs);
+    let _ = std::fs::remove_file(&script); // прибрать временный filter-скрипт (в т.ч. при ошибке)
+    r
 }
 
 /// Финальная нормализация программы по EBU R128 (ffmpeg loudnorm): интегральная громкость к I LUFS
@@ -417,7 +465,8 @@ pub fn mux_multitrack(
         OsStr::new("-i"), orig_source.as_os_str(),
         OsStr::new("-map"), OsStr::new("0:v:0"),
         OsStr::new("-map"), OsStr::new("1:a:0"),
-        OsStr::new("-map"), OsStr::new("2:a:0?"),
+        // без `?`: вызов гарантирует аудио в источнике (has_audio) — иначе -disposition:a:1 валит команду.
+        OsStr::new("-map"), OsStr::new("2:a:0"),
         OsStr::new("-c:v"), OsStr::new("copy"),
         // дубляж (a:0)
         OsStr::new("-c:a:0"), OsStr::new("aac"), OsStr::new("-b:a:0"), OsStr::new("192k"),
@@ -436,6 +485,30 @@ pub fn mux_multitrack(
     }
     args.push(out.as_os_str());
     run_ff(&args)
+}
+
+/// Ремукс лёгкого playable output.mp4 из мультитрек-mkv (#116): видео + ПЕРВАЯ (дубляж) дорожка, copy
+/// без перекодирования (доли секунды) + faststart. Плеер редактора (WebView2 не играет Matroska) тянет
+/// этот mp4, а «Сохранить» отдаёт полный mkv.
+pub fn remux_playable_mp4(mkv: &Path, out_mp4: &Path) -> Result<(), String> {
+    run_ff(&[
+        OsStr::new("-y"), OsStr::new("-i"), mkv.as_os_str(),
+        OsStr::new("-map"), OsStr::new("0:v:0"), OsStr::new("-map"), OsStr::new("0:a:0"),
+        OsStr::new("-c"), OsStr::new("copy"),
+        OsStr::new("-movflags"), OsStr::new("+faststart"), out_mp4.as_os_str(),
+    ])
+}
+
+/// Есть ли в файле аудиопоток (ffprobe). Для мультитрек-mux: нет аудио в источнике -> вторую дорожку
+/// не добавляем (иначе -disposition:a:1 по несуществующему потоку валит ffmpeg). Ошибка probe -> false.
+pub fn has_audio(input: &Path) -> bool {
+    Command::new(FFPROBE)
+        .args(["-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0"])
+        .arg(input)
+        .output()
+        .ok()
+        .map(|o| !o.stdout.is_empty())
+        .unwrap_or(false)
 }
 
 /// Сконвертировать аудио в PCM 16-bit WAV (стерео). Финальный формат аудио-режима (вход без видео):
@@ -520,24 +593,19 @@ mod env_tests {
 
     /// Референс-огибающая: та же кусочно-линейная функция, что генерит duck_volume_expr, но на Rust —
     /// проверяем ключевые точки (вне блока 1.0, в центре блока DUCK_GAIN, середины фейдов).
+    // Референс gain(t): та же формула, что в duck_volume_expr — СУММА трапеций с clip суммы в [0,1]
+    // (не return по первой трапеции), чтобы тест ловил пересечение блоков.
     fn gain_at(t: f64, blocks: &[SpeechBlock]) -> f64 {
         let g = DUCK_GAIN;
+        let mut sum = 0.0f64;
         for b in blocks {
             let ds = (b.start - DUCK_PREROLL).max(0.0);
-            let de = ds + DUCK_FADE_DOWN;
             let us = b.end + DUCK_HOLD;
             let ue = us + DUCK_FADE_UP;
-            if t >= ds && t < ue {
-                return if t < de {
-                    1.0 - (1.0 - g) * (t - ds) / DUCK_FADE_DOWN
-                } else if t < us {
-                    g
-                } else {
-                    g + (1.0 - g) * (t - us) / DUCK_FADE_UP
-                };
-            }
+            let trap = ((t - ds) / DUCK_FADE_DOWN).min((ue - t) / DUCK_FADE_UP).clamp(0.0, 1.0);
+            sum += trap;
         }
-        1.0
+        1.0 - (1.0 - g) * sum.clamp(0.0, 1.0)
     }
 
     #[test]
@@ -579,6 +647,27 @@ mod env_tests {
             .collect();
         let e = duck_volume_expr(&blocks);
         assert!(e.len() < 60 * 300 + 64, "len={}", e.len());
+    }
+
+    #[test]
+    fn expr_has_clip_wrapper() {
+        // clip(...,0,1) держит sum трапеций в [0,1] -> gain не ниже g и не отрицательный (#116).
+        assert!(duck_volume_expr(&[SpeechBlock { start: 1.0, end: 2.0 }]).contains("clip("));
+    }
+
+    #[test]
+    fn overlapping_blocks_gain_never_below_g() {
+        // Два блока ВПЛОТНУЮ (пауза 0.05с < суммы фейдов) — трапеции пересекаются, sum>1. Без clip gain
+        // ушёл бы ниже g и в минус (инверсия фазы). С clip — держится в [g,1] на всей шкале.
+        let blocks = [SpeechBlock { start: 1.0, end: 2.0 }, SpeechBlock { start: 2.05, end: 3.0 }];
+        let mut t = 0.0;
+        while t < 4.0 {
+            let gv = gain_at(t, &blocks);
+            assert!(gv >= DUCK_GAIN - 1e-9 && gv <= 1.0 + 1e-9, "t={t} gain={gv}");
+            t += 0.01;
+        }
+        // в зоне стыка приглушение полное (обе трапеции=1, clip=1 -> g)
+        assert!((gain_at(2.02, &blocks) - DUCK_GAIN).abs() < 1e-9);
     }
 }
 

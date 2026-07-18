@@ -180,19 +180,22 @@ fn numbered_block(segs: &[Seg], chunk: &[usize]) -> String {
         .join("\n")
 }
 
-/// Плотность речи для бюджета длины (#107): ~14 символов/сек. Бюджет = round(14 × длит.сек); ≤0 -> None.
+/// Плотность речи для бюджета длины (#107): ~14 символов/сек. Бюджет = round(14 × длит.сек), но не ниже
+/// 12 (#116, находка [13]: «(≤3)» на междометиях провоцирует искажение); ≤0 -> None.
 const CHARS_PER_SEC: f64 = 14.0;
+const MIN_BUDGET: usize = 12;
 fn char_budget(dur: f64) -> Option<usize> {
     if dur > 0.0 {
-        Some((dur * CHARS_PER_SEC).round().max(1.0) as usize)
+        Some(((dur * CHARS_PER_SEC).round() as usize).max(MIN_BUDGET))
     } else {
         None
     }
 }
 
-/// Вычистить ведущий маркер лимита «(≤NN)»/«(<=NN)» из перевода (если модель его протащила).
+/// Вычистить ведущий маркер лимита «(≤NN)» из перевода (если модель его протащила). Устойчиво (#116,
+/// находка [14]): пробелы после «(» и перед числом, варианты ≤/<=/=<.
 fn strip_budget_marker(s: &str) -> String {
-    let re = Regex::new(r"^\s*\((?:\u{2264}|<=)\s*\d+\)\s*").unwrap();
+    let re = Regex::new(r"^\s*\(\s*(?:\u{2264}|<=|=<)\s*\d+\s*\)\s*").unwrap();
     re.replace(s, "").into_owned()
 }
 
@@ -386,13 +389,16 @@ mod tests {
         assert_eq!(char_budget(3.0), Some(42)); // 14 симв/сек × 3с
         assert_eq!(char_budget(0.0), None); // нет таймингов -> без лимита
         assert_eq!(char_budget(-1.0), None);
-        assert_eq!(char_budget(0.01), Some(1)); // минимум 1
+        assert_eq!(char_budget(0.01), Some(12)); // пол бюджета 12 (#116) — междометие не в «(≤1)»
     }
 
     #[test]
     fn strip_leading_budget_marker() {
         assert_eq!(strip_budget_marker("(≤45) Привет"), "Привет");
         assert_eq!(strip_budget_marker("(<=30)  Текст"), "Текст");
+        // устойчивость (#116): пробелы после «(», перед числом, вариант =<
+        assert_eq!(strip_budget_marker("( ≤ 45) Привет"), "Привет");
+        assert_eq!(strip_budget_marker("(=< 30) Текст"), "Текст");
         assert_eq!(strip_budget_marker("Обычный текст"), "Обычный текст");
         // цифры/скобки внутри перевода не трогаем
         assert_eq!(strip_budget_marker("В 2024 (год) было"), "В 2024 (год) было");

@@ -711,6 +711,14 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         );
     }
     let mut proj = Project::default();
+    // Стиль перевода (#112) фронт патчит ДО analyze, поэтому переносим его из уже сохранённого
+    // project.json в свежий Project (иначе default затирает фичу). Только это поле: остальной audio
+    // analyze настраивает сам; voiceover_gain/keep_original правятся ПОСЛЕ analyze.
+    if let Ok(text) = std::fs::read_to_string(paths.work_dir.join("project.json")) {
+        if let Ok(prev) = Project::from_json(&text) {
+            proj.audio.translate_style = prev.audio.translate_style;
+        }
+    }
     proj.meta = Meta {
         video: paths.input.to_string_lossy().into_owned(),
         duration: meta.duration,

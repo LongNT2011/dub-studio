@@ -117,7 +117,7 @@ export const api = {
   speakerVoice: (pid: string, speaker: string, name: string) => postJson<{ ok: boolean; name: string; voices: string[] }>(`/projects/${pid}/speaker-voice`, { speaker, name }),
   // Слоты голосов из библиотеки (#114): раздать голоса по спикерам по полу/приоритету. Пустые списки -> клон.
   voiceSlots: (pid: string, slots: { male: string[]; female: string[] }) =>
-    postJson<{ ok: boolean; speakers: Record<string, { voice: string | null; gender: string | null; f0: number }> }>(`/projects/${pid}/voice-slots`, slots),
+    postJson<{ ok: boolean; speakers: Record<string, { voice: string | null; gender: string | null; f0: number | null }> }>(`/projects/${pid}/voice-slots`, slots),
   presets: () => getJson<{ presets: Record<string, Record<string, unknown>>; reveals: string[] }>("/presets"),
   createProject: (file: File, subs?: File | null) => {
     const fd = new FormData(); fd.append("file", file);

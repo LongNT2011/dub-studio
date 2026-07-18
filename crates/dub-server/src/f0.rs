@@ -62,26 +62,44 @@ fn frame_f0(win: &[f32], sr: f64, min_lag: usize, max_lag: usize) -> Option<f64>
     if rms < VOICED_RMS || r0 <= 0.0 {
         return None;
     }
-    // Автокорреляция: ищем лаг с максимальным r(lag) в допустимом диапазоне.
+    // НОРМИРОВАННАЯ кросс-корреляция (#116, находка [1]): score(lag)=r(lag)/sqrt(E1·E2) — коэффициент в
+    // [-1,1] без перекоса (сырая сумма r(lag) занижала низкие частоты -> октавная ошибка вверх; деление
+    // на (n-lag) раздувало шум длинных лагов). Энергия-нормировка убирает оба перекоса.
     let hi = max_lag.min(n - 1);
-    let mut best_lag = 0usize;
-    let mut best_r = f64::MIN;
+    let mut scores: Vec<(usize, f64)> = Vec::with_capacity(hi - min_lag + 1);
+    let mut best_score = f64::MIN;
     for lag in min_lag..=hi {
-        let mut acc = 0.0f64;
+        let (mut num, mut e1, mut e2) = (0.0f64, 0.0f64, 0.0f64);
         for i in lag..n {
-            acc += (win[i] as f64) * (win[i - lag] as f64);
+            let (a, b) = (win[i] as f64, win[i - lag] as f64);
+            num += a * b;
+            e1 += a * a;
+            e2 += b * b;
         }
-        if acc > best_r {
-            best_r = acc;
-            best_lag = lag;
+        let denom = (e1 * e2).sqrt();
+        let score = if denom > 0.0 { num / denom } else { 0.0 };
+        scores.push((lag, score));
+        if score > best_score {
+            best_score = score;
         }
     }
-    if best_lag == 0 {
-        return None;
+    if best_score < VOICED_ACF {
+        return None; // нет достаточно периодичного пика -> не voiced
     }
-    // Нормируем на энергию (r(0)); voiced-гейт по периодичности.
-    if best_r / r0 < VOICED_ACF {
-        return None;
+    // ФУНДАМЕНТАЛЬНЫЙ период = ВЕРШИНА ПЕРВОГО пика score выше порога. Нормировка одинаково оценивает и
+    // КРАТНЫЕ периоды (2×,3× -> октава ВНИЗ, 220 Гц детектился как 73); берём первый лепесток, но его argmax
+    // (не восходящий фронт — тот дал бы завышенную частоту), т.е. истинный период.
+    let thr = (best_score * 0.9).max(VOICED_ACF);
+    let first = scores.iter().position(|(_, s)| *s >= thr);
+    let Some(mut i) = first else { return None };
+    let mut best_lag = scores[i].0;
+    let mut lobe_max = scores[i].1;
+    while i < scores.len() && scores[i].1 >= thr {
+        if scores[i].1 > lobe_max {
+            lobe_max = scores[i].1;
+            best_lag = scores[i].0;
+        }
+        i += 1;
     }
     Some(sr / best_lag as f64)
 }
