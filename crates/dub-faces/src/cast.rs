@@ -59,13 +59,17 @@ impl Default for Character {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Casting {
     pub version: u32,
+    /// Тип контента: "real" (лицо=512-d LVFace, косинус) | "anime" (лицо=768-d CCIP, L2). Пространства
+    /// эмбеддингов РАЗНЫЕ — кросс-эпизод матчить ТОЛЬКО одинаковый content_type. Пусто = "real" (старые файлы).
+    #[serde(default)]
+    pub content_type: String,
     #[serde(default)]
     pub characters: Vec<Character>,
 }
 
 impl Default for Casting {
     fn default() -> Self {
-        Casting { version: CASTING_VERSION, characters: Vec::new() }
+        Casting { version: CASTING_VERSION, content_type: String::new(), characters: Vec::new() }
     }
 }
 

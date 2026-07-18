@@ -1,284 +1,351 @@
-//! Стадия кастинга персонажей (#115) для analyze. Порядок: sample_frames (ffmpeg ~1.5fps) -> SCRFD
-//! detect -> LVFace embed -> кластеризация в персонажей -> связка лицо↔голос (со-встречаемость с
-//! репликами спикеров) -> аватарки -> casting.json. Плюс cross-episode матчинг с прошлым эпизодом.
+//! Стадия кастинга персонажей (#115) для analyze — SPEAKER-DRIVEN.
 //!
-//! ГЕЙТ: вызывается ТОЛЬКО при proj.casting_enabled (иначе НИ ОДНОГО кадра не сканируется — ноль
-//! оверхеда, как OCR по галочке). Fail-safe: сбой (нет весов / SCRFD упал) логируется в SSE и НЕ валит
-//! analyze — кастинг не блокер, транскрипт/перевод уже валидны.
+//! Первичка — АУДИО/диаризация: персонаж = СПИКЕР (спикеры отсортированы по суммарному времени речи —
+//! главные герои первыми). Голос (WeSpeaker: эмбеддинг + образец-фраза) — первичный кастинг. Лицо/аватар
+//! ДОПОЛНЯЕТ голос: детектим лицо ТОЛЬКО в кадрах, ГДЕ ЭТОТ СПИКЕР ГОВОРИТ (его сегменты), берём лучший.
+//! Никакого скана всего видео и кластеризации лиц (см. feedback_casting_speaker_driven_not_clustering).
+//!
+//! content_type: "real" -> SCRFD (лица) + LVFace (512-d, косинус); "anime" -> anime_face_detection
+//! (рисованные лица) + CCIP (768-d, L2). Кросс-эпизод матчим только одинаковый content_type.
+//!
+//! ГЕЙТ: только при proj.casting_enabled. Fail-safe: нет весов лица -> персонажи строятся по голосу без
+//! аватара; сбой не валит analyze (кастинг не блокер).
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use dub_core::Project;
 use dub_faces::{
-    build_casting, crop_sharpness, frontality, load_casting, match_cross_episode, save_casting,
-    FaceAccumulator, FacesModels, FrameDisposition, FrameFace, LvFace, Scrfd, SpeakerTurn,
+    crop_sharpness, frontality, load_casting, save_casting, save_face_crop, AnimeFaceDetector,
+    Casting, CcipEmbedder, Character, Face, FacesModels, LvFace, Scrfd, CASTING_VERSION,
 };
 
 use crate::analyze::{AnalyzePaths, Progress};
 
-// Реальные стадии кастинга — совпадают с ANALYZE_STEPS.casting фронта (App.tsx), чтобы степпер
-// подсвечивал шаг «Кастинг» и двигался: cast_detect (кадры+детект лиц) -> cast_embed (эмбеддинги+
-// кластеризация) -> cast_speaker (связка лицо↔голос+аватарки+casting.json).
+#[cfg(windows)]
+const FFMPEG: &str = "ffmpeg.exe";
+#[cfg(not(windows))]
+const FFMPEG: &str = "ffmpeg";
+
+// Стадии кастинга для степпера фронта: cast_detect (подготовка/спикеры) -> cast_embed (голос) ->
+// cast_speaker (аватарки из говорящих кадров + casting.json).
 fn emit(progress: &Progress, stage: &str, msg: &str) {
     progress(serde_json::json!({ "stage": stage, "msg": msg }));
 }
 
-// Value импорт не нужен — все json! литералы через serde_json::json!.
-
-/// Fps семплинга кадров кастинга. Env DUB_FACES_FPS, иначе дефолт dub-faces (1.5).
-fn casting_fps() -> f64 {
-    std::env::var("DUB_FACES_FPS")
-        .ok()
-        .and_then(|s| s.trim().parse().ok())
-        .unwrap_or(dub_faces::DEFAULT_FPS)
-}
+/// Макс. число кадров-кандидатов на персонажа для поиска аватара (из его говорящих сегментов).
+const MAX_AVATAR_CAND: usize = 14;
 
 /// Прогнать стадию кастинга. proj уже собран транскрипт-стадией (segments + speaker). Пишет casting.json
-/// в work_dir и аватарки в work_dir/casting/. Ничего не возвращает — результат в файле (эндпоинт отдаёт).
-/// `casting_ref` — slug профиля app-библиотеки (#115): если задан, грузим его как prev и переносим
-/// имена/голоса/заметки на новые кластеры по face+voice similarity. Пусто = без применения библиотеки
-/// (fallback на соседний prev_casting.json / env, как раньше).
+/// в work_dir и аватарки в work_dir/casting/. `casting_ref` — slug профиля app-библиотеки для применения
+/// к этому ролику; `content_type` — "real"|"anime".
 pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_type: &str, progress: &Progress) {
-    // Вторая линия защиты гейта нулевого оверхеда (#115): вызывающий проверяет casting_enabled, но
-    // страхуемся здесь — при выключенном кастинге НИ ОДНОГО кадра не сканируем.
     if !proj.casting_enabled {
-        return;
-    }
-    // WIP: speaker-driven путь (аватар из говорящих кадров) + аниме-детектор — в переписке (см. handoff).
-    // Пока content_type пробрасывается, но stage ещё использует старый скан+кластеризацию (real).
-    if content_type.eq_ignore_ascii_case("anime") {
-        emit(progress, "cast_detect", "аниме-режим кастинга ещё подключается — текущий прогон реальным детектором");
-    }
-    let models = FacesModels::resolve(&paths.models_root);
-    if !models.available() {
-        emit(
-            progress,
-            "cast_detect",
-            &format!(
-                "кастинг пропущен: нет весов (SCRFD/LVFace) в {}",
-                paths.models_root.join("faces").display()
-            ),
-        );
         return;
     }
     if proj.segments.is_empty() {
         emit(progress, "cast_detect", "кастинг пропущен: нет речевых сегментов");
         return;
     }
+    let anime = content_type.eq_ignore_ascii_case("anime");
 
-    // 1-2) ПОТОКОВЫЙ конвейер (#115 перф/OOM): кадры декодируются по одному (stream_frames), сразу
-    // детект+эмбеддинг, PNG удаляется тут же (Keep только у кадров с принятым лицом — кандидаты в
-    // аватарки). Раньше все декодированные кадры + все PNG держались в RAM/на диске: на 90мин@1.5fps
-    // ~8100 кадров = гигабайты (OOM на 32ГБ). Теперь в памяти — только принятые FrameFace (кап 4000).
-    let frames_dir = paths.work_dir.join("casting").join("frames");
-    let mut scrfd = match Scrfd::load(&models.scrfd) {
-        Ok(s) => s,
-        Err(e) => {
-            emit(progress, "cast_detect", &format!("SCRFD не загрузился: {e}; кастинг пропущен"));
-            return;
-        }
-    };
-    let mut lvface = match LvFace::load(&models.lvface) {
-        Ok(s) => s,
-        Err(e) => {
-            emit(progress, "cast_embed", &format!("LVFace не загрузился: {e}; кастинг пропущен"));
-            return;
-        }
-    };
-
-    emit(progress, "cast_detect", "семплинг кадров + детекция лиц (ffmpeg + SCRFD + LVFace)");
-    // Фильтрация+дедуп+кап лиц ДО O(N²)-кластеризации: score/bbox-порог, дедуп почти-идентичных соседних
-    // кадров, хард-кап (см. FaceAccumulator).
-    let mut acc = FaceAccumulator::new();
-    // avatar_src[i] — путь к кадру i-го ПРИНЯТОГО лица (индексы синхронны с faces), для копии аватарки.
-    let mut avatar_src: Vec<std::path::PathBuf> = Vec::new();
-    let stream = dub_faces::stream_frames(&paths.input, &frames_dir, casting_fps(), |fr| {
-        if acc.is_full() {
-            // Кап достигнут — этот и следующие кадры не нужны; PNG удаляем (кроме уже помеченных Keep).
-            return Ok(FrameDisposition::Delete);
-        }
-        let detected = match scrfd.detect(&fr.img) {
-            Ok(d) => d,
-            Err(_) => return Ok(FrameDisposition::Delete), // кадр не удался -> пропускаем, не валим прогон
-        };
-        let mut keep = false;
-        for face in &detected {
-            let emb = match lvface.embed_face(&fr.img, face) {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            let bbox = (face.x1, face.y1, face.x2, face.y2);
-            let ff = FrameFace {
-                t: fr.t,
-                bbox,
-                score: face.score,
-                sharpness: crop_sharpness(&fr.img, bbox),
-                frontality: frontality(face),
-                embedding: emb,
-            };
-            let idx = avatar_src.len();
-            if acc.offer(ff, idx) {
-                avatar_src.push(fr.path.clone());
-                keep = true; // кадр — кандидат в аватарку -> PNG оставляем
-            }
-        }
-        Ok(if keep { FrameDisposition::Keep } else { FrameDisposition::Delete })
-    });
-    let processed = match stream {
-        Ok(n) => n,
-        Err(e) => {
-            emit(progress, "cast_detect", &format!("не удалось извлечь кадры: {e}; кастинг пропущен"));
-            return;
-        }
-    };
-    if processed == 0 {
-        emit(progress, "cast_detect", "кадров нет (аудио-файл?); кастинг пропущен");
+    // 1) СПИКЕРЫ по суммарному времени речи (главные персонажи первыми) — первичка кастинга.
+    let ranked = speakers_by_talktime(proj);
+    if ranked.is_empty() {
+        emit(progress, "cast_detect", "кастинг пропущен: нет спикеров");
         return;
     }
-    let (faces, _avatar_idx, stats) = acc.finish();
-    emit(progress, "cast_detect", &format!("кадров обработано: {processed}"));
-    // Лог отбраковки (правило «no silent caps»): сколько лиц отброшено и почему.
-    let dropped = stats.dropped_score + stats.dropped_bbox + stats.dropped_dedup + stats.dropped_cap;
-    if dropped > 0 {
-        emit(
-            progress,
-            "cast_embed",
-            &format!(
-                "лиц принято: {} (отброшено {dropped}: score {}, bbox {}, дубли {}, кап {})",
-                stats.kept, stats.dropped_score, stats.dropped_bbox, stats.dropped_dedup, stats.dropped_cap
-            ),
-        );
-    }
-    if stats.dropped_cap > 0 {
-        emit(
-            progress,
-            "cast_embed",
-            &format!(
-                "достигнут хард-кап лиц ({}) — дальнейшие кадры не сканировались; поднимите DUB_FACES_MAX при необходимости",
-                dub_faces::max_faces_cap()
-            ),
-        );
-    }
-    if faces.is_empty() {
-        emit(progress, "cast_embed", "лиц не найдено; casting.json не создан");
-        return;
-    }
-    // avatar_src синхронен с faces (offer принимает лица по порядку добавления в avatar_src).
-    debug_assert_eq!(avatar_src.len(), faces.len());
-    emit(progress, "cast_embed", &format!("лиц детектировано: {}", faces.len()));
+    let ids: Vec<String> = ranked.iter().map(|(s, _, _)| s.clone()).collect();
+    emit(progress, "cast_detect", &format!("персонажей-спикеров: {} (ранжированы по времени речи)", ranked.len()));
 
-    // 3) реплики спикеров + пол (по F0, из voice_slots).
-    let turns: Vec<SpeakerTurn> = proj
-        .segments
-        .iter()
-        .map(|s| SpeakerTurn {
-            start: s.start,
-            end: s.end,
-            speaker: s.speaker.clone().unwrap_or_else(|| "0".to_string()),
-        })
-        .collect();
-    let mut speakers: Vec<String> = turns.iter().map(|t| t.speaker.clone()).collect();
-    speakers.sort();
-    speakers.dedup();
+    // 2) Пол (F0) + голос (WeSpeaker: 256-d эмбеддинг + образец-фраза) — per-speaker, аудио.
+    let genders = speaker_genders(paths, proj, &ids);
+    let (voice_embeddings, speaker_samples) = speaker_voices(paths, proj, &ids, progress);
 
-    // Пол спикеров по F0 (переиспользуем f0 на чистом вокале, если он есть). Пустой — без пола.
-    let genders = speaker_genders(paths, proj, &speakers);
-    // Эмбеддинги голоса (WeSpeaker ResNet34-LM #115): для КАЖДОГО спикера извлекаем образец-фразу
-    // (длиннейшая чистая реплика) на чистом вокале, режем wav casting/char-*_voice.wav, считаем 256-d.
-    // Модели нет / вокала нет -> карта пуста (кастинг по лицу работает; cross-episode по голосу отключён,
-    // но не падаем). Сами wav-образцы (для проигрывания в UI) кладём ПОЗЖЕ, по индексу персонажа.
-    let (voice_embeddings, speaker_samples) = speaker_voices(paths, proj, &speakers, progress);
+    // 3) Детектор+эмбеддер ЛИЦА по типу контента (только для аватара). Нет моделей -> без аватаров.
+    let mut det = load_face_det(&paths.models_root, anime, progress);
+    let mut emb = load_face_emb(&paths.models_root, anime, progress);
 
-    // 4) кластеризация + связка лицо↔голос + ФИЛЬТР «только говорящие/существенные» -> Casting.
-    emit(progress, "cast_speaker", "связка лицо↔голос");
-    let cos = dub_faces::cluster_cos_threshold();
-    let min_onscreen = dub_faces::min_onscreen_secs();
-    let (mut casting, clusters, dropped) = build_casting(
-        &faces,
-        &turns,
-        &speakers,
-        &voice_embeddings,
-        &genders,
-        cos,
-        casting_fps(),
-        min_onscreen,
-    );
-    if dropped > 0 {
-        emit(
-            progress,
-            "cast_speaker",
-            &format!(
-                "отброшено кластеров-статистов (не говорят и <{min_onscreen:.1}с на экране): {dropped}"
-            ),
-        );
-    }
-    emit(progress, "cast_speaker", &format!("персонажей (кластеров лиц): {}", casting.characters.len()));
-
-    // 5) аватарки: сохранить кадр-аватарку каждого кластера в casting/char_<i>.png.
     let cast_dir = paths.work_dir.join("casting");
     let _ = std::fs::create_dir_all(&cast_dir);
-    for (ci, cl) in clusters.iter().enumerate() {
-        // .get вместо avatar_src[cl.avatar]: при рассинхроне индексов не паникуем, а логируем и пропускаем.
-        let Some(src) = avatar_src.get(cl.avatar) else {
-            emit(progress, "cast_speaker", &format!("аватарка char_{ci} пропущена: индекс {} вне avatar_src", cl.avatar));
-            continue;
-        };
-        let bbox = faces[cl.avatar].bbox;
-        let (bx1, by1, bx2, by2) = bbox;
-        // Диагностика (правило «смотреть свой вывод»): сколько кадров у персонажа, размер лица, score.
+    emit(
+        progress,
+        "cast_speaker",
+        if anime { "аниме-детектор лиц по говорящим кадрам" } else { "детектор лиц по говорящим кадрам" },
+    );
+
+    // 4) На КАЖДОГО спикера: аватар из его говорящих кадров + face-эмбеддинг + образец голоса -> Character.
+    let mut casting = Casting {
+        version: CASTING_VERSION,
+        content_type: if anime { "anime".into() } else { "real".into() },
+        characters: Vec::new(),
+    };
+    for (ci, (spk, dur, lines)) in ranked.iter().enumerate() {
+        let (sample_frame, face_emb) =
+            avatar_for_speaker(paths, proj, spk, ci, anime, det.as_mut(), emb.as_mut(), &cast_dir, progress);
+        // образец голоса персонажа (проигрывается в UI через /casting/voice).
+        if let Some(src) = speaker_samples.get(spk) {
+            let dst = cast_dir.join(format!("char_{ci}_voice.wav"));
+            let _ = std::fs::copy(src, &dst);
+        }
+        let has_face = !sample_frame.is_empty();
         emit(
             progress,
             "cast_speaker",
-            &format!(
-                "char_{ci}: кадров {}, лицо {}×{}px, score {:.2}",
-                cl.members.len(),
-                (bx2 - bx1) as i32,
-                (by2 - by1) as i32,
-                faces[cl.avatar].score
-            ),
+            &format!("char_{ci}: спикер {spk}, реплик {lines}, речь {dur:.0}с, лицо: {}", if has_face { "да" } else { "нет" }),
         );
-        let out = cast_dir.join(format!("char_{ci}.png"));
-        // Кроп ЛИЦА по bbox (+поля), а не копия целого кадра — иначе аватар = весь кадр (руки/фон), #115-баг.
-        match dub_faces::save_face_crop(src, bbox, 0.35, &out) {
-            Ok(()) => {
-                if let Some(ch) = casting.characters.get_mut(ci) {
-                    ch.sample_frame = format!("casting/char_{ci}.png");
-                }
-            }
-            Err(e) => emit(progress, "cast_speaker", &format!("аватарка char_{ci} не сохранена: {e}")),
-        }
+        casting.characters.push(Character {
+            id: format!("char_{ci}"),
+            gender: genders.get(spk).cloned().unwrap_or_default(),
+            speaker_ids: vec![spk.clone()],
+            face_embedding: face_emb,
+            voice_embedding: voice_embeddings.get(spk).cloned().unwrap_or_default(),
+            sample_frame,
+            ..Default::default()
+        });
     }
 
-    // 5b) образцы голоса: для каждого персонажа с привязанным спикером кладём проигрываемый wav
-    // casting/char_<i>_voice.wav (тот же клип, что дал voice_embedding). Фронт отдаёт его через
-    // /casting/voice?id=; отсутствие файла -> voice_sample_url:null (персонаж без голоса/закадровый).
-    for (ci, ch) in casting.characters.iter().enumerate() {
-        let Some(spk) = ch.speaker_ids.first() else { continue };
-        let Some(src) = speaker_samples.get(spk) else { continue };
-        let dst = cast_dir.join(format!("char_{ci}_voice.wav"));
-        if let Err(e) = std::fs::copy(src, &dst) {
-            emit(progress, "cast_speaker", &format!("образец голоса char_{ci} не сохранён: {e}"));
-        }
-    }
-
-    // 6) cross-episode / применение библиотеки: приоритет — профиль app-библиотеки (casting_ref), иначе
-    //    соседний prev_casting.json / env DUB_FACES_PREV_CASTING. Матчим по face+voice similarity и
-    //    переносим имена/голоса/speech_note (match_cross_episode). Голос теперь участвует в матче —
-    //    voice_embedding наполнен выше (WeSpeaker), character_similarity сам берёт обе модальности.
+    // 5) cross-episode / применение библиотеки — ТОЛЬКО одинаковый content_type (разные пространства
+    //    эмбеддингов: real=512 косинус, anime=768 L2). Матч по face+voice similarity (character_similarity).
     if let Some(prev) = load_prev_casting(paths, casting_ref, progress) {
-        let mt = dub_faces::match_cos_threshold();
-        casting.characters = match_cross_episode(&casting.characters, &prev, mt);
-        let carried = casting.characters.iter().filter(|c| !c.name.is_empty()).count();
-        emit(progress, "cast_speaker", &format!("cross-episode: перенесено имён/голосов: {carried}"));
+        let prev_type = if prev.content_type.is_empty() { "real" } else { prev.content_type.as_str() };
+        let cur_type = if anime { "anime" } else { "real" };
+        if prev_type != cur_type {
+            emit(
+                progress,
+                "cast_speaker",
+                &format!("профиль другого типа ({prev_type} ≠ {cur_type}) — кросс-матч пропущен"),
+            );
+        } else {
+            let mt = dub_faces::match_cos_threshold();
+            casting.characters = dub_faces::match_cross_episode(&casting.characters, &prev, mt);
+            let carried = casting.characters.iter().filter(|c| !c.name.is_empty()).count();
+            emit(progress, "cast_speaker", &format!("cross-episode: перенесено имён/голосов: {carried}"));
+        }
     }
 
-    // 7) записать casting.json.
+    // 6) записать casting.json.
     let path = paths.work_dir.join("casting.json");
     match save_casting(&path, &casting) {
         Ok(()) => emit(progress, "cast_speaker", &format!("casting.json готов: {} персонаж(ей)", casting.characters.len())),
         Err(e) => emit(progress, "cast_speaker", &format!("не удалось записать casting.json: {e}")),
     }
+}
+
+/// Спикеры, отсортированные по суммарной длительности речи (desc), с числом реплик. Главные персонажи
+/// первыми. Tie-break по id (детерминизм). Возвращает (speaker_id, суммарная_длит_сек, число_реплик).
+fn speakers_by_talktime(proj: &Project) -> Vec<(String, f64, usize)> {
+    let mut acc: HashMap<String, (f64, usize)> = HashMap::new();
+    for s in &proj.segments {
+        let spk = s.speaker.clone().unwrap_or_else(|| "0".to_string());
+        let e = acc.entry(spk).or_insert((0.0, 0));
+        e.0 += (s.end - s.start).max(0.0);
+        e.1 += 1;
+    }
+    let mut v: Vec<(String, f64, usize)> = acc.into_iter().map(|(k, (d, n))| (k, d, n)).collect();
+    v.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then_with(|| a.0.cmp(&b.0))
+    });
+    v
+}
+
+/// Детектор лиц по типу контента. real -> SCRFD; anime -> anime_face_detection. Нет модели/сбой -> None
+/// (персонажи строятся по голосу без аватара, не падаем).
+enum FaceDet {
+    Real(Scrfd),
+    Anime(AnimeFaceDetector),
+}
+impl FaceDet {
+    fn detect(&mut self, img: &image::RgbImage) -> Result<Vec<Face>, String> {
+        match self {
+            FaceDet::Real(s) => s.detect(img),
+            FaceDet::Anime(a) => a.detect(img),
+        }
+    }
+}
+
+/// Эмбеддер лица по типу контента. real -> LVFace (512-d, кроп лица+align); anime -> CCIP (768-d, кроп
+/// всего персонажа).
+enum FaceEmb {
+    Lv(LvFace),
+    Ccip(CcipEmbedder),
+}
+impl FaceEmb {
+    fn embed(&mut self, img: &image::RgbImage, face: &Face) -> Result<Vec<f32>, String> {
+        match self {
+            FaceEmb::Lv(l) => l.embed_face(img, face),
+            FaceEmb::Ccip(c) => c.embed_character(img, face),
+        }
+    }
+}
+
+fn load_face_det(models_root: &Path, anime: bool, progress: &Progress) -> Option<FaceDet> {
+    if anime {
+        let p = models_root.join("faces").join("anime_face").join("model.onnx");
+        if !p.is_file() {
+            emit(progress, "cast_detect", &format!("аниме-детектор не найден ({}) — без аватаров", p.display()));
+            return None;
+        }
+        match AnimeFaceDetector::load(&p) {
+            Ok(d) => Some(FaceDet::Anime(d)),
+            Err(e) => {
+                emit(progress, "cast_detect", &format!("аниме-детектор не загрузился: {e} — без аватаров"));
+                None
+            }
+        }
+    } else {
+        let models = FacesModels::resolve(models_root);
+        if !models.scrfd.is_file() {
+            emit(progress, "cast_detect", "SCRFD не найден — без аватаров (кастинг по голосу)");
+            return None;
+        }
+        match Scrfd::load(&models.scrfd) {
+            Ok(d) => Some(FaceDet::Real(d)),
+            Err(e) => {
+                emit(progress, "cast_detect", &format!("SCRFD не загрузился: {e} — без аватаров"));
+                None
+            }
+        }
+    }
+}
+
+fn load_face_emb(models_root: &Path, anime: bool, progress: &Progress) -> Option<FaceEmb> {
+    if anime {
+        let p = dub_faces::ccip_path(models_root);
+        if !p.is_file() {
+            emit(progress, "cast_embed", &format!("CCIP не найден ({}) — аватар без эмбеддинга", p.display()));
+            return None;
+        }
+        match CcipEmbedder::load(&p) {
+            Ok(e) => Some(FaceEmb::Ccip(e)),
+            Err(e) => {
+                emit(progress, "cast_embed", &format!("CCIP не загрузился: {e} — аватар без эмбеддинга"));
+                None
+            }
+        }
+    } else {
+        let models = FacesModels::resolve(models_root);
+        if !models.lvface.is_file() {
+            return None;
+        }
+        match LvFace::load(&models.lvface) {
+            Ok(e) => Some(FaceEmb::Lv(e)),
+            Err(e) => {
+                emit(progress, "cast_embed", &format!("LVFace не загрузился: {e} — аватар без эмбеддинга"));
+                None
+            }
+        }
+    }
+}
+
+/// Аватар персонажа: детект лица ТОЛЬКО в кадрах, где этот спикер говорит (его сегменты). Берём кадры из
+/// самых длинных реплик (до MAX_AVATAR_CAND), детектим, выбираем лучшее лицо (score²·резкость·фронтальность·
+/// размер) -> кроп аватара + face-эмбеддинг. Нет детектора/лиц -> ("", []). Возвращает (sample_frame, emb).
+#[allow(clippy::too_many_arguments)]
+fn avatar_for_speaker(
+    paths: &AnalyzePaths,
+    proj: &Project,
+    spk: &str,
+    ci: usize,
+    anime: bool,
+    det: Option<&mut FaceDet>,
+    emb: Option<&mut FaceEmb>,
+    cast_dir: &Path,
+    progress: &Progress,
+) -> (String, Vec<f32>) {
+    let Some(det) = det else { return (String::new(), Vec::new()) };
+
+    // Сегменты спикера, по убыванию длительности (в длинных репликах он крупно и на экране).
+    let mut segs: Vec<(f64, f64)> = proj
+        .segments
+        .iter()
+        .filter(|s| s.speaker.as_deref().unwrap_or("0") == spk)
+        .map(|s| (s.start, s.end))
+        .collect();
+    segs.sort_by(|a, b| (b.1 - b.0).partial_cmp(&(a.1 - a.0)).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Таймстемпы-кандидаты: середина самых длинных реплик (+ пара точек внутри очень длинных).
+    let mut times: Vec<f64> = Vec::new();
+    for (s, e) in &segs {
+        if times.len() >= MAX_AVATAR_CAND {
+            break;
+        }
+        times.push((s + e) / 2.0);
+        if (e - s) > 6.0 && times.len() < MAX_AVATAR_CAND {
+            times.push(s + (e - s) * 0.25);
+        }
+        if (e - s) > 6.0 && times.len() < MAX_AVATAR_CAND {
+            times.push(s + (e - s) * 0.75);
+        }
+    }
+
+    let tmp_dir = cast_dir.join("cand");
+    let _ = std::fs::create_dir_all(&tmp_dir);
+    // Лучшее лицо среди всех кандидатов: (кадр, лицо, качество, путь-к-кадру).
+    let mut best: Option<(image::RgbImage, Face, f32, std::path::PathBuf)> = None;
+    for (k, t) in times.iter().enumerate() {
+        let fp = tmp_dir.join(format!("s{}_{k}.png", sanitize(spk)));
+        let img = match extract_frame(&paths.input, *t, &fp) {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+        let faces = match det.detect(&img) {
+            Ok(f) => f,
+            Err(_) => continue,
+        };
+        for f in faces {
+            let (x1, y1, x2, y2) = (f.x1, f.y1, f.x2, f.y2);
+            let area = ((x2 - x1).max(0.0) * (y2 - y1).max(0.0)).sqrt();
+            let area_gate = area / (area + 120.0);
+            let sharp = crop_sharpness(&img, (x1, y1, x2, y2));
+            // real: фронтальность по 5 точкам; anime: точек нет -> нейтрально 1.0.
+            let front = if anime { 1.0 } else { frontality(&f) };
+            let q = f.score * f.score * (sharp + 1.0) * (front + 0.05) * area_gate;
+            let better = best.as_ref().map(|(_, _, bq, _)| q > *bq).unwrap_or(true);
+            if better {
+                best = Some((img.clone(), f, q, fp.clone()));
+            }
+        }
+    }
+
+    let result = match best {
+        Some((img, face, _q, fp)) => {
+            let out = cast_dir.join(format!("char_{ci}.png"));
+            let bbox = (face.x1, face.y1, face.x2, face.y2);
+            let sample = match save_face_crop(&fp, bbox, 0.35, &out) {
+                Ok(()) => format!("casting/char_{ci}.png"),
+                Err(e) => {
+                    emit(progress, "cast_speaker", &format!("аватар char_{ci} не сохранён: {e}"));
+                    String::new()
+                }
+            };
+            let embv = match emb {
+                Some(e) => e.embed(&img, &face).unwrap_or_default(),
+                None => Vec::new(),
+            };
+            (sample, embv)
+        }
+        None => (String::new(), Vec::new()),
+    };
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    result
+}
+
+/// Извлечь один кадр видео в момент t (сек) -> RgbImage. Быстрый seek (-ss ПЕРЕД -i).
+fn extract_frame(video: &Path, t: f64, out: &Path) -> Result<image::RgbImage, String> {
+    let res = std::process::Command::new(FFMPEG)
+        .args(["-y", "-ss"])
+        .arg(format!("{:.3}", t.max(0.0)))
+        .arg("-i")
+        .arg(video)
+        .args(["-frames:v", "1"])
+        .arg(out)
+        .output()
+        .map_err(|e| format!("ffmpeg: {e}"))?;
+    if !res.status.success() {
+        return Err("ffmpeg не извлёк кадр".into());
+    }
+    Ok(image::open(out).map_err(|e| format!("open frame: {e}"))?.to_rgb8())
 }
 
 // Границы серой зоны/валидного диапазона F0 для КАСТИНГА. Пол в UI показывается фактом, поэтому здесь
@@ -335,8 +402,6 @@ fn speaker_genders(paths: &AnalyzePaths, proj: &Project, speakers: &[String]) ->
         }
         if let Ok((mono, sr)) = crate::wavio::read_mono_f32(&tmp) {
             if let Some(f) = crate::f0::median_f0(&mono, sr) {
-                // Пол ставим ФАКТОМ (UI-карточка), поэтому в неуверенных случаях лучше "" (неизвестно),
-                // чем гадать: серая зона у порогов или F0 вне валидного диапазона -> gender="".
                 if let Some(g) = gender_label(f) {
                     out.insert(spk.clone(), g.to_string());
                 }
@@ -348,16 +413,13 @@ fn speaker_genders(paths: &AnalyzePaths, proj: &Project, speakers: &[String]) ->
 }
 
 /// Границы длины образца-фразы для голосового эмбеддера (сек). RESEARCH: чистый вокал 16к, длиннейшая
-/// реплика спикера, 2-6с; короче 1с — шумнее, но ок. Кап сверху 6с (дольше не улучшает эмбеддинг, но
-/// раздувает fbank), пол — 1с (короче — совсем ненадёжно).
+/// реплика спикера, 2-6с; короче 1с — шумнее, но ок. Кап сверху 6с, пол — 1с.
 const VOICE_SAMPLE_MAX_SEC: f64 = 6.0;
 const VOICE_SAMPLE_MIN_SEC: f64 = 1.0;
 
-/// Голосовые эмбеддинги + wav-образцы для КАЖДОГО спикера. Для каждого спикера берём длиннейшую реплику
-/// (build_speaker_refs-логика: устойчивый образец) на ЧИСТОМ вокале, режем в casting/char-<spk>_voice.wav
-/// (16к моно), считаем 256-d WeSpeaker-эмбеддинг. Модели нет / вокала нет / клип короче 1с -> спикер без
-/// голоса (кастинг по лицу всё равно работает; cross-episode по голосу отключён для него — не падаем).
-/// Возвращает (speaker_id -> эмбеддинг, speaker_id -> путь к wav-образцу).
+/// Голосовые эмбеддинги + wav-образцы для КАЖДОГО спикера (WeSpeaker 256-d). Длиннейшая реплика на чистом
+/// вокале -> casting/char-<spk>_voice.wav + эмбеддинг. Нет модели/вокала/клип<1с -> спикер без голоса
+/// (не падаем). Возвращает (speaker_id -> эмбеддинг, speaker_id -> путь к wav-образцу).
 fn speaker_voices(
     paths: &AnalyzePaths,
     proj: &Project,
@@ -367,7 +429,6 @@ fn speaker_voices(
     let mut embs: HashMap<String, Vec<f32>> = HashMap::new();
     let mut samples: HashMap<String, std::path::PathBuf> = HashMap::new();
 
-    // Чистый вокал (тот же приоритет, что speaker_genders/build_speaker_refs). Нет вокала -> без голоса.
     let vocals = {
         let clean = paths.work_dir.join("vocals16_clean.wav");
         let raw = paths.work_dir.join("vocals16.wav");
@@ -376,28 +437,22 @@ fn speaker_voices(
         } else if raw.is_file() {
             raw
         } else {
-            emit(progress, "cast_speaker", "голосовой эмбеддинг пропущен: нет чистого вокала");
+            emit(progress, "cast_embed", "голосовой эмбеддинг пропущен: нет чистого вокала");
             return (embs, samples);
         }
     };
 
-    // Модель WeSpeaker (по образцу SCRFD/LVFace: <models_root>/faces/wespeaker/…). Нет модели -> без
-    // голоса (fail-safe: кастинг по лицу работает). Env DUB_FACES_WESPEAKER — явный путь (портатив).
     let onnx = std::env::var("DUB_FACES_WESPEAKER")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| dub_faces::wespeaker_path(&paths.models_root));
     if !onnx.is_file() {
-        emit(
-            progress,
-            "cast_speaker",
-            &format!("голосовой эмбеддинг пропущен: нет модели WeSpeaker ({})", onnx.display()),
-        );
+        emit(progress, "cast_embed", &format!("голос пропущен: нет модели WeSpeaker ({})", onnx.display()));
         return (embs, samples);
     }
     let mut embedder = match dub_faces::VoiceEmbedder::load(&onnx) {
         Ok(e) => e,
         Err(e) => {
-            emit(progress, "cast_speaker", &format!("WeSpeaker не загрузился: {e}; голос пропущен"));
+            emit(progress, "cast_embed", &format!("WeSpeaker не загрузился: {e}; голос пропущен"));
             return (embs, samples);
         }
     };
@@ -405,7 +460,6 @@ fn speaker_voices(
     let cast_dir = paths.work_dir.join("casting");
     let _ = std::fs::create_dir_all(&cast_dir);
     for spk in speakers {
-        // Длиннейшая реплика спикера — устойчивый образец (та же эвристика, что build_speaker_refs fallback).
         let cand = proj
             .segments
             .iter()
@@ -415,13 +469,12 @@ fn speaker_voices(
             });
         let Some(seg) = cand else { continue };
         if (seg.end - seg.start) < VOICE_SAMPLE_MIN_SEC {
-            continue; // короче 1с — ненадёжно, пропускаем (лучше без голоса, чем шум)
+            continue;
         }
-        // Образец = wav для проигрывания И для эмбеддинга. Имя по спикеру; персонажу его копирует step 5b.
         let wav = cast_dir.join(format!("char-{}_voice.wav", sanitize(spk)));
         let end = seg.end.min(seg.start + VOICE_SAMPLE_MAX_SEC).max(seg.start + 0.05);
         if let Err(e) = crate::media::trim(&vocals, &wav, seg.start, end, 16_000) {
-            emit(progress, "cast_speaker", &format!("образец голоса спикера {spk}: обрезка не удалась: {e}"));
+            emit(progress, "cast_embed", &format!("образец голоса {spk}: обрезка не удалась: {e}"));
             continue;
         }
         match embedder.embed_wav(&wav) {
@@ -430,40 +483,31 @@ fn speaker_voices(
                 samples.insert(spk.clone(), wav);
             }
             Err(e) => {
-                emit(progress, "cast_speaker", &format!("голос спикера {spk}: эмбеддинг не удался: {e}"));
-                // wav-образец всё равно оставляем (проигрывание в UI не требует эмбеддинга).
+                emit(progress, "cast_embed", &format!("голос {spk}: эмбеддинг не удался: {e}"));
                 samples.insert(spk.clone(), wav);
             }
         }
     }
     if !embs.is_empty() {
-        emit(progress, "cast_speaker", &format!("голосовых эмбеддингов: {}", embs.len()));
+        emit(progress, "cast_embed", &format!("голосовых эмбеддингов: {}", embs.len()));
     }
     (embs, samples)
 }
 
-/// casting.json для cross-episode матчинга. Приоритет:
-///   1) `casting_ref` — slug профиля app-библиотеки (<repo>/casting_library/<slug>/casting.json);
-///   2) env DUB_FACES_PREV_CASTING (явный путь);
-///   3) work_dir/prev_casting.json (кладёт вызывающий/UI при выборе предыдущего эпизода).
-/// None если ничего нет. Невалидный/несуществующий slug логируем и продолжаем без применения (не падаем).
+/// casting.json для cross-episode матчинга. Приоритет: 1) `casting_ref` (slug профиля app-библиотеки);
+/// 2) env DUB_FACES_PREV_CASTING; 3) work_dir/prev_casting.json. None если ничего нет.
 fn load_prev_casting(
     paths: &AnalyzePaths,
     casting_ref: &str,
     progress: &Progress,
-) -> Option<dub_faces::Casting> {
+) -> Option<Casting> {
     let slug = casting_ref.trim();
     if !slug.is_empty() {
-        // Тот же safe-slug контракт, что у эндпоинтов библиотеки (без traversal).
         let safe = slug.len() <= 128
             && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
             && !slug.contains("..");
-        let prof = if safe {
-            paths.repo_root.join("casting_library").join(slug).join("casting.json")
-        } else {
-            std::path::PathBuf::new()
-        };
         if safe {
+            let prof = paths.repo_root.join("casting_library").join(slug).join("casting.json");
             if let Some(c) = load_casting(&prof) {
                 emit(progress, "cast_speaker", &format!("применяю профиль библиотеки: {slug}"));
                 return Some(c);
@@ -483,10 +527,9 @@ fn sanitize(s: &str) -> String {
     s.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').collect()
 }
 
-/// Собрать speech_note персонажей в единый стилевой хвост перевода (пер-спикерный style в текущем
-/// ctx_run НЕ поддержан — единый глобальный style; см. translate.rs). Формат: «CharName (реплики спикера
-/// N): note». Пусто, если ни у кого нет заметки. Вызывается при применении правок кастинга (эндпоинт).
-pub fn speech_notes_to_style(casting: &dub_faces::Casting) -> String {
+/// Собрать speech_note персонажей в единый стилевой хвост перевода. Формат: «CharName: note». Пусто, если
+/// ни у кого нет заметки. Вызывается при применении правок кастинга (эндпоинт).
+pub fn speech_notes_to_style(casting: &Casting) -> String {
     let mut parts: Vec<String> = Vec::new();
     for c in &casting.characters {
         let note = c.speech_note.trim();
@@ -510,14 +553,8 @@ pub fn speech_notes_to_style(casting: &dub_faces::Casting) -> String {
 /// Сентинел клона в позиционном CSV voice.name (#114): "-" => render клонирует голос спикера.
 pub const CLONE_SLOT: &str = crate::voice_slots::CLONE_SLOT;
 
-/// Построить новый позиционный CSV voice.name ПОВЕРХ старого при применении голосов кастинга.
-/// Формат — как в render.rs/voice_slots: позиция i = i-й спикер из `sorted_speakers` (лексикографически
-/// отсортированные+dedup id). Правило слияния (не затираем чужие голоса из #114):
-///   - спикер есть в `vmap` со значением Some(name) -> его голос;
-///   - спикер есть в `vmap` со значением None (выставлен в кастинге на 'clone') -> сентинел "-";
-///   - спикера НЕТ в `vmap` -> сохраняем его позицию из старого CSV (если тот был voice-режимом),
-///     иначе "-".
-/// `old_csv_is_voice` = был ли proj.audio.voice.mode == "voice" (иначе старый CSV не берём).
+/// Построить новый позиционный CSV voice.name ПОВЕРХ старого при применении голосов кастинга (не затираем
+/// чужие голоса #114). См. тесты. `old_csv_is_voice` = был ли proj.audio.voice.mode == "voice".
 pub fn merge_voice_csv(
     sorted_speakers: &[String],
     vmap: &HashMap<String, Option<String>>,
@@ -542,9 +579,8 @@ pub fn merge_voice_csv(
     parts.join(",")
 }
 
-/// Мапа speaker_id -> имя голоса из кастинга (для применения per-speaker голосов тем же механизмом, что
-/// voice_slots #114: voice.mode="voice" + позиционный CSV по отсортированным id). "clone"/пусто -> None.
-pub fn casting_voice_map(casting: &dub_faces::Casting) -> HashMap<String, Option<String>> {
+/// Мапа speaker_id -> имя голоса из кастинга (для применения per-speaker голосов). "clone"/пусто -> None.
+pub fn casting_voice_map(casting: &Casting) -> HashMap<String, Option<String>> {
     let mut out = HashMap::new();
     for c in &casting.characters {
         let v = c.dub_voice.trim();
@@ -598,8 +634,6 @@ mod tests {
 
     #[test]
     fn merge_preserves_speakers_not_in_casting() {
-        // #114 назначил всем троим (voice_slots): CSV "V0,V1,V2". Кастинг трогает только спикера "1"
-        // (ставит голос W1). Спикеры "0" и "2" НЕ в кастинге -> их позиции ДОЛЖНЫ сохраниться.
         let sorted = vec!["0".to_string(), "1".to_string(), "2".to_string()];
         let mut vmap: HashMap<String, Option<String>> = HashMap::new();
         vmap.insert("1".into(), Some("W1".into()));
@@ -609,22 +643,36 @@ mod tests {
 
     #[test]
     fn merge_clone_only_for_explicit_clone_in_casting() {
-        // Спикер "1" явно на 'clone' в кастинге (vmap: Some(None)) -> "-". Спикер "0" не в кастинге ->
-        // сохраняем V0. Спикер "2" не в кастинге, но старого CSV на его позицию нет -> "-".
         let sorted = vec!["0".to_string(), "1".to_string(), "2".to_string()];
         let mut vmap: HashMap<String, Option<String>> = HashMap::new();
-        vmap.insert("1".into(), None); // явный clone в кастинге
+        vmap.insert("1".into(), None);
         let csv = merge_voice_csv(&sorted, &vmap, Some("V0,V1"), true);
         assert_eq!(csv, "V0,-,-");
     }
 
     #[test]
     fn merge_ignores_old_csv_when_not_voice_mode() {
-        // Старый режим не "voice" (напр. "clone") -> старый CSV не берём; спикер не из кастинга -> "-".
         let sorted = vec!["0".to_string(), "1".to_string()];
         let mut vmap: HashMap<String, Option<String>> = HashMap::new();
         vmap.insert("0".into(), Some("W0".into()));
         let csv = merge_voice_csv(&sorted, &vmap, Some("junk,junk"), false);
         assert_eq!(csv, "W0,-");
+    }
+
+    #[test]
+    fn talktime_ranks_by_duration_desc() {
+        use dub_core::Segment;
+        let mut p = Project::default();
+        let seg = |spk: &str, a: f64, b: f64| Segment {
+            start: a,
+            end: b,
+            speaker: Some(spk.to_string()),
+            ..Default::default()
+        };
+        p.segments = vec![seg("1", 0.0, 1.0), seg("0", 1.0, 6.0), seg("0", 6.0, 8.0), seg("1", 8.0, 8.5)];
+        let r = speakers_by_talktime(&p);
+        assert_eq!(r[0].0, "0"); // 7с речи -> первый
+        assert_eq!(r[0].2, 2); // 2 реплики
+        assert_eq!(r[1].0, "1"); // 1.5с -> второй
     }
 }
