@@ -35,6 +35,7 @@
     "voicing": "Generando la voz",
     "style": "Detectando estilo de subtítulos",
     "locating": "Localizando texto en pantalla",
+    "casting": "Asignando personajes",
     "assembling": "Montando el vídeo",
     "cancel": "Cancelar"
   },
@@ -385,6 +386,8 @@
     "asrSwitched": "Parakeet no conoce {{lang}} — ASR cambiado a Whisper (99 idiomas).",
     "detect": "Detectar texto en pantalla",
     "detectHint": "El OCR encuentra subtítulos incrustados para difuminar y localizar. Lento en 4K — desactívalo si no lo necesitas (p. ej. doblaje sin subtítulos).",
+    "casting": "Reparto de personajes",
+    "castingHint": "Opcional. Añade una pasada por los fotogramas: detecta rostros, los asocia con los hablantes y crea un reparto de personajes (avatar, nombre, voz) que puedes editar tras el análisis. Más lento en vídeos largos.",
     "hint": "Combina libremente — audio y subtítulos son independientes, en cualquier modo",
     "audioLabel": "Audio",
     "audioNone": "Original (sin doblaje)",
@@ -452,5 +455,25 @@
     "voicesLib": "De la biblioteca: {{n}} voz(ces)",
     "subs": "Subtítulos",
     "advanced": "Más opciones"
+  },
+  "casting": {
+    "tab": "Personajes",
+    "tabHint": "Reparto de personajes: rostros, voces y notas de habla",
+    "title": "Reparto de personajes",
+    "count": "{{n}} personaje(s)",
+    "hint": "Personajes detectados en el vídeo. Da a cada uno un nombre, una nota de habla (se envía al traductor) y una voz de doblaje, luego aplica el reparto. Voz vacía = clonar del vídeo.",
+    "apply": "Aplicar reparto",
+    "applied": "Aplicado",
+    "namePlaceholder": "Nombre del personaje",
+    "lines": "{{n}} línea(s)",
+    "speech": "Estilo de habla",
+    "speechPlaceholder": "p. ej. brusco y sarcástico, habla rápido, mayor",
+    "voice": "Voz de doblaje",
+    "voiceClone": "Clonar del vídeo",
+    "gender": {
+      "male": "Masculino",
+      "female": "Femenino",
+      "unknown": "—"
+    }
   }
 }

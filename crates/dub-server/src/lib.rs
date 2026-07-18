@@ -8,6 +8,7 @@
 
 mod analyze;
 mod bench;
+mod casting;
 mod compose;
 mod endpoints;
 mod f0;
@@ -81,6 +82,7 @@ pub fn verify_captions_e2e(
         translate_style: proj.audio.translate_style.clone(),
         burn: proj.subs.burn,
         detect_text: true,
+        casting: false, // verify-путь: только капшены/OCR, кастинг не нужен
         import_translated: false,
     };
     let sel = models::load_selection(&mroot);
@@ -323,6 +325,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/voices/delete", post(voices_delete))
         .route("/projects/{pid}/speaker-voice", post(speaker_voice))
         .route("/projects/{pid}/voice-slots", post(voice_slots_assign))
+        .route("/projects/{pid}/casting", get(casting_get).post(casting_save))
+        .route("/projects/{pid}/casting/avatar", get(casting_avatar))
         .route("/fonts", get(endpoints::fonts))
         .route("/voices", get(voices_list))
         .route("/presets", get(endpoints::presets))
@@ -694,6 +698,203 @@ async fn voice_slots_assign(
     }
 }
 
+// ─── Кастинг персонажей (#115) ──────────────────────────────────────────────
+
+/// Единый шейп персонажа для фронта (тип Character в api.ts): id/name/gender/voice/speaker_ids/
+/// line_count/sample_frame_url. Возвращают ОБА эндпоинта (get + save) — фронт кладёт результат в один
+/// стейт Character[]. `voice` = dub_voice бэка; line_count = число сегментов проекта у speaker_ids
+/// персонажа; sample_frame_url nullable (закадровый персонаж без кадра -> null, фронт рисует заглушку).
+fn character_json(c: &dub_faces::Character, pid: &str, proj: &Project) -> Value {
+    let ids: std::collections::HashSet<&str> = c.speaker_ids.iter().map(|s| s.as_str()).collect();
+    let line_count = proj
+        .segments
+        .iter()
+        .filter(|s| ids.contains(s.speaker.as_deref().unwrap_or("0")))
+        .count();
+    json!({
+        "id": c.id,
+        "name": c.name,
+        "gender": c.gender,
+        "voice": c.dub_voice,
+        "speech_note": c.speech_note,
+        "speaker_ids": c.speaker_ids,
+        "line_count": line_count,
+        // URL аватарки эндпоинта (без раскрытия файловых путей). Нет кадра -> null (фронт рисует инициал).
+        "sample_frame_url": if c.sample_frame.is_empty() {
+            Value::Null
+        } else {
+            Value::from(format!("/projects/{pid}/casting/avatar?id={}", c.id))
+        },
+    })
+}
+
+/// GET /projects/{pid}/casting — карточки персонажей из casting.json в шейпе фронта (см. character_json).
+/// 404 если casting.json нет (кастинг не запускался).
+async fn casting_get(State(st): State<AppState>, AxPath(pid): AxPath<String>) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let proj = match st.load_project(&pid) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let path = dir.join("casting.json");
+    let Some(casting) = dub_faces::load_casting(&path) else {
+        return (StatusCode::NOT_FOUND, "casting not run").into_response();
+    };
+    let chars: Vec<Value> = casting
+        .characters
+        .iter()
+        .map(|c| character_json(c, &pid, &proj))
+        .collect();
+    Json(json!({ "version": casting.version, "characters": chars })).into_response()
+}
+
+/// GET /projects/{pid}/casting/avatar?id=<char_id> — кадр-аватарка персонажа (PNG, с Range).
+async fn casting_avatar(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+    req: axum::http::Request<axum::body::Body>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let id = q.get("id").map(|s| s.as_str()).unwrap_or("");
+    let Some(casting) = dub_faces::load_casting(&dir.join("casting.json")) else {
+        return (StatusCode::NOT_FOUND, "casting not run").into_response();
+    };
+    let Some(ch) = casting.characters.iter().find(|c| c.id == id) else {
+        return (StatusCode::NOT_FOUND, "character not found").into_response();
+    };
+    if ch.sample_frame.is_empty() {
+        return (StatusCode::NOT_FOUND, "no avatar").into_response();
+    }
+    // sample_frame — относительный путь внутри work_dir (casting/char_N.png); отсекаем traversal.
+    if ch.sample_frame.contains("..") {
+        return (StatusCode::BAD_REQUEST, "bad path").into_response();
+    }
+    let p = dir.join(&ch.sample_frame);
+    if !p.is_file() {
+        return (StatusCode::NOT_FOUND, "avatar file missing").into_response();
+    }
+    serve_file_range(&p, req, None).await
+}
+
+/// POST /projects/{pid}/casting {characters:[{id,name,speech_note,dub_voice,gender?}]} — сохранить правки
+/// юзера в casting.json И применить: (1) per-speaker голоса тем же механизмом, что voice_slots/ручное
+/// назначение (voice.mode="voice" + позиционный CSV по отсортированным id спикеров); (2) speech_note ->
+/// единый translate_style (пер-спикерный style в ctx_run НЕ поддержан — глобальный; см. casting.rs +
+/// translate.rs). Метит сегменты dirty при смене голоса (ре-синтез). Возвращает обновлённый кастинг.
+async fn casting_save(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    let mut proj = match st.load_project(&pid) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    let path = dir.join("casting.json");
+    let Some(mut casting) = dub_faces::load_casting(&path) else {
+        return (StatusCode::CONFLICT, "casting not run").into_response();
+    };
+    // Применить правки по id: name/speech_note/dub_voice/gender.
+    if let Some(edits) = body.get("characters").and_then(|v| v.as_array()) {
+        for e in edits {
+            let Some(id) = e.get("id").and_then(|v| v.as_str()) else { continue };
+            let Some(ch) = casting.characters.iter_mut().find(|c| c.id == id) else { continue };
+            if let Some(v) = e.get("name").and_then(|v| v.as_str()) {
+                ch.name = v.to_string();
+            }
+            if let Some(v) = e.get("speech_note").and_then(|v| v.as_str()) {
+                ch.speech_note = v.to_string();
+            }
+            if let Some(v) = e.get("dub_voice").and_then(|v| v.as_str()) {
+                ch.dub_voice = v.to_string();
+            }
+            if let Some(v) = e.get("gender").and_then(|v| v.as_str()) {
+                ch.gender = v.to_string();
+            }
+        }
+    }
+    // Валидация голосов: непустой не-"clone" должен существовать в voices/.
+    let available: std::collections::BTreeSet<String> =
+        list_voice_names(&st.voices_dir).into_iter().collect();
+    for c in &casting.characters {
+        let v = c.dub_voice.trim();
+        if !v.is_empty() && !v.eq_ignore_ascii_case("clone") && !available.contains(v) {
+            return (StatusCode::BAD_REQUEST, format!("голос {v:?} не найден в voices/")).into_response();
+        }
+    }
+
+    // (1) применить голоса per-speaker: позиционный CSV по лексикографически отсортированным id спикеров
+    // (как читает render.rs / пишет voice_slots). Слияние ПОВЕРХ старого CSV — см. merge_voice_csv:
+    // спикера на 'clone' в кастинге -> "-", спикера НЕ из кастинга -> сохраняем его позицию из #114.
+    let vmap = casting::casting_voice_map(&casting);
+    let mut spk_ids: Vec<String> = proj
+        .segments
+        .iter()
+        .map(|s| s.speaker.clone().unwrap_or_else(|| "0".to_string()))
+        .collect();
+    spk_ids.sort();
+    spk_ids.dedup();
+    let any_voice = vmap.values().any(|v| v.is_some());
+    // Голоса из кастинга применяем ТОЛЬКО когда юзер реально назначил хоть один (any_voice). Иначе
+    // (все на "clone") НЕ трогаем proj.audio.voice — иначе перезатёрли бы библиотечные голоса из #114
+    // (voice_slots) и пометили бы ВСЕ сегменты dirty на пустой ре-синтез.
+    if any_voice {
+        let old_name = proj.audio.voice.name.clone();
+        // Новый CSV строим ПОВЕРХ текущего (см. casting::merge_voice_csv): спикеров, НЕ настроенных в
+        // кастинге, НЕ трогаем — сохраняем их позицию из voice_slots (#114). "-" ставим только тем, кого
+        // реально выставили в кастинге на 'clone'. Формат позиционный по отсортированным id (как render.rs).
+        let old_is_voice = proj.audio.voice.mode == "voice";
+        let csv = casting::merge_voice_csv(&spk_ids, &vmap, old_name.as_deref(), old_is_voice);
+        proj.audio.voice.mode = "voice".to_string();
+        proj.audio.voice.name = Some(csv);
+        // Смена голосов -> ре-синтез: метим сегменты dirty (как voice_slots).
+        if proj.audio.voice.name != old_name {
+            for seg in &mut proj.segments {
+                seg.dirty = true;
+            }
+        }
+    }
+
+    // (2) speech_note -> глобальный translate_style (документированное ограничение: ctx_run не берёт
+    // пер-спикерный стиль). Дополняем существующий стиль заметками персонажей.
+    let notes = casting::speech_notes_to_style(&casting);
+    if !notes.is_empty() {
+        let base = proj.audio.translate_style.trim();
+        proj.audio.translate_style = if base.is_empty() {
+            format!("per-character voice notes — {notes}")
+        } else {
+            format!("{base}; per-character voice notes — {notes}")
+        };
+    }
+
+    // Сохранить casting.json + project.json.
+    if let Err(e) = dub_faces::save_casting(&path, &casting) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    if let Err(e) = save_project_atomic(&dir, &proj) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, e).into_response();
+    }
+    // Возвращаем ПОЛНЫЙ список персонажей в шейпе фронта (тот же, что casting_get) — фронт кладёт его
+    // прямо в стейт Character[]. line_count считаем по обновлённому proj (спикеры не менялись, но шейп единый).
+    let chars: Vec<Value> = casting
+        .characters
+        .iter()
+        .map(|c| character_json(c, &pid, &proj))
+        .collect();
+    Json(json!({ "ok": true, "characters": chars })).into_response()
+}
+
 /// GET /voices/catalog — каталог доп-голосов (HF датасет Slait/russia_voices): имя, пол, URL-превью.
 async fn voices_catalog() -> Json<Value> {
     Json(tokio::task::spawn_blocking(record::catalog).await.unwrap_or_else(|_| json!({ "voices": [] })))
@@ -968,6 +1169,8 @@ async fn analyze_project(
         translate_style: qget("translate_style", ""),
         burn: qget("burn", "1") != "0",
         detect_text: qget("detect", "1") != "0",
+        // кастинг персонажей (#115): ВЫКЛ по умолчанию (дорогой скан кадров SCRFD/LVFace).
+        casting: qget("casting", "0") == "1",
         // «сабы уже на языке перевода» — эффективно только если сабы реально импортированы.
         import_translated: import_subs.is_some() && qget("import_translated", "0") == "1",
     };

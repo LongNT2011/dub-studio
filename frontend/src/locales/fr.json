@@ -35,6 +35,7 @@
     "voicing": "Génération de la voix",
     "style": "Détection du style des sous-titres",
     "locating": "Localisation du texte à l'écran",
+    "casting": "Distribution des personnages",
     "assembling": "Assemblage de la vidéo",
     "cancel": "Annuler"
   },
@@ -385,6 +386,8 @@
     "asrSwitched": "Parakeet ne connaît pas {{lang}} — ASR basculé sur Whisper (99 langues).",
     "detect": "Détecter le texte à l'écran",
     "detectHint": "L'OCR trouve les textes incrustés à flouter et localiser. Lent en 4K — désactivez si inutile (p. ex. doublage sans sous-titres).",
+    "casting": "Distribution des personnages",
+    "castingHint": "Facultatif. Ajoute un passage sur les images : détecte les visages, les associe aux locuteurs et constitue une distribution de personnages (avatar, nom, voix) modifiable après l'analyse. Plus lent sur les vidéos longues.",
     "hint": "Composez librement — audio et sous-titres sont indépendants, dans tout mode",
     "audioLabel": "Audio",
     "audioNone": "Original (sans doublage)",
@@ -452,5 +455,25 @@
     "voicesLib": "Depuis la bibliothèque : {{n}} voix",
     "subs": "Sous-titres",
     "advanced": "Plus d'options"
+  },
+  "casting": {
+    "tab": "Personnages",
+    "tabHint": "Distribution des personnages — visages, voix et notes d'élocution",
+    "title": "Distribution des personnages",
+    "count": "{{n}} personnage(s)",
+    "hint": "Personnages détectés dans la vidéo. Donnez à chacun un nom, une note d'élocution (transmise au traducteur) et une voix de doublage, puis appliquez la distribution. Voix vide = clonage depuis la vidéo.",
+    "apply": "Appliquer la distribution",
+    "applied": "Appliqué",
+    "namePlaceholder": "Nom du personnage",
+    "lines": "{{n}} réplique(s)",
+    "speech": "Style d'élocution",
+    "speechPlaceholder": "ex. bourru et sarcastique, parle vite, âgé",
+    "voice": "Voix de doublage",
+    "voiceClone": "Cloner depuis la vidéo",
+    "gender": {
+      "male": "Homme",
+      "female": "Femme",
+      "unknown": "—"
+    }
   }
 }

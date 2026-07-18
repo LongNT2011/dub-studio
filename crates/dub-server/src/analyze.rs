@@ -271,6 +271,8 @@ pub struct AnalyzeArgs {
     pub burn: bool,     // вжигать ли субтитры/титры на видео (композируемость; дефолт true)
     pub detect_text: bool, // OCR-детекция вшитого текста (блюр + локализация титров). Дорогая (минуты на 4K);
                            // в режиме без субтитров/блюра не нужна — галочка в UI, дефолт true.
+    pub casting: bool,     // кастинг персонажей (#115): SCRFD+LVFace-скан кадров. ВЫКЛ по умолчанию —
+                           // при false НИ ОДНОГО кадра не сканируется (галочка в UI, как detect_text).
     pub import_translated: bool, // импортированные субтитры УЖЕ на языке перевода -> MT/vision пропустить,
                                  // tgt = импортированный текст, Даб Студио только озвучивает. Работает лишь с import_subs.
 }
@@ -782,6 +784,17 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         emit(progress, "ocr_detect", "аудио-режим: без видео, детекция экранного текста не нужна");
     } else {
         emit(progress, "ocr_detect", "детекция вшитого текста отключена (галочка)");
+    }
+
+    // 7b) КАСТИНГ ПЕРСОНАЖЕЙ (#115). ГЕЙТ: только при галочке casting И наличии видео. При выкл — НИ
+    //     ОДНОГО кадра не сканируется (ноль оверхеда, как OCR). Ставится ПОСЛЕ ASR/диаризации (нужны
+    //     спикеры+тайминги) и перевода. Fail-safe: сбой не валит analyze (кастинг — не блокер).
+    proj.casting_enabled = args.casting;
+    bench.stage("casting");
+    if args.casting && meta.width > 0 && meta.height > 0 {
+        crate::casting::stage(paths, &proj, progress);
+    } else if args.casting {
+        emit(progress, "casting", "аудио-режим: без видео, кастинг персонажей не нужен");
     }
 
     // 8) финализация кэша: зеркалим param-ключи крупных стадий в project.stage_ckpts (resume работает

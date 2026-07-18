@@ -35,6 +35,7 @@
     "voicing": "Gerando a narração",
     "style": "Detectando estilo das legendas",
     "locating": "Localizando texto na tela",
+    "casting": "Escalando personagens",
     "assembling": "Montando o vídeo",
     "cancel": "Cancelar"
   },
@@ -385,6 +386,8 @@
     "asrSwitched": "Parakeet não conhece {{lang}} — ASR mudado para Whisper (99 idiomas).",
     "detect": "Detectar texto na tela",
     "detectHint": "O OCR encontra legendas embutidas para desfocar e localizar. Lento em 4K — desative se não precisar (ex.: dublagem sem legendas).",
+    "casting": "Elenco de personagens",
+    "castingHint": "Opcional. Adiciona uma passagem pelos quadros: detecta rostos, associa-os aos falantes e monta um elenco de personagens (avatar, nome, voz) editável após a análise. Mais lento em vídeos longos.",
     "hint": "Combine livremente — áudio e legendas são independentes, em qualquer modo",
     "audioLabel": "Áudio",
     "audioNone": "Original (sem dublagem)",
@@ -452,5 +455,25 @@
     "voicesLib": "Da biblioteca: {{n}} voz(es)",
     "subs": "Legendas",
     "advanced": "Mais opções"
+  },
+  "casting": {
+    "tab": "Personagens",
+    "tabHint": "Elenco de personagens — rostos, vozes e notas de fala",
+    "title": "Elenco de personagens",
+    "count": "{{n}} personagem(ns)",
+    "hint": "Personagens detectados no vídeo. Dê a cada um um nome, uma nota de fala (enviada ao tradutor) e uma voz de dublagem, depois aplique o elenco. Voz vazia = clonar do vídeo.",
+    "apply": "Aplicar elenco",
+    "applied": "Aplicado",
+    "namePlaceholder": "Nome do personagem",
+    "lines": "{{n}} fala(s)",
+    "speech": "Estilo de fala",
+    "speechPlaceholder": "ex. rude e sarcástico, fala rápido, idoso",
+    "voice": "Voz de dublagem",
+    "voiceClone": "Clonar do vídeo",
+    "gender": {
+      "male": "Masculino",
+      "female": "Feminino",
+      "unknown": "—"
+    }
   }
 }

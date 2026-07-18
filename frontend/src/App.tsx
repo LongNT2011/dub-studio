@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { Upload, Languages, AudioLines, Sparkles, ArrowRight, ShieldCheck, Download, Loader2, Trash2, Plus, Captions, Columns2, FolderDown, ExternalLink, X, Undo2, Redo2, Settings, Eye, EyeOff, Play, Pause, RotateCw, RefreshCw, Square, Droplet, Check, HelpCircle, Copy, Star, Music, Move, Minimize2, FileText, Users, Mic2, AlignLeft, AlignCenter, AlignRight, ChevronFirst, ChevronLast, ArrowLeftToLine, ArrowRightToLine, ChevronDown, ScrollText, Clock, Keyboard } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useFloatable, dockSlot } from "./lib/useFloatable";
-import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent, type ProjectSummary } from "./lib/api";
+import { api, type Project, type Capabilities, type SetupStatus, type SetupComponent, type ProjectSummary, type Character } from "./lib/api";
 import { LANGS, DUB_LANGS, setLang, type Lang } from "./lib/i18n";
 import { useStore } from "./store";
 import PreviewCanvas from "./components/PreviewCanvas";
@@ -671,6 +671,10 @@ function DropZone() {
   const [subs, setSubs] = useState<"none" | "transcribe" | "translate">("translate");
   const [burn, setBurn] = useState(true);
   const [detectText, setDetectText] = useState(false);                          // OCR-детекция вшитого текста (блюр/локализация титров). Дорогая на 4K -> ПО УМОЛЧАНИЮ ВЫКЛ (юзеры жаловались, что дубляж без сабов всё равно сканирует кадры); кто хочет блюр вшитых субтитров — включает галочкой.
+  // Кастинг персонажей (#115): доп. проход по кадрам (детект лиц + эмбеддинги + active-speaker) -> база
+  // персонажей с аватарами/голосами. Опционально, дорого на длинном видео -> ПО УМОЛЧАНИЮ ВЫКЛ. Персист.
+  const [castingOn, setCastingOn] = useState<boolean>(() => localStorage.getItem("dub-casting") === "1");
+  const setCastingSaved = (v: boolean) => { setCastingOn(v); localStorage.setItem("dub-casting", v ? "1" : "0"); };
   const [funnyOn, setFunnyOn] = useState(false);
   const [funny, setFunny] = useState("");                                       // Gemma rewrite instruction (тема ремикса)
   // Громкость оригинала под переводом (voiceover), стартовый выбор -> применяется ко всем создаваемым проектам.
@@ -754,6 +758,9 @@ function DropZone() {
       if (wantTranslate) steps.push("translating");
       if (wantVoice) steps.push("voicing");
       if (!audioOnly && detectText) steps.push("locating");
+      // #115: кастинг гоняем только когда галка реально видна на старте (showCasting = !audioOnly && isVoiced),
+      // иначе персист castingOn=1 из прошлого дубляжа гнал бы детект лиц впустую в nodub/subtitles/transcribe.
+      if (!audioOnly && wantVoice && castingOn) steps.push("casting");   // доп. проход по кадрам — детект персонажей
       // «Собираем видео» — только когда run() реально гонит рендер (dub/voiceover); в остальных
       // режимах сборка происходит позже на Экспорте, и шаг висел бы серым навсегда (ревью).
       if (wantVoice) steps.push("assembling");
@@ -777,7 +784,10 @@ function DropZone() {
       // «Вжигать» для transcribe скрыт, поэтому форсируем burn=true, не полагаясь на его прежнее значение.
       // Аудио-режим: субтитры/бёрн/OCR не нужны (нет видео) -> off.
       const eBurn = audioOnly ? false : audio === "transcribe" ? true : burn;
-      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated, trStyleText);
+      // #115: кастинг только при видео-дубляже (как showCasting на старте); иначе персист castingOn=1
+      // ушёл бы с analyze в nodub/subtitles/transcribe и бэк впустую гонял бы детект лиц.
+      const effCasting = !audioOnly && (audio === "dub" || audio === "voiceover") && castingOn;
+      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated, trStyleText, effCasting);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       if (audio === "voiceover") await api.patch(project_id, { op: "voiceover_gain", gain_db: voGain });   // громкость оригинала со старта -> рендер ниже подхватит
       // Сохранить оригинальную дорожку (#113): 2-я аудиодорожка при mux рендера. Только dub/voiceover, не аудио-режим.
@@ -970,9 +980,10 @@ function DropZone() {
             const showTrStyle = audio === "dub" || audio === "voiceover" || (subs === "translate" && audio !== "transcribe");
             const showKeepOrig = isVoiced && !audioOnly;
             const showDetect = showSubs;
+            const showCasting = !audioOnly && isVoiced;   // #115: кастинг имеет смысл только при дубляже видео
             const showFunny = isVoiced;
             const showVoGain = audio === "voiceover";
-            const showAdvanced = showTrStyle || showKeepOrig || showDetect || showFunny || showVoGain;
+            const showAdvanced = showTrStyle || showKeepOrig || showDetect || showCasting || showFunny || showVoGain;
             return (
               <>
                 {/* ГОЛОСА (#114): клон из видео (дефолт) или слоты из библиотеки. */}
@@ -1061,6 +1072,14 @@ function DropZone() {
                         <span title={t("comp.detectHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
                       </label>
                     )}
+                    {/* КАСТИНГ ПЕРСОНАЖЕЙ (#115): доп. проход по кадрам -> база персонажей (аватар/голос). Опц., дефолт ВЫКЛ. */}
+                    {showCasting && (
+                      <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit">
+                        <input type="checkbox" checked={castingOn} onChange={(e) => setCastingSaved(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
+                        {t("comp.casting")}
+                        <span title={t("comp.castingHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
+                      </label>
+                    )}
                     {/* ШУТОЧНЫЙ РЕМИКС — сочетается с дубляжом/закадром. */}
                     {showFunny && (
                       <>
@@ -1121,6 +1140,7 @@ const ANALYZE_STEPS: { key: string; stages: string[] }[] = [
   // «Находим текст на экране» = ТОЛЬКО OCR-стадии: юзер с выключенной детекцией не должен видеть этот
   // шаг вовсе (жалоба). Сборка выходного файла (build/burn/mux) — отдельный честный шаг.
   { key: "locating",    stages: ["ocr_detect", "translate_titles", "translate_tagline"] },
+  { key: "casting",     stages: ["cast_detect", "cast_embed", "cast_speaker"] },   // #115: лица (SCRFD) + эмбеддинги (LVFace) + active-speaker (LR-ASD)
   { key: "assembling",  stages: ["build", "burn", "mux"] },
 ];
 // стадия -> переведённая метка шага (бэкенд шлёт детальный msg по-русски; в UI показываем локализованный
@@ -1420,6 +1440,129 @@ function AutoGrowTextarea(props: React.TextareaHTMLAttributes<HTMLTextAreaElemen
   return <textarea ref={ref} rows={1} {...props} />;
 }
 
+// Кастинг персонажей (#115): Кинопоиск-style сетка карточек. Аватар (кадр из видео) сверху, поля снизу:
+// имя, пол (бейдж), «характер речи» (уходит в Гемму как speech_note), голос дубляжа (селект из библиотеки),
+// счётчик реплик. Правки локальные -> «Применить кастинг» POST /casting. База актёров переживает язык/проект.
+function CastingPanel({ pid, characters, voices, onChange }: {
+  pid: string; characters: Character[]; voices: string[]; onChange: (c: Character[]) => void;
+}) {
+  const { t } = useTranslation();
+  // Черновик правок: имя / заметка о речи / голос — редактируются локально, коммит одной кнопкой.
+  const [draft, setDraft] = useState<Record<string, { name: string; speech_note: string; voice: string | null }>>(
+    () => Object.fromEntries(characters.map((c) => [c.id, { name: c.name, speech_note: "", voice: c.voice }])),
+  );
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  // Аватарки без кадра (sample_frame_url=null, напр. закадровый) или с битой ссылкой -> заглушка-инициал.
+  const [imgFail, setImgFail] = useState<Record<string, boolean>>({});
+  // #115/#6: characters могут обновиться извне (после apply() cross-episode-матчинг возвращает ДРУГИЕ id;
+  // либо ресинк из стора). Ре-мёржим черновик: правки по существующим id сохраняем, новые id добавляем из c.
+  // imgFail чистим только для исчезнувших id (для новых стартует false -> покажем аватар).
+  useEffect(() => {
+    setDraft((d) => {
+      const next: typeof d = {};
+      for (const c of characters) next[c.id] = d[c.id] ?? { name: c.name, speech_note: "", voice: c.voice };
+      return next;
+    });
+    setImgFail((m) => {
+      const next: typeof m = {};
+      for (const c of characters) if (m[c.id]) next[c.id] = true;
+      return next;
+    });
+  }, [characters]);
+  const setField = (id: string, patch: Partial<{ name: string; speech_note: string; voice: string | null }>) => {
+    setDraft((d) => ({ ...d, [id]: { ...d[id], ...patch } })); setSaved(false);
+  };
+  const voiceOpts = voices.map((v) => ({ value: v, label: prettyVoice(v), search: v }));
+  // Инициал имени (или «?») для заглушки-аватара; цвет из палитры спикеров (как кружки в TranscriptView).
+  const initialOf = (name: string) => (name.trim()[0] ?? "?").toUpperCase();
+  const avatarColor = (i: number) => SPK_PALETTE[i % SPK_PALETTE.length];
+  async function apply() {
+    setSaving(true);
+    try {
+      const payload = characters.map((c) => ({
+        id: c.id, name: draft[c.id]?.name ?? c.name,
+        speech_note: draft[c.id]?.speech_note ?? "", dub_voice: draft[c.id]?.voice ?? null,
+      }));
+      const r = await api.setCasting(pid, payload);
+      onChange(r.characters);
+      setSaved(true); playSfx("success");
+    } catch (e) { useStore.getState().pushActivity(String(e), "error"); playSfx("error"); }
+    finally { setSaving(false); }
+  }
+  return (
+    <div className="w-full h-full flex flex-col rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)] overflow-hidden">
+      <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-[var(--color-border)]">
+        <Users size={16} className="text-[var(--color-accent)]" />
+        <span className="text-[13px] font-semibold">{t("casting.title")}</span>
+        <span className="text-[11px] text-[var(--color-muted)]">{t("casting.count", { n: characters.length })}</span>
+        <div className="flex-1" />
+        <button onClick={apply} disabled={saving}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[12px] font-semibold disabled:opacity-60 hover:brightness-105 transition">
+          {saving ? <Loader2 size={14} className="animate-spin" /> : saved ? <Check size={14} /> : <Users size={14} />}
+          {saved ? t("casting.applied") : t("casting.apply")}
+        </button>
+      </div>
+      <div data-kb-scroll className="flex-1 min-h-0 overflow-y-auto p-4">
+        <p className="text-[12px] text-[var(--color-muted)] leading-snug mb-3 max-w-2xl">{t("casting.hint")}</p>
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
+          {characters.map((c, i) => {
+            const d = draft[c.id] ?? { name: c.name, speech_note: "", voice: c.voice };
+            // Есть кадр (URL не null) и он не сломался -> картинка; иначе заглушка-инициал.
+            const showImg = !!c.sample_frame_url && !imgFail[c.id];
+            return (
+              <div key={c.id} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] overflow-hidden flex flex-col">
+                {/* Аватар: кадр из видео (2:3 постер как на Кинопоиске). Нет кадра/битая ссылка -> инициал. */}
+                <div className="relative aspect-[2/3] bg-[var(--color-surface)] overflow-hidden">
+                  {showImg ? (
+                    <img src={api.castingAvatarUrl(pid, c.id)} alt={d.name}
+                      className="w-full h-full object-cover" loading="lazy"
+                      onError={() => setImgFail((m) => ({ ...m, [c.id]: true }))} />
+                  ) : (
+                    <div className="w-full h-full grid place-items-center"
+                      style={{ background: `color-mix(in oklab, ${avatarColor(i)} 22%, var(--color-surface))` }}>
+                      <span className="text-[40px] font-bold leading-none" style={{ color: avatarColor(i) }}>{initialOf(d.name)}</span>
+                    </div>
+                  )}
+                  {/* Пол — бейдж поверх аватара. */}
+                  {c.gender && (
+                    <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-[color-mix(in_oklab,var(--color-surface)_75%,transparent)] backdrop-blur text-[var(--color-text)]">
+                      {t(`casting.gender.${c.gender}`, c.gender)}
+                    </span>
+                  )}
+                </div>
+                <div className="p-2.5 flex flex-col gap-2">
+                  {/* Имя персонажа. */}
+                  <input value={d.name} onChange={(e) => setField(c.id, { name: e.target.value })}
+                    placeholder={t("casting.namePlaceholder")}
+                    className="w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg px-2 py-1.5 text-[13px] font-semibold focus:border-[var(--color-accent)] focus:outline-none" />
+                  {/* Кол-во реплик. */}
+                  <div className="flex items-center gap-1.5 text-[11px] text-[var(--color-muted)]">
+                    <FileText size={12} />{t("casting.lines", { n: c.line_count })}
+                  </div>
+                  {/* Характер речи — уходит в Гемму. */}
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("casting.speech")}</div>
+                    <textarea value={d.speech_note} onChange={(e) => setField(c.id, { speech_note: e.target.value })}
+                      rows={2} placeholder={t("casting.speechPlaceholder")}
+                      className="w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg px-2 py-1.5 text-[12px] focus:border-[var(--color-accent)] focus:outline-none resize-none" />
+                  </div>
+                  {/* Голос дубляжа — из библиотеки. */}
+                  <div>
+                    <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("casting.voice")}</div>
+                    <Combobox value={d.voice ?? ""} onChange={(v) => setField(c.id, { voice: v || null })} options={voiceOpts}
+                      placeholder={t("casting.voiceClone")} noResults={t("voice.noMatch")} allowClear size="sm" className="w-full" />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Editor() {
   const { t, i18n } = useTranslation();
   const p = useStore((s) => s.project) as Project;
@@ -1490,6 +1633,12 @@ function Editor() {
   useEffect(() => { api.presets().then((r) => setPresets(r.presets)).catch(() => {}); }, []);   // caption look presets
   const [sizeDraft, setSizeDraft] = useState<number | null>(null);   // live size while dragging (commit on release)
   const [lane, setLane] = useState<"subs" | "blur" | "titles">("subs"); // left lane: which object type to edit
+  // Кастинг персонажей (#115): вкладка «Персонажи» в редакторе. Список тянем при монтировании; если бэк
+  // вернул персонажей (casting включался на анализе) — показываем вкладку-переключатель в тулбаре.
+  const [characters, setCharacters] = useState<Character[] | null>(null);
+  const [castView, setCastView] = useState(false);   // главная область: сетка карточек вместо превью
+  useEffect(() => { api.casting(pid).then((r) => setCharacters(r.characters)).catch(() => setCharacters([])); }, [pid]);
+  const hasCasting = !!characters && characters.length > 0;
   const [blurAll, setBlurAll] = useState(false);                      // blur: only active-on-frame vs all zones
   const [compare, setCompare] = useState(false);                      // before/after split preview (Topaz-style)
   const [play, setPlay] = useState(false);                            // dub playback: play TTS audio + advance preview frames + playhead
@@ -2005,6 +2154,15 @@ function Editor() {
               <Languages size={13} /><span className="hidden md:inline">{t("multilang.backToExport")}</span>
             </button>
           )}
+          {/* КАСТИНГ (#115): вкладка «Персонажи» — видна, только если casting включался и персонажи найдены.
+              Переключает главную область: сетка карточек ↔ превью. */}
+          {hasCasting && (
+            <button onClick={() => setCastView((v) => !v)} title={t("casting.tabHint")}
+              className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[12px] transition-colors ${castView ? "bg-[var(--color-accent)] text-[var(--color-on-accent)] border-transparent font-semibold" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)]"}`}>
+              <Users size={13} /><span className="hidden md:inline">{t("casting.tab")}</span>
+              <span className="mono text-[10px] opacity-70">{characters!.length}</span>
+            </button>
+          )}
           {!audioOnly && (
           <div className="flex items-center gap-1.5 shrink-0" title={t("comp.hint")}>
             <select value={p.subs.mode} onChange={(e) => branch("subs_content", { value: e.target.value })}
@@ -2069,6 +2227,15 @@ function Editor() {
         </div>
         <div ref={previewRef} className="fs-preview flex-1 min-h-0 p-3 overflow-hidden flex flex-col gap-2">
           <div className="flex-1 min-h-0">
+          {/* #122/#115: НЕ размонтируем CastingPanel при переключении на превью — прячем через CSS, чтобы
+              локальный черновик (имя/речь/голос) и imgFail пережили тоггл вкладки. Превью — в соседнем
+              контейнере, скрытом при castView. Плеер дубляжа — отдельный <audio> в футере, display:none его не рвёт. */}
+          {hasCasting && (
+            <div className={castView ? "w-full h-full" : "hidden"}>
+              <CastingPanel pid={pid} characters={characters!} voices={voiceList} onChange={setCharacters} />
+            </div>
+          )}
+          <div className={hasCasting && castView ? "hidden" : "w-full h-full"}>
           {audioOnly ? (
             <div className="w-full h-full grid place-items-center rounded-xl bg-[var(--color-surface)] border border-[var(--color-border)]">
               <div className="text-center px-6">
@@ -2086,6 +2253,7 @@ function Editor() {
             <PreviewCanvas pid={pid} project={p} scrub={scrub} rendered={rendered} lane={lane} playing={play}
               onChanged={(fresh) => setProject(fresh)} />
           )}
+          </div>
           </div>
           {/* Слайдер перемотки под превью: явный прогресс + время. Клик/драг = seek (единый скраб с вейформой). */}
           {!audioOnly && (
@@ -3077,10 +3245,52 @@ function MultiLangView() {
 const SPK_PALETTE = ["#7fb3ff", "#f79bd3", "#c6f24e", "#ffb454"];   // до 4 спикеров
 
 function TranscriptView() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const p = useStore((s) => s.project) as Project;
   const pid = useStore((s) => s.pid) as string;
   const setStage = useStore((s) => s.setStage);                     // выход на главный экран (кнопка «Назад»)
+  const setProject = useStore((s) => s.setProject);
+  const setProgress = useStore((s) => s.setProgress);
+  const setJobSteps = useStore((s) => s.setJobSteps);               // #122/#3: шаги степпера нового прогона
+  const setAudioOnly = useStore((s) => s.setAudioOnly);            // «analyzing» знает видео/аудио вход
+  const [, setPortalTick] = useState(0);                            // 2-й рендер: слот #editor-modes-slot уже в DOM (как forcePortal в Editor)
+  useEffect(() => { setPortalTick(1); }, []);
+  // Переключатель режимов из транскрипта (реквест Стаса #122): симметрично с Editor. transcribe НЕ переводит
+  // (tgt=исходный текст) -> переход в переводящий режим = ПОЛНЫЙ ре-анализ в новом режиме (не op-патч: иначе
+  // дубляж заговорит непереведённым текстом). После анализа projMode сменится -> отрисуется Editor.
+  const TR_MODES = [["subtitles", Captions], ["dub", AudioLines], ["voiceover", Mic2], ["funny", Sparkles], ["transcribe", FileText]] as const;
+  // #122/#4: свой гейт ре-анализа. Старый `busy` — стейт СОЗДАНИЯ ГОЛОСОВ, switchMode его не ставил ->
+  // двойной клик по разным режимам запускал 2 analyze. reanalyzing блокирует и дизейблит кнопки портала.
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const trAudioOnly = !((p.meta.width || 0) > 0 && (p.meta.height || 0) > 0);   // транскрипт может быть аудио-входом
+  async function switchMode(k: string) {
+    if (k === "transcribe" || reanalyzing) return;                  // уже в транскрипте / ре-анализ уже идёт
+    setReanalyzing(true);
+    const mode = k === "subtitles" ? "nodub" : k === "funny" ? "dub" : k;   // dub|voiceover|nodub
+    // #122/#5: транскрипт НЕ переводит -> p.tgt_lang == язык оригинала. Слать его в переводящий режим = «перевод»
+    // на исходный язык (no-op) -> дубляж заговорит исходным текстом. В lib/api Project нет src_lang (ни на проекте,
+    // ни на сегментах), сравнить не с чем -> берём дефолтный целевой = язык UI (тот же дефолт, что на стартовом
+    // экране: tgt = i18n.language || "ru"). Для nodub/subtitles субтитры-перевод тоже нужен валидный tgt.
+    const tgt = (i18n.language as string) || p.tgt_lang || "ru";
+    // #122/#3: шаги нового режима + сброс прогресса ДО analyze (иначе «analyzing» показывает шаги прошлого прогона).
+    // Логика шагов — по образцу run(): subs здесь всегда translate, casting/detect выкл.
+    {
+      const wantVoice = mode === "dub" || mode === "voiceover";
+      const steps = ["download", "separating", "diarizing", "recognizing", "translating"];   // subs=translate -> перевод всегда
+      if (wantVoice) { steps.push("voicing"); steps.push("assembling"); }
+      setJobSteps(steps);
+    }
+    setAudioOnly(trAudioOnly);
+    setProgress("", "", null);
+    setStage("analyzing");
+    try {
+      const { job_id } = await api.analyze(pid, tgt, mode, "auto", "translate", "", true, false, false, p.audio.translate_style || "", false);
+      await api.watchJob(job_id, (e) => { if (e.type === "progress") setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
+      setProject(await api.getProject(pid));
+      setStage("editor");
+    } catch { setStage("editor"); }
+    finally { setReanalyzing(false); }
+  }
   const [busy, setBusy] = useState<string | null>(null);            // спикер в работе, либо "__all__"
   const [made, setMade] = useState<Record<string, string>>({});     // спикер -> имя созданного голоса
   const [scrub, setScrub] = useState(() => initialScrub() || 0);      // ?t=SEC — deep-link на кадр транскрипта
@@ -3150,6 +3360,15 @@ function TranscriptView() {
 
   return (
     <main className="flex-1 min-h-0 overflow-hidden grid grid-cols-[1.4fr_1fr] gap-3 p-3">
+      {(() => { const el = document.getElementById("editor-modes-slot"); return el ? createPortal(
+        <div className="inline-flex rounded-lg bg-[var(--color-surface-2)] p-0.5 border border-[var(--color-border)] shrink-0">
+          {TR_MODES.map(([k, Ic]) => (
+            <button key={k} onClick={() => switchMode(k)} title={t(`mode.${k}_desc`)} disabled={reanalyzing}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[13px] transition-colors disabled:opacity-50 disabled:cursor-default ${k === "transcribe" ? "bg-[var(--color-accent)] text-[var(--color-on-accent)] font-semibold" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+              <Ic size={15} /> <span className="hidden xl:inline">{t(`mode.${k}`)}</span>
+            </button>
+          ))}
+        </div>, el) : null; })()}
       <div className="min-h-0 flex flex-col rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="px-3 py-2 flex items-center justify-between border-b border-[var(--color-border)]">
           <span className="text-[13px] font-medium flex items-center gap-2 min-w-0">

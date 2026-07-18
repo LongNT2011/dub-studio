@@ -35,6 +35,7 @@
     "voicing": "Generating voiceover",
     "style": "Detecting caption style",
     "locating": "Locating on-screen text",
+    "casting": "Casting characters",
     "assembling": "Assembling video",
     "cancel": "Cancel"
   },
@@ -385,6 +386,8 @@
     "asrSwitched": "Parakeet doesn't know {{lang}} — ASR switched to Whisper (99 languages).",
     "detect": "Detect on-screen text",
     "detectHint": "OCR finds baked-in captions to blur & localize. Slow on 4K — turn off if you don't need it (e.g. dubbing without subtitles).",
+    "casting": "Cast characters",
+    "castingHint": "Optional. Adds a pass over the frames — detects faces, matches them to speakers, and builds a character cast (avatar, name, voice) you can edit after analysis. Slower on long videos.",
     "hint": "Compose freely — audio and subtitles are independent, in any mode",
     "audioLabel": "Audio",
     "audioNone": "Original (no dub)",
@@ -452,5 +455,25 @@
     "voicesLib": "From library: {{n}} voice(s)",
     "subs": "Subtitles",
     "advanced": "More options"
+  },
+  "casting": {
+    "tab": "Characters",
+    "tabHint": "Character cast — faces, voices and speech notes",
+    "title": "Character casting",
+    "count": "{{n}} character(s)",
+    "hint": "Detected characters from the video. Give each a name, a speech note (sent to the translator), and a dubbing voice, then apply the cast. Empty voice = clone from the video.",
+    "apply": "Apply casting",
+    "applied": "Applied",
+    "namePlaceholder": "Character name",
+    "lines": "{{n}} line(s)",
+    "speech": "Speech style",
+    "speechPlaceholder": "e.g. gruff and sarcastic, speaks fast, elderly",
+    "voice": "Dubbing voice",
+    "voiceClone": "Clone from video",
+    "gender": {
+      "male": "Male",
+      "female": "Female",
+      "unknown": "—"
+    }
   }
 }

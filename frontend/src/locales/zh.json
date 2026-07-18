@@ -35,6 +35,7 @@
     "voicing": "生成配音",
     "style": "检测字幕样式",
     "locating": "定位画面文字",
+    "casting": "角色选配",
     "assembling": "合成视频",
     "cancel": "取消"
   },
@@ -385,6 +386,8 @@
     "asrSwitched": "Parakeet 不支持 {{lang}} — ASR 已切换为 Whisper（99 种语言）。",
     "detect": "检测画面文字",
     "detectHint": "OCR 查找烧录字幕以模糊和本地化。4K 上较慢——不需要就关闭（例如无字幕配音）。",
+    "casting": "角色选配",
+    "castingHint": "可选。额外对画面进行一次分析——检测人脸、将其与说话人匹配，并生成可在分析后编辑的角色阵容（头像、姓名、配音）。长视频会更慢。",
     "hint": "自由组合 —— 音频与字幕相互独立，任意模式",
     "audioLabel": "音频",
     "audioNone": "原声（不配音）",
@@ -452,5 +455,25 @@
     "voicesLib": "来自音色库：{{n}} 个音色",
     "subs": "字幕",
     "advanced": "更多选项"
+  },
+  "casting": {
+    "tab": "角色",
+    "tabHint": "角色阵容——面孔、配音与语气说明",
+    "title": "角色选配",
+    "count": "{{n}} 个角色",
+    "hint": "从视频中检测到的角色。为每个角色设置姓名、语气说明（发送给翻译）和配音，然后应用选配。留空配音 = 从视频克隆。",
+    "apply": "应用选配",
+    "applied": "已应用",
+    "namePlaceholder": "角色名称",
+    "lines": "{{n}} 句台词",
+    "speech": "语气风格",
+    "speechPlaceholder": "例如 粗犷而讽刺、语速快、年长",
+    "voice": "配音",
+    "voiceClone": "从视频克隆",
+    "gender": {
+      "male": "男",
+      "female": "女",
+      "unknown": "—"
+    }
   }
 }

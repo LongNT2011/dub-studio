@@ -454,6 +454,11 @@ pub struct Project {
     /// {"extract":"<blake3-hex>", "diarize":"…", …}.
     #[serde(default)]
     pub stage_ckpts: Map<String, Value>,
+    /// Кастинг персонажей (#115): при true analyze сканирует кадры (SCRFD+LVFace), кластеризует лица в
+    /// персонажей и связывает их с голосами-спикерами (casting.json). ВЫКЛ по умолчанию — при false НИ
+    /// ОДНОГО кадра не сканируется, ноль оверхеда (как detect_text/OCR). Аддитивно, не нарушает extra=allow.
+    #[serde(default)]
+    pub casting_enabled: bool,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -479,6 +484,7 @@ impl Default for Project {
             work_dir: None,
             raw_ctx: Map::new(),
             stage_ckpts: Map::new(),
+            casting_enabled: false,
             extra: Extra::new(),
         }
     }
