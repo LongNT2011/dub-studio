@@ -230,8 +230,15 @@ pub fn run(
     // «Сохранить» отдаёт mkv. Успешный mkv-mux -> ремукс лёгкого mp4; иначе mp4 уже основной выход.
     let mp4_companion = paths.output.with_extension("mp4");
     if mkv && muxed {
-        if let Err(e) = media::remux_playable_mp4(&out_path, &mp4_companion) {
-            emit(progress, "mux", &format!("mp4-компаньон не собран ({e}) — плеер потянет mkv (VLC ок)"));
+        match media::remux_playable_mp4(&out_path, &mp4_companion) {
+            Ok(()) => {} // валидный playable-компаньон рядом с output.mkv
+            Err(e) => {
+                // Ремукс упал -> компаньон битый/частичный ИЛИ остался stale mp4 от прошлого прогона.
+                // Обязательно удалить (find_output отдаёт mp4 приоритетнее mkv -> иначе плеер получит
+                // битьё/старьё вместо свежего mkv, регресс #116 находки [0][1]). VLC играет mkv напрямую.
+                let _ = std::fs::remove_file(&mp4_companion);
+                emit(progress, "mux", &format!("mp4-компаньон не собран ({e}) — плеер откроет mkv (VLC ок)"));
+            }
         }
     } else {
         // не-mkv выход: прибрать stale output.mkv от прошлого экспорта (find_output отдаёт mkv приоритетнее).
@@ -929,9 +936,10 @@ fn build_dub(
                     }
                     let wav = AudiocppEngine::encode_wav(&smp, r, 1);
                     if std::fs::write(raw, &wav).is_ok() {
-                        // пере-fit в тот же слот и подмена в placed (позиция at не меняется, длит. обновляем)
-                        let cap = if *room < 1.5 { paths.max_stretch.max(1.30) } else { paths.max_stretch };
-                        if let Ok((nf, nd)) = fit_to_slot(raw, *room, fitp, cap) {
+                        // пере-fit в тот же слот и подмена в placed (позиция at не меняется, длит. обновляем).
+                        // Кап = потолок дрейфа (2.0): основной проход мог дрейф-капнуть этот сегмент выше
+                        // seg_cap; пересинтез с seg_cap дал бы более ДЛИННЫЙ дубль и порвал синк (#116 [6]).
+                        if let Ok((nf, nd)) = fit_to_slot(raw, *room, fitp, 2.0) {
                             placed[*pidx].1 = nf;
                             placed[*pidx].2 = nd;
                             fixed = true;
@@ -960,8 +968,8 @@ fn build_dub(
                     if s.end - s.start <= 2.5
                         && media::trim(&vocals, raw, s.start, s.end, 24_000).is_ok()
                     {
-                        let cap = if *room < 1.5 { paths.max_stretch.max(1.30) } else { paths.max_stretch };
-                        if let Ok((nf, nd)) = fit_to_slot(raw, *room, fitp, cap) {
+                        // кап 2.0 (потолок дрейфа): keep-оригинал укладываем в слот так же плотно (#116 [6]).
+                        if let Ok((nf, nd)) = fit_to_slot(raw, *room, fitp, 2.0) {
                             placed[*pidx].1 = nf;
                             placed[*pidx].2 = nd;
                             kept += 1;
