@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.egg-info/
 workspace/
+casting_library/
 node_modules/
 dist/
 test_e2e_*
