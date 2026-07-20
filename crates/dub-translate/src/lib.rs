@@ -12,7 +12,7 @@ mod vision;
 pub use ctx::{run as ctx_run, CtxConfig, CtxResult};
 pub use seg::Seg;
 pub use translate::{rewrite as flat_rewrite, run as flat_run};
-pub use vision::{analyze_layout, is_counter, scene_context, Layout, FONTS};
+pub use vision::{analyze_layout, classify_content_type, is_counter, scene_context, Layout, FONTS};
 
 use thiserror::Error;
 

@@ -676,7 +676,7 @@ function DropZone() {
   const [castingRef, setCastingRef] = useState<string>(() => localStorage.getItem("dub-casting-ref") ?? "");
   const setCastingRefSaved = (v: string) => { setCastingRef(v); localStorage.setItem("dub-casting-ref", v); };
   // Тип контента кастинга (#115): real (SCRFD+LVFace) | anime (детектор рисованных лиц + CCIP). Персист.
-  const [contentType, setContentType] = useState<string>(() => localStorage.getItem("dub-content-type") ?? "real");
+  const [contentType, setContentType] = useState<string>(() => localStorage.getItem("dub-content-type") ?? "auto");
   const setContentTypeSaved = (v: string) => { setContentType(v); localStorage.setItem("dub-content-type", v); };
   // Список профилей библиотеки — грузим лениво, когда галка кастинга включена (не засорять UI при выкл.).
   const [castLib, setCastLib] = useState<{ slug: string; name: string; char_count: number }[]>([]);
@@ -1094,7 +1094,7 @@ function DropZone() {
                         лиц + CCIP). Виден только при вкл. кастинге. Сегмент-контрол из двух кнопок. */}
                     {showCasting && castingOn && (
                       <div className="mt-1.5 inline-flex rounded-lg border border-[var(--color-border)] overflow-hidden text-[11px] w-fit">
-                        {([["real", t("casting.contentReal")], ["anime", t("casting.contentAnime")]] as const).map(([v, lbl]) => (
+                        {([["auto", t("casting.contentAuto")], ["real", t("casting.contentReal")], ["anime", t("casting.contentAnime")]] as const).map(([v, lbl]) => (
                           <button key={v} type="button" onClick={() => setContentTypeSaved(v)}
                             className={`px-2.5 py-1 transition ${contentType === v ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
                             {lbl}

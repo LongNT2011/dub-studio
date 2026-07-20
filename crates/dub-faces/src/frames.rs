@@ -112,8 +112,13 @@ pub fn sample_frames(video: &Path, out_dir: &Path, fps: f64) -> Result<Vec<Sampl
     Ok(frames)
 }
 
-/// Резкость кропа лица (variance of Laplacian по grayscale) — метрика чёткости для выбора аватарки.
+/// Резкость кропа лица (variance of Laplacian по grayscale) — метрика ФОКУСА для выбора аватарки.
 /// bbox — в координатах кадра; клэмпится к границам. Пустой/вырожденный кроп -> 0.
+///
+/// ВАЖНО: кроп НОРМАЛИЗУЕТСЯ к фиксированному 128×128 ДО Лапласа. Иначе variance растёт с размером лица
+/// (у крупного расфокус-лица было бы больше, чем у мелкого резкого) — и большое мыльное лицо побеждало
+/// резкое поменьше (баг мыльных аватаров). После нормализации это истинная мера фокуса, сравнимая между
+/// лицами любого размера.
 pub fn crop_sharpness(img: &RgbImage, bbox: (f32, f32, f32, f32)) -> f32 {
     let (iw, ih) = (img.width() as i32, img.height() as i32);
     let x1 = bbox.0.max(0.0) as i32;
@@ -123,23 +128,25 @@ pub fn crop_sharpness(img: &RgbImage, bbox: (f32, f32, f32, f32)) -> f32 {
     if x2 - x1 < 3 || y2 - y1 < 3 {
         return 0.0;
     }
-    let w = (x2 - x1) as usize;
-    let h = (y2 - y1) as usize;
-    // grayscale
-    let mut g = vec![0.0f32; w * h];
+    // Кроп лица -> ресайз к NORM² (Triangle). Focus-мера считается на нормализованном кропе.
+    const NORM: u32 = 128;
+    let sub = image::imageops::crop_imm(img, x1 as u32, y1 as u32, (x2 - x1) as u32, (y2 - y1) as u32).to_image();
+    let g = image::imageops::resize(&sub, NORM, NORM, image::imageops::FilterType::Triangle);
+    let (w, h) = (NORM as usize, NORM as usize);
+    let mut gray = vec![0.0f32; w * h];
     for yy in 0..h {
         for xx in 0..w {
-            let p = img.get_pixel((x1 + xx as i32) as u32, (y1 + yy as i32) as u32);
-            g[yy * w + xx] = 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32;
+            let p = g.get_pixel(xx as u32, yy as u32);
+            gray[yy * w + xx] = 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32;
         }
     }
     // Лаплас 4-соседей, дисперсия отклика.
     let mut vals: Vec<f32> = Vec::with_capacity((w - 2) * (h - 2));
     for yy in 1..h - 1 {
         for xx in 1..w - 1 {
-            let c = g[yy * w + xx];
-            let lap = g[(yy - 1) * w + xx] + g[(yy + 1) * w + xx] + g[yy * w + xx - 1]
-                + g[yy * w + xx + 1]
+            let c = gray[yy * w + xx];
+            let lap = gray[(yy - 1) * w + xx] + gray[(yy + 1) * w + xx] + gray[yy * w + xx - 1]
+                + gray[yy * w + xx + 1]
                 - 4.0 * c;
             vals.push(lap);
         }

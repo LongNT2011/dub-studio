@@ -7,7 +7,7 @@
 
 use dub_core::{Brand, Project, SubStyle};
 use dub_llm::{ChatClient, LlamaServer, ServerOpts};
-use dub_translate::{ctx_run, CtxConfig, Seg};
+use dub_translate::{classify_content_type, ctx_run, CtxConfig, Seg};
 use serde_json::Value;
 
 use crate::analyze::{AnalyzeArgs, AnalyzePaths, Progress};
@@ -102,6 +102,17 @@ pub fn stage(
             return;
         }
     };
+
+    // Авто-детект типа контента для кастинга (#115): юзер выбрал «Авто» + кастинг включён -> классифицируем
+    // live-action vs анимация Gemma-vision (сервер уже поднят). Результат в проект; casting-стадия прочитает.
+    if args.casting && args.content_type == "auto" {
+        let tmp = paths.work_dir.join("ctype_frame.png");
+        let ct = classify_content_type(&client, &paths.input, &tmp, total, |m| {
+            emit(progress, "vision", m);
+        });
+        let _ = std::fs::remove_file(&tmp);
+        proj.audio.content_type = ct;
+    }
 
     // Seg-вью для dub-translate (text/speaker). speaker -> i64 (питон speaker=0 по умолчанию).
     let mut segs: Vec<Seg> = proj

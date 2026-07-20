@@ -470,6 +470,7 @@
     "speechPlaceholder": "ex. bourru et sarcastique, parle vite, âgé",
     "voice": "Voix de doublage",
     "voiceClone": "Cloner depuis la vidéo",
+    "contentAuto": "Auto",
     "contentReal": "Real faces",
     "contentAnime": "Cartoon / anime",
     "gender": {

@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use dub_core::Project;
+use dub_core::{Project, Segment};
 use dub_faces::{
     crop_sharpness, frontality, load_casting, save_casting, save_face_crop, AnimeFaceDetector,
     Casting, CcipEmbedder, Character, Face, FacesModels, LvFace, Scrfd, CASTING_VERSION,
@@ -34,7 +34,13 @@ fn emit(progress: &Progress, stage: &str, msg: &str) {
 }
 
 /// Макс. число кадров-кандидатов на персонажа для поиска аватара (из его говорящих сегментов).
-const MAX_AVATAR_CAND: usize = 14;
+const MAX_AVATAR_CAND: usize = 24;
+
+/// Мин. сторона bbox лица (px) для «чёткого» аватара: мельче — кроп мылится при показе на ~250px.
+/// Предпочитаем лица >= этого; мельче берём лишь если крупнее не нашлось. Env DUB_FACES_MIN_FACE_PX.
+fn min_face_px() -> f32 {
+    std::env::var("DUB_FACES_MIN_FACE_PX").ok().and_then(|s| s.trim().parse().ok()).unwrap_or(96.0)
+}
 
 /// Порог косинуса голосовой кластеризации сегментов (WeSpeaker). Выше -> больше персонажей (строже
 /// различает голоса). Env DUB_VOICE_CLUSTER_COS. 0 или отсутствие модели -> без переразметки.
@@ -111,13 +117,18 @@ fn ahc_average(embs: &[Vec<f32>], threshold: f32) -> Vec<usize> {
 /// персонажей больше Sortformer'а (слитых/пропущенных, напр. мужского) и сливает один голос из разных окон
 /// в одного. Возвращает КЛОН проекта с переразмеченными segment.speaker; None -> нет модели/вокала/1 кластер
 /// (оставляем Sortformer-разметку). Дорого (эмбеддинг на сегмент), но только при включённом кастинге.
-fn refine_speakers_by_voice(paths: &AnalyzePaths, proj: &Project, progress: &Progress) -> Option<Project> {
-    // Голосовая переразметка ВКЛючена по умолчанию (юзер хочет >4 персонажей): AHC average-linkage находит
-    // персонажей больше Sortformer (Avatar: 4->10, мужские найдены). На ОЧЕНЬ шумном/старом моно-аудио
-    // (Ghostbusters) кластеризация менее точна — тогда отключить DUB_VOICE_REDIARIZE=0. Порог
-    // DUB_VOICE_CLUSTER_COS (дефолт 0.3).
+/// Голосовая переразметка спикеров (#83/#115): Sortformer даёт ≤4 в окне, а персонажей больше —
+/// кластеризуем вокал по сегментам (WeSpeaker average-linkage) и ПЕРЕРАЗМЕЧАЕМ сами сегменты метками
+/// «v{k}» НА МЕСТЕ. Зовётся в пайплайне ПОСЛЕ ASR (до перевода/TTS) -> дубляж идёт по N голосам, счётчик
+/// реплик у персонажей верный, кастинг строится на тех же метках (0 реплик больше не бывает). Возвращает
+/// число кластеров (0 = не размечали: выключено env / нет модели / не дало больше персонажей, чем
+/// Sortformer). ВКЛ по умолчанию; opt-out DUB_VOICE_REDIARIZE=0. Порог DUB_VOICE_CLUSTER_COS.
+pub fn recluster_segments(paths: &AnalyzePaths, segments: &mut [Segment], progress: &Progress) -> usize {
     if std::env::var("DUB_VOICE_REDIARIZE").ok().as_deref() == Some("0") {
-        return None;
+        return 0;
+    }
+    if segments.len() < 2 {
+        return 0;
     }
     let vocals = {
         let clean = paths.work_dir.join("vocals16_clean.wav");
@@ -127,23 +138,23 @@ fn refine_speakers_by_voice(paths: &AnalyzePaths, proj: &Project, progress: &Pro
         } else if raw.is_file() {
             raw
         } else {
-            return None;
+            return 0;
         }
     };
     let onnx = std::env::var("DUB_FACES_WESPEAKER")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| dub_faces::wespeaker_path(&paths.models_root));
     if !onnx.is_file() {
-        return None;
+        return 0;
     }
-    // Кэш эмбеддингов (тюнинг порога без пере-эмбеддинга ~4мин): casting/vc_embs.json = {seg_count, idxs, embs}.
+    // Кэш эмбеддингов (тюнинг порога без пере-эмбеддинга): casting/vc_embs.json = {seg_count, idxs, embs}.
     let cache = paths.work_dir.join("casting").join("vc_embs.json");
     let mut idxs: Vec<usize> = Vec::new();
     let mut embs: Vec<Vec<f32>> = Vec::new();
     let cached = std::fs::read_to_string(&cache)
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .filter(|v| v.get("seg_count").and_then(|x| x.as_u64()) == Some(proj.segments.len() as u64));
+        .filter(|v| v.get("seg_count").and_then(|x| x.as_u64()) == Some(segments.len() as u64));
     if let Some(v) = cached {
         idxs = serde_json::from_value(v.get("idxs").cloned().unwrap_or_default()).unwrap_or_default();
         embs = serde_json::from_value(v.get("embs").cloned().unwrap_or_default()).unwrap_or_default();
@@ -152,9 +163,12 @@ fn refine_speakers_by_voice(paths: &AnalyzePaths, proj: &Project, progress: &Pro
         // Эмбеддим вокал каждого достаточно длинного сегмента.
         idxs.clear();
         embs.clear();
-        let mut embedder = dub_faces::VoiceEmbedder::load(&onnx).ok()?;
+        let mut embedder = match dub_faces::VoiceEmbedder::load(&onnx) {
+            Ok(e) => e,
+            Err(_) => return 0,
+        };
         let tmp = paths.work_dir.join("casting_vc.wav");
-        for (i, s) in proj.segments.iter().enumerate() {
+        for (i, s) in segments.iter().enumerate() {
             if (s.end - s.start) < VC_MIN_SEG_SEC {
                 continue;
             }
@@ -171,47 +185,64 @@ fn refine_speakers_by_voice(paths: &AnalyzePaths, proj: &Project, progress: &Pro
         let _ = std::fs::create_dir_all(cache.parent().unwrap_or(&paths.work_dir));
         let _ = std::fs::write(
             &cache,
-            serde_json::json!({ "seg_count": proj.segments.len(), "idxs": idxs, "embs": embs }).to_string(),
+            serde_json::json!({ "seg_count": segments.len(), "idxs": idxs, "embs": embs }).to_string(),
         );
     }
     if embs.len() < 2 {
-        return None;
+        return 0;
     }
-    let labels = ahc_average(&embs, voice_cluster_cos());
-    let k = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
-    let orig: std::collections::HashSet<&String> = proj.segments.iter().filter_map(|s| s.speaker.as_ref()).collect();
-    if k <= 1 || k <= orig.len() {
+    let max_chars: usize = std::env::var("DUB_VOICE_MAX_CHARS")
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .filter(|&n: &usize| n >= 2)
+        .unwrap_or(8);
+    let mut thr = voice_cluster_cos();
+    let mut labels = ahc_average(&embs, thr);
+    let mut k = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
+    // Кап на число персонажей: 13 голосов на 16 мин = переразбиение (один персонаж дробится). Пока
+    // кластеров слишком много — снижаем порог (сливает близкие голоса), до разумного числа или пола 0.18.
+    while k > max_chars && thr > 0.18 {
+        thr -= 0.02;
+        labels = ahc_average(&embs, thr);
+        k = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
+    }
+    // Число исходных Sortformer-меток (борроу сразу отпускаем — ниже мутируем segments).
+    let orig_count = segments
+        .iter()
+        .filter_map(|s| s.speaker.as_ref())
+        .collect::<std::collections::HashSet<&String>>()
+        .len();
+    if k <= 1 || k <= orig_count {
         // Кластеризация не дала БОЛЬШЕ персонажей, чем Sortformer -> не переразмечаем (не рискуем).
-        return None;
+        return 0;
     }
     // seg_idx -> голосовая метка (для эмбеддированных).
     let mut seg_label: HashMap<usize, usize> = HashMap::new();
     for (j, &i) in idxs.iter().enumerate() {
         seg_label.insert(i, labels[j]);
     }
-    // Переразметка клона: короткие/невекторизованные сегменты -> метка ближайшего по времени эмбеддированного.
-    let mut refined = proj.clone();
-    for (i, s) in refined.segments.iter_mut().enumerate() {
+    // Короткие/невекторизованные сегменты -> метка ближайшего по времени эмбеддированного. Центры считаем
+    // заранее (иначе borrow segments и immut, и mut одновременно).
+    let mids: Vec<f64> = segments.iter().map(|s| (s.start + s.end) / 2.0).collect();
+    for i in 0..segments.len() {
         let lbl = seg_label.get(&i).copied().or_else(|| {
-            let mid = (s.start + s.end) / 2.0;
+            let mid = mids[i];
             idxs.iter()
                 .min_by(|&&a, &&b| {
-                    let da = (((proj.segments[a].start + proj.segments[a].end) / 2.0) - mid).abs();
-                    let db = (((proj.segments[b].start + proj.segments[b].end) / 2.0) - mid).abs();
-                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                    (mids[a] - mid).abs().partial_cmp(&(mids[b] - mid).abs()).unwrap_or(std::cmp::Ordering::Equal)
                 })
                 .and_then(|&j| seg_label.get(&j).copied())
         });
         if let Some(l) = lbl {
-            s.speaker = Some(format!("v{l}"));
+            segments[i].speaker = Some(format!("v{l}"));
         }
     }
     emit(
         progress,
-        "cast_detect",
-        &format!("голосовых кластеров: {k} (Sortformer нашёл {}); персонажи по голосу", orig.len()),
+        "asr",
+        &format!("голосовая переразметка: {k} персонажей по голосу (Sortformer нашёл {orig_count})"),
     );
-    Some(refined)
+    k
 }
 
 /// Прогнать стадию кастинга. proj уже собран транскрипт-стадией (segments + speaker). Пишет casting.json
@@ -227,11 +258,9 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
     }
     let anime = content_type.eq_ignore_ascii_case("anime");
 
-    // 0) ГОЛОСОВАЯ ПЕРЕРАЗМЕТКА СПИКЕРОВ (#83, по указанию юзера): Sortformer ≤4 в окне, а персонажей
-    //    больше — кластеризуем вокал по сегментам (WeSpeaker) и работаем по голосовым меткам. Дальше вся
-    //    speaker-driven логика (персонаж=спикер) идёт по УТОЧНЁННЫМ меткам -> находит >4 и мужского.
-    let refined = refine_speakers_by_voice(paths, proj, progress);
-    let proj: &Project = refined.as_ref().unwrap_or(proj);
+    // 0) Сегменты УЖЕ переразмечены по голосу в пайплайне (recluster_segments после ASR) — метки «v{k}».
+    //    Персонаж = спикер (по этим меткам) => те же метки на сегментах => счётчик реплик верный, дубляж
+    //    идёт по N голосам. Здесь никакой переразметки: работаем по proj.segments как есть.
 
     // 1) СПИКЕРЫ по суммарному времени речи (главные персонажи первыми) — первичка кастинга.
     let ranked = speakers_by_talktime(proj);
@@ -450,25 +479,28 @@ fn avatar_for_speaker(
         .collect();
     segs.sort_by(|a, b| (b.1 - b.0).partial_cmp(&(a.1 - a.0)).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Таймстемпы-кандидаты: середина самых длинных реплик (+ пара точек внутри очень длинных).
+    // Таймстемпы-кандидаты: НЕ только середина (в лайв-экшене там часто motion-blur говорящего), а
+    // несколько кадров внутри каждой длинной реплики (каждые ~0.6с) — больше шансов поймать резкий
+    // фронтальный кадр с крупным лицом.
     let mut times: Vec<f64> = Vec::new();
-    for (s, e) in &segs {
-        if times.len() >= MAX_AVATAR_CAND {
-            break;
-        }
-        times.push((s + e) / 2.0);
-        if (e - s) > 6.0 && times.len() < MAX_AVATAR_CAND {
-            times.push(s + (e - s) * 0.25);
-        }
-        if (e - s) > 6.0 && times.len() < MAX_AVATAR_CAND {
-            times.push(s + (e - s) * 0.75);
+    'outer: for (s, e) in &segs {
+        let dur = (e - s).max(0.0);
+        let n = ((dur / 0.6).floor() as usize).clamp(1, 6);
+        for j in 0..n {
+            let frac = (j as f64 + 0.5) / n as f64;
+            times.push(s + dur * frac);
+            if times.len() >= MAX_AVATAR_CAND {
+                break 'outer;
+            }
         }
     }
 
+    let min_px = min_face_px();
     let tmp_dir = cast_dir.join("cand");
     let _ = std::fs::create_dir_all(&tmp_dir);
-    // Лучшее лицо среди всех кандидатов: (кадр, лицо, качество, путь-к-кадру).
-    let mut best: Option<(image::RgbImage, Face, f32, std::path::PathBuf)> = None;
+    // Лучшее лицо: (кадр, лицо, качество, лицо>=мин.размера, путь). Предпочитаем лица не мельче min_px
+    // (мельче -> аватар мылится); мелкое берём только если ничего крупнее нет.
+    let mut best: Option<(image::RgbImage, Face, f32, bool, std::path::PathBuf)> = None;
     for (k, t) in times.iter().enumerate() {
         let fp = tmp_dir.join(format!("s{}_{k}.png", sanitize(spk)));
         let img = match extract_frame(&paths.input, *t, &fp) {
@@ -481,21 +513,27 @@ fn avatar_for_speaker(
         };
         for f in faces {
             let (x1, y1, x2, y2) = (f.x1, f.y1, f.x2, f.y2);
-            let area = ((x2 - x1).max(0.0) * (y2 - y1).max(0.0)).sqrt();
-            let area_gate = area / (area + 120.0);
-            let sharp = crop_sharpness(&img, (x1, y1, x2, y2));
+            let side = (x2 - x1).max(0.0).min((y2 - y1).max(0.0)); // меньшая сторона bbox лица, px
+            let sharp = crop_sharpness(&img, (x1, y1, x2, y2)); // variance of Laplacian: выше = резче
             // real: фронтальность по 5 точкам; anime: точек нет -> нейтрально 1.0.
             let front = if anime { 1.0 } else { frontality(&f) };
-            let q = f.score * f.score * (sharp + 1.0) * (front + 0.05) * area_gate;
-            let better = best.as_ref().map(|(_, _, bq, _)| q > *bq).unwrap_or(true);
+            // Качество: РЕЗКОСТЬ доминирует (против расфокуса/motion-blur), размер — sublinear (sqrt),
+            // чтобы крупное мыльное лицо НЕ побеждало резкое поменьше; + фронтальность × уверенность.
+            let q = f.score * sharp * (front + 0.1) * side.sqrt();
+            let meets = side >= min_px;
+            let better = match &best {
+                None => true,
+                // любое лицо >= мин.размера бьёт любое мельче; при равном классе — по качеству.
+                Some((_, _, bq, bmeets, _)) => (meets && !*bmeets) || (meets == *bmeets && q > *bq),
+            };
             if better {
-                best = Some((img.clone(), f, q, fp.clone()));
+                best = Some((img.clone(), f, q, meets, fp.clone()));
             }
         }
     }
 
     let result = match best {
-        Some((img, face, _q, fp)) => {
+        Some((img, face, _q, _meets, fp)) => {
             let out = cast_dir.join(format!("char_{ci}.png"));
             let bbox = (face.x1, face.y1, face.x2, face.y2);
             let sample = match save_face_crop(&fp, bbox, 0.35, &out) {

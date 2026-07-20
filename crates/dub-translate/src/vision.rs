@@ -168,6 +168,46 @@ fn imsg(
     Ok(strip_think(&llm.chat(&[Message::user_parts(parts)], &s)?))
 }
 
+/// Авто-детект типа контента для кастинга (#115): live-action (реальные лица -> SCRFD+LVFace) vs
+/// animation/cartoon/anime (рисованные -> anime_face+CCIP). Сэмплируем несколько кадров по телу видео,
+/// спрашиваем Gemma-vision по каждому и голосуем (most_common, детерминированный tie-break). Возвращает
+/// "real" | "anime". При неоднозначности/сбое — "real" (самый частый тип контента).
+pub fn classify_content_type(
+    llm: &ChatClient,
+    video: &Path,
+    tmp: &Path,
+    total: f64,
+    mut log: impl FnMut(&str),
+) -> String {
+    const N: usize = 4;
+    let prompt = "Look at this single video frame. Is it LIVE-ACTION (filmed real people and places \
+        with a camera, photographic) or ANIMATION (hand-drawn or CG cartoon / anime, illustrated \
+        characters)? Reply with exactly one word: LIVE or ANIMATION.";
+    let mut votes: Vec<String> = Vec::new();
+    for i in 0..N {
+        // кадры по телу (8%..92%), избегаем заставок/финальных титров.
+        let frac = 0.08 + 0.84 * (i as f64) / ((N - 1).max(1) as f64);
+        let t = (total * frac).max(0.0);
+        if let Ok(ans) = imsg(llm, video, tmp, t, prompt, 8, 0.1) {
+            let a = ans.to_lowercase();
+            // "animation"/"anime"/"cartoon"/"drawn" ловим ПЕРВЫМ (в "live-action" нет "anim").
+            let v = if a.contains("anim") || a.contains("cartoon") || a.contains("drawn") {
+                Some("anime")
+            } else if a.contains("live") || a.contains("real") || a.contains("photo") {
+                Some("real")
+            } else {
+                None // непонятный ответ — не голосуем
+            };
+            if let Some(v) = v {
+                votes.push(v.to_string());
+            }
+        }
+    }
+    let decided = most_common(&votes).unwrap_or_else(|| "real".to_string());
+    log(&format!("тип контента (Gemma): {decided} ({} валидных голосов из {N})", votes.len()));
+    decided
+}
+
 /// VISION layout (фаза 1 ctx_translate.run) — сэмплируем кадры, читаем sub_style/sub_y/titles/brands/captions.
 /// total — длительность (с), vh — высота кадра (px). video — исходное видео. tmp — путь под кадр.
 pub fn analyze_layout(

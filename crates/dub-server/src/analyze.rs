@@ -418,6 +418,53 @@ impl WindowPlan {
     }
 }
 
+/// Слить короткие огрызки ОДНОГО спикера в одну фразу (#115). Whisper дробит предложение на «If» +
+/// «they find you.» — каждый огрызок озвучивается отдельно и звучит рвано. Клеим сосед в предыдущий,
+/// если: тот же спикер, зазор < 0.35с, хотя бы один из двух короткий (<1.6с), суммарно ≤12с и <200 симв.
+/// Так «одна фраза, разбитая таймингом» снова становится одной; две полные разные фразы НЕ склеиваются.
+fn merge_short_turns(segs: &mut Vec<Segment>) {
+    if segs.len() < 2 {
+        return;
+    }
+    const GAP: f64 = 0.35;
+    const SHORT: f64 = 1.6;
+    const MAX_DUR: f64 = 12.0;
+    const MAX_CH: usize = 200;
+    let src = std::mem::take(segs);
+    let mut out: Vec<Segment> = Vec::with_capacity(src.len());
+    for s in src {
+        if let Some(last) = out.last_mut() {
+            let same_spk = last.speaker == s.speaker;
+            let gap = s.start - last.end;
+            let short = (last.end - last.start) < SHORT || (s.end - s.start) < SHORT;
+            let dur_ok = (s.end - last.start) <= MAX_DUR;
+            let ch_ok = last.src_text.len() + s.src_text.len() < MAX_CH;
+            if same_spk && gap >= 0.0 && gap < GAP && short && dur_ok && ch_ok {
+                let lt = last.src_text.trim_end();
+                let rt = s.src_text.trim_start();
+                let sep = if lt.is_empty() || rt.is_empty() { "" } else { " " };
+                last.src_text = format!("{lt}{sep}{rt}");
+                last.end = s.end;
+                // слить пословный тайминг (karaoke) если есть у обоих.
+                if let Some(Value::Array(wr)) = s.extra.get("words") {
+                    match last.extra.get_mut("words") {
+                        Some(Value::Array(wl)) => wl.extend(wr.clone()),
+                        _ => {
+                            last.extra.insert("words".into(), Value::Array(wr.clone()));
+                        }
+                    }
+                }
+                continue;
+            }
+        }
+        out.push(s);
+    }
+    for (i, s) in out.iter_mut().enumerate() {
+        s.id = format!("s{i}");
+    }
+    *segs = out;
+}
+
 /// Запустить analyze: extract -> diarize -> transcribe -> Project. Возвращает готовый Project.
 /// Диаризация/транскрипция тяжёлые (ONNX CPU) — вызывать в блокирующем контексте (job worker).
 ///
@@ -565,7 +612,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
 
     // 4) сегменты: из импортированных субтитров (точный текст+тайминг, ASR пропущен) ЛИБО через ASR.
     //    Импорт: спикеров всё равно раздаём — по максимальному перекрытию реплики с диаризацией.
-    let (segments, n_spk): (Vec<Segment>, usize) = if let Some(subs_path) = &paths.import_subs {
+    let (mut segments, n_spk): (Vec<Segment>, usize) = if let Some(subs_path) = &paths.import_subs {
         let content = std::fs::read_to_string(subs_path)
             .map_err(|e| format!("чтение субтитров {}: {e}", subs_path.display()))?;
         let ext = subs_path.extension().and_then(|s| s.to_str()).unwrap_or("srt");
@@ -675,6 +722,27 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         }
         }
     };
+
+    // Слияние коротких огрызков (#115): whisper режет «If they find you» на «If» + «they find you.» —
+    // каждый огрызок TTS-ится отдельно и звучит рвано. Клеим near-continuous короткие реплики ОДНОГО
+    // спикера в одну фразу (не для import_subs — там реплики уже цельные из сабов).
+    if paths.import_subs.is_none() {
+        let before = segments.len();
+        merge_short_turns(&mut segments);
+        if segments.len() != before {
+            emit(progress, "asr", &format!("слияние огрызков: {before} -> {} сегментов", segments.len()));
+        }
+    }
+
+    // Голосовая переразметка спикеров (#115): при кастинге разворачиваем ≤4 Sortformer-спикеров в реальных
+    // персонажей по голосу и ПЕРЕРАЗМЕЧАЕМ сегменты (метки «v{k}») -> дубляж по N голосам + верный счётчик
+    // реплик у персонажей (0 реплик больше не бывает). Не для import_subs и single-speaker.
+    if args.casting && paths.import_subs.is_none() && n_spk > 1 {
+        let k = crate::casting::recluster_segments(paths, &mut segments, progress);
+        if k > 0 {
+            emit(progress, "asr", &format!("персонажей по голосу: {k}"));
+        }
+    }
 
     emit(
         progress,
@@ -797,7 +865,15 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     proj.casting_enabled = args.casting;
     bench.stage("casting");
     if args.casting && meta.width > 0 && meta.height > 0 {
-        crate::casting::stage(paths, &proj, &args.casting_ref, &args.content_type, progress);
+        // content_type="auto" -> берём тип, определённый Gemma в translate-стадии (proj.audio.content_type);
+        // если детект не отработал (translate пропущен/непонятный ответ) — дефолт "real".
+        let eff_ct = if args.content_type == "auto" {
+            let d = proj.audio.content_type.clone();
+            if d.is_empty() { "real".to_string() } else { d }
+        } else {
+            args.content_type.clone()
+        };
+        crate::casting::stage(paths, &proj, &args.casting_ref, &eff_ct, progress);
     } else if args.casting {
         emit(progress, "casting", "аудио-режим: без видео, кастинг персонажей не нужен");
     }

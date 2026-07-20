@@ -80,6 +80,10 @@ pub struct Audio {
     /// Контейнер выхода при keep_original_track: "mp4" | "mkv" (mkv надёжнее держит мультитрек-метаданные).
     #[serde(default = "default_container")]
     pub container: String,
+    /// Тип контента для кастинга (#115), определённый авто-детектом Gemma при content_type="auto":
+    /// "real" (реальные лица) | "anime" (рисованные). Пусто = не определяли (юзер задал явно/кастинг выкл).
+    #[serde(default)]
+    pub content_type: String,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -107,6 +111,7 @@ impl Default for Audio {
             voiceover_gain_db: default_voiceover_gain(),
             keep_original_track: false,
             container: default_container(),
+            content_type: String::new(),
             extra: Extra::new(),
         }
     }

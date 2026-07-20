@@ -17,6 +17,7 @@ mod detect;
 mod embed;
 mod frames;
 mod link;
+mod occluder;
 mod ort_engine;
 mod voice;
 
@@ -33,6 +34,7 @@ pub use frames::{
     DEFAULT_FPS,
 };
 pub use link::{link_faces_to_speakers, Linkage, SpeakerTurn};
+pub use occluder::{occluder_path, FaceOccluder};
 pub use voice::{voice_cos_threshold, wespeaker_path, VoiceEmbedder, VOICE_DIM};
 
 use std::path::Path;
