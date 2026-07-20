@@ -1651,7 +1651,10 @@ function CastingPanel({ pid, characters, voices, onChange }: {
                   {/* Голос дубляжа — из библиотеки. */}
                   <div>
                     <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--color-muted)] mb-1">{t("casting.voice")}</div>
-                    <Combobox value={d.voice ?? ""} onChange={(v) => setField(c.id, { voice: v || null })} options={voiceOpts}
+                    {/* «clone»/пусто = клонировать из видео -> показываем ПУСТО (плейсхолдер), а не буквальный
+                        текст «clone» (иначе значение не из списка и автокомплит выглядит сломанным). */}
+                    <Combobox value={d.voice && d.voice.toLowerCase() !== "clone" ? d.voice : ""}
+                      onChange={(v) => setField(c.id, { voice: v || null })} options={voiceOpts}
                       placeholder={t("casting.voiceClone")} noResults={t("voice.noMatch")} allowClear size="sm" className="w-full" />
                   </div>
                 </div>
