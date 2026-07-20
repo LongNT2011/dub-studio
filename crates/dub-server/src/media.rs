@@ -301,12 +301,26 @@ pub struct SpeechBlock {
     pub end: f64,
 }
 
-// Параметры детерминированной огибающей дакинга (проф.практика Premiere Auto-Ducking / Descript):
-const DUCK_GAIN: f64 = 0.25; // −12 дБ под речью
+// Параметры детерминированной огибающей дакинга.
+// ВАЖНО: в ДУБЛЯЖЕ фон = сепарированный инструментал (= M&E, оригинального голоса там НЕТ). Проф.практика
+// дубляжа (Netflix/Deepdub M&E): M&E микшируется на ПОЛНОМ уровне с новым дубляжом — его НЕ душат, дубляж
+// просто занимает место оригинального диалога. Поэтому дакинг мягкий (−3 дБ, лёгкий провал для разборчивости
+// синтет-голоса), фон остаётся слышен. Env DUB_DUCK_DB (dB, 0 = совсем не душить). Прошлые −12 дБ «срезали
+// весь фон» (подкаст/закадр-техника, ошибочно на дубляж). [[reference_parakeet_rs_ort_gotchas]] — «фон не глушить».
+const DUCK_GAIN: f64 = 0.708; // −3 дБ под речью (дефолт); env DUB_DUCK_DB override
 const DUCK_PREROLL: f64 = 0.08; // fade-down стартует за 0.08с ДО блока
 const DUCK_FADE_DOWN: f64 = 0.10; // длина спуска
 const DUCK_HOLD: f64 = 0.30; // держим приглушение 0.30с ПОСЛЕ конца блока
 const DUCK_FADE_UP: f64 = 0.40; // длина подъёма
+
+/// Глубина дакинга фона (линейный gain 0..1) под речью в ДУБЛЯЖЕ. Env DUB_DUCK_DB (дБ; 0 = без дакинга,
+/// отрицательное = приглушать). Дефолт DUCK_GAIN (−3 дБ). Клэмп в [0.02, 1.0].
+fn duck_gain() -> f64 {
+    match std::env::var("DUB_DUCK_DB").ok().and_then(|s| s.trim().parse::<f64>().ok()) {
+        Some(db) => 10f64.powf(db / 20.0).clamp(0.02, 1.0),
+        None => DUCK_GAIN,
+    }
+}
 
 /// Собрать выражение gain(t) для ffmpeg-фильтра `volume` из речевых блоков: 1.0 вне блоков, DUCK_GAIN
 /// внутри, линейные фейды на краях (down за DUCK_PREROLL до start, up через DUCK_HOLD после end).
@@ -315,8 +329,7 @@ const DUCK_FADE_UP: f64 = 0.40; // длина подъёма
 /// Форма: gain(t) = 1 − (1−g)·Σ trap_i(t), где trap_i — трапеция блока i (clip(min(рампа-вниз,
 /// рампа-вверх),0,1)). Блоки разведены паузой ≥1.6с > preroll+fade+hold+fade — трапеции не пересекаются,
 /// сумма ≤ 1. Длина выражения O(N) по блокам (вложенные if давали O(2^N) — дубль prev в обеих ветках).
-fn duck_volume_expr(blocks: &[SpeechBlock]) -> String {
-    let g = DUCK_GAIN;
+fn duck_volume_expr(blocks: &[SpeechBlock], g: f64) -> String {
     if blocks.is_empty() {
         return "1".into();
     }
@@ -348,7 +361,21 @@ fn duck_volume_expr(blocks: &[SpeechBlock]) -> String {
 /// `-filter_complex_script` (лимит CreateProcess 32767, паттерн из dub-captions/burn.rs). Порядок как в
 /// mix: голос полным уровнем + фон по огибающей, amix normalize=0. Пусто блоков -> фон ровно 1.0.
 pub fn mix_env(voice: &Path, music: &Path, blocks: &[SpeechBlock], out: &Path) -> Result<(), String> {
-    let vol = duck_volume_expr(blocks);
+    // Дубляж: глубина дакинга фона = duck_gain() (−3 дБ дефолт, env DUB_DUCK_DB).
+    mix_env_g(voice, music, blocks, duck_gain(), out)
+}
+
+/// Динамический дакинг с ЗАДАННОЙ глубиной (дБ) — для ЗАКАДРА (UN-style voice-over): оригинал звучит
+/// ПОЛНЫМ между репликами перевода (слышно исходного спикера/эмоцию) и приглушается на `duck_db` ПОД
+/// переводом, восстанавливаясь после. `bed` — весь оригинал, `blocks` — тайминги переведённой речи.
+/// Прежде оригинал давился ПЛОСКО на всю дорожку (−12 дБ навсегда, в т.ч. в паузах) — не по практике.
+pub fn mix_env_db(voice: &Path, bed: &Path, blocks: &[SpeechBlock], duck_db: f64, out: &Path) -> Result<(), String> {
+    let g = 10f64.powf(duck_db / 20.0).clamp(0.02, 1.0);
+    mix_env_g(voice, bed, blocks, g, out)
+}
+
+fn mix_env_g(voice: &Path, music: &Path, blocks: &[SpeechBlock], g: f64, out: &Path) -> Result<(), String> {
+    let vol = duck_volume_expr(blocks, g);
     let fc = format!(
         "[0:a]aformat=channel_layouts=stereo[v];\
          [1:a]aformat=channel_layouts=stereo,volume='{vol}':eval=frame[bg];\
@@ -627,16 +654,16 @@ mod env_tests {
 
     #[test]
     fn empty_blocks_is_flat_one() {
-        assert_eq!(duck_volume_expr(&[]), "1");
+        assert_eq!(duck_volume_expr(&[], DUCK_GAIN), "1");
     }
 
     #[test]
     fn expr_mentions_each_block_boundaries() {
         let blocks = [SpeechBlock { start: 1.0, end: 2.0 }];
-        let e = duck_volume_expr(&blocks);
-        // спуск стартует за preroll (0.920), глубина 1-g (0.7500) присутствует
+        let e = duck_volume_expr(&blocks, DUCK_GAIN);
+        // спуск стартует за preroll (0.920), глубина 1-g присутствует
         assert!(e.contains("0.920"), "{e}");
-        assert!(e.contains("0.7500"), "{e}");
+        assert!(e.contains(&format!("{:.4}", 1.0 - DUCK_GAIN)), "{e}");
     }
 
     #[test]
@@ -645,14 +672,14 @@ mod env_tests {
         let blocks: Vec<SpeechBlock> = (0..300)
             .map(|i| SpeechBlock { start: i as f64 * 10.0, end: i as f64 * 10.0 + 5.0 })
             .collect();
-        let e = duck_volume_expr(&blocks);
+        let e = duck_volume_expr(&blocks, DUCK_GAIN);
         assert!(e.len() < 60 * 300 + 64, "len={}", e.len());
     }
 
     #[test]
     fn expr_has_clip_wrapper() {
         // clip(...,0,1) держит sum трапеций в [0,1] -> gain не ниже g и не отрицательный (#116).
-        assert!(duck_volume_expr(&[SpeechBlock { start: 1.0, end: 2.0 }]).contains("clip("));
+        assert!(duck_volume_expr(&[SpeechBlock { start: 1.0, end: 2.0 }], DUCK_GAIN).contains("clip("));
     }
 
     #[test]

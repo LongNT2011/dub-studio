@@ -1015,25 +1015,29 @@ fn build_dub(
 
     // 6) свести дорожку.
     let mixed = if voiceover {
-        // Закадровый: весь оригинал приглушаем на voiceover_gain_db (регулируется в редакторе) и кладём
-        // ПОД переведённый голос. Слышно исходного спикера под дублем (эффект «voice-over»). loudnorm
-        // ниже приведёт программу к -14 LUFS — соотношение дубль/оригинал сохранится.
+        // Закадровый (UN-style voice-over): оригинал ЗВУЧИТ ПОЛНЫМ между репликами перевода (слышно
+        // исходного спикера/эмоцию) и ДИНАМИЧЕСКИ приглушается на voiceover_gain_db ПОД переводом,
+        // восстанавливаясь после — best-practice (IVA/Wikipedia). Прежде оригинал давился ПЛОСКО на всю
+        // дорожку (−12 дБ навсегда, в т.ч. в паузах) — «странная настройка», оригинал не поднимался.
         let duck_db = proj.audio.voiceover_gain_db.clamp(VOICEOVER_DUCK_MIN_DB, 0.0);
-        emit(progress, "mix", &format!("voiceover: оригинал {duck_db:+.1} dB под переводом"));
-        // .m4a: media::gain кодирует в AAC — расширение должно совпадать (AAC в .wav-контейнере
-        // читается как тишина). amix(normalize=0) суммирует дубль (полный) + оригинал (приглушённый).
-        // duck_db==0 -> gain не нужен, кладём оригинал как есть.
-        let bed = if duck_db.abs() < 0.05 {
-            audio_hq.clone()
-        } else {
-            let ducked = wd.join("orig_ducked.m4a");
-            match media::gain(&audio_hq, &ducked, duck_db) {
-                Ok(()) => ducked,
-                Err(_) => audio_hq.clone(),
-            }
-        };
+        emit(progress, "mix", &format!(
+            "voiceover: оригинал {duck_db:+.1} dB ПОД переводом, полный в паузах (динам. огибающая, {} блоков)",
+            speech_blocks.len()));
         let new_audio = wd.join("new_audio.m4a");
-        media::mix(&dub, &bed, &new_audio)?;
+        // Динамическая огибающая на ОРИГИНАЛ по таймингам перевода. Фолбэк — старое плоское приглушение.
+        if media::mix_env_db(&dub, &audio_hq, &speech_blocks, duck_db, &new_audio).is_err() {
+            emit(progress, "mix", "voiceover: огибающая недоступна -> плоское приглушение");
+            let bed = if duck_db.abs() < 0.05 {
+                audio_hq.clone()
+            } else {
+                let ducked = wd.join("orig_ducked.m4a");
+                match media::gain(&audio_hq, &ducked, duck_db) {
+                    Ok(()) => ducked,
+                    Err(_) => audio_hq.clone(),
+                }
+            };
+            media::mix(&dub, &bed, &new_audio)?;
+        }
         new_audio
     } else if let Some(inst) = instrumental {
         // Детерминированный дакинг (#106): фон приглушается −12 дБ по кусочно-линейной ОГИБАЮЩЕЙ,
