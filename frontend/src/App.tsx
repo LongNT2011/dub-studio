@@ -2356,13 +2356,15 @@ function Editor() {
           )}
           </div>
           </div>
-          {/* Слайдер перемотки под превью: явный прогресс + время. Клик/драг = seek (единый скраб с вейформой). */}
+          {/* Ползунок перемотки + вейформа — СТРОГО друг под другом, ОДНОЙ ширины (полная ширина превью).
+              Оба скрабят единый scrub. Время/транспорт — в баре ниже. */}
           {!audioOnly && (
-            <div className="shrink-0 flex items-center gap-2.5">
+            <div className="shrink-0 px-4 pb-1.5 flex flex-col gap-1">
               <input type="range" min={0} max={Math.max(0.1, p.meta.duration || 0)} step={0.05} value={Math.min(scrub, p.meta.duration || 0)}
                 onChange={(e) => onSeek(parseFloat(e.target.value))}
-                className="flex-1 h-1 accent-[var(--color-accent)] cursor-pointer" />
-              <span className="mono text-[10px] tabnum text-[var(--color-muted)] shrink-0"><span className="text-[var(--color-accent)]">{fmtMS(scrub)}</span> / {fmtMS(p.meta.duration || 0)}</span>
+                className="w-full h-1 accent-[var(--color-accent)] cursor-pointer" />
+              <WaveformTimeline pid={pid} duration={p.meta.duration || 0} scrub={scrub} segments={p.segments}
+                gainDb={gainDraft ?? p.audio.gain_db ?? 0} onSeek={onSeek} />
             </div>
           )}
         </div>
@@ -2382,12 +2384,8 @@ function Editor() {
             className={`shrink-0 p-1.5 rounded-md transition-colors ${compare ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "bg-[var(--color-surface-2)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
             <Columns2 size={15} />
           </button>
-          <span className="mono text-[11px] tabnum w-24 shrink-0"><span className="text-[var(--color-accent)] font-semibold">{fmtT(scrub)}</span><span className="text-[var(--color-muted)]"> / {fmtT(p.meta.duration || 0)}</span></span>
-          <div className="flex-1 min-w-0">
-            <WaveformTimeline pid={pid} duration={p.meta.duration || 0} scrub={scrub} segments={p.segments}
-              gainDb={gainDraft ?? p.audio.gain_db ?? 0}
-              onSeek={onSeek} />
-          </div>
+          <span className="mono text-[11px] tabnum shrink-0"><span className="text-[var(--color-accent)] font-semibold">{fmtT(scrub)}</span><span className="text-[var(--color-muted)]"> / {fmtT(p.meta.duration || 0)}</span></span>
+          <div className="flex-1" />
         </div>
       </main>
 
