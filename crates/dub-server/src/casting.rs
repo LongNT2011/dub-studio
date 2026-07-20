@@ -39,11 +39,70 @@ const MAX_AVATAR_CAND: usize = 14;
 /// Порог косинуса голосовой кластеризации сегментов (WeSpeaker). Выше -> больше персонажей (строже
 /// различает голоса). Env DUB_VOICE_CLUSTER_COS. 0 или отсутствие модели -> без переразметки.
 fn voice_cluster_cos() -> f32 {
-    std::env::var("DUB_VOICE_CLUSTER_COS").ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0.55)
+    // Порог остановки AHC average-linkage (косинус центроидов). ~0.5 для WeSpeaker. Env DUB_VOICE_CLUSTER_COS.
+    std::env::var("DUB_VOICE_CLUSTER_COS").ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0.5)
 }
 
 /// Мин. длительность сегмента (сек) для голосового эмбеддинга (короче — шумный вектор, размечаем соседом).
 const VC_MIN_SEG_SEC: f64 = 0.6;
+
+/// Агломеративная кластеризация AVERAGE-LINKAGE (по центроидам): сливаем два ближайших по косинусу
+/// кластера (центроид = среднее эмбеддингов членов), пока max-косинус >= threshold. Центроиды денойзят
+/// шум коротких сегментов -> сходится к истинному числу спикеров ЛУЧШЕ single-linkage (тот на шумном
+/// аудио фрагментирует). Возвращает метки 0..k-1 по первому появлению. O(n³) в худшем — n сегментов немного.
+fn ahc_average(embs: &[Vec<f32>], threshold: f32) -> Vec<usize> {
+    let n = embs.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let dim = embs[0].len();
+    let mut members: Vec<Vec<usize>> = (0..n).map(|i| vec![i]).collect();
+    let mut centroids: Vec<Vec<f32>> = embs.to_vec();
+    let mut active: Vec<bool> = vec![true; n];
+    loop {
+        let idxs: Vec<usize> = (0..centroids.len()).filter(|&i| active[i]).collect();
+        let mut best = (usize::MAX, usize::MAX, f32::MIN);
+        for a in 0..idxs.len() {
+            for b in (a + 1)..idxs.len() {
+                let (i, j) = (idxs[a], idxs[b]);
+                let c = dub_asr::cosine(&centroids[i], &centroids[j]);
+                if c > best.2 {
+                    best = (i, j, c);
+                }
+            }
+        }
+        if best.0 == usize::MAX || best.2 < threshold {
+            break;
+        }
+        let (i, j) = (best.0, best.1);
+        let jm = std::mem::take(&mut members[j]);
+        members[i].extend(jm);
+        active[j] = false;
+        // центроид i = среднее эмбеддингов всех членов.
+        let mut c = vec![0.0f32; dim];
+        for &pt in &members[i] {
+            for d in 0..dim {
+                c[d] += embs[pt][d];
+            }
+        }
+        let cnt = members[i].len() as f32;
+        for v in &mut c {
+            *v /= cnt;
+        }
+        centroids[i] = c;
+    }
+    let mut labels = vec![0usize; n];
+    let mut next = 0usize;
+    for i in 0..centroids.len() {
+        if active[i] {
+            for &pt in &members[i] {
+                labels[pt] = next;
+            }
+            next += 1;
+        }
+    }
+    labels
+}
 
 /// Голосовая кластеризация СЕГМЕНТОВ (#83 global speakers, по указанию юзера): Sortformer даёт ≤4 спикеров
 /// ОДНОВРЕМЕННО в окне, но за всё видео их больше. Эмбеддим вокал каждого сегмента (WeSpeaker) и
@@ -117,7 +176,7 @@ fn refine_speakers_by_voice(paths: &AnalyzePaths, proj: &Project, progress: &Pro
     if embs.len() < 2 {
         return None;
     }
-    let labels = dub_asr::cluster_embeddings(&embs, voice_cluster_cos());
+    let labels = ahc_average(&embs, voice_cluster_cos());
     let k = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
     let orig: std::collections::HashSet<&String> = proj.segments.iter().filter_map(|s| s.speaker.as_ref()).collect();
     if k <= 1 || k <= orig.len() {
