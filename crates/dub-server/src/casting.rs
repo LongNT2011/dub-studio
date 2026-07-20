@@ -36,6 +36,124 @@ fn emit(progress: &Progress, stage: &str, msg: &str) {
 /// Макс. число кадров-кандидатов на персонажа для поиска аватара (из его говорящих сегментов).
 const MAX_AVATAR_CAND: usize = 14;
 
+/// Порог косинуса голосовой кластеризации сегментов (WeSpeaker). Выше -> больше персонажей (строже
+/// различает голоса). Env DUB_VOICE_CLUSTER_COS. 0 или отсутствие модели -> без переразметки.
+fn voice_cluster_cos() -> f32 {
+    std::env::var("DUB_VOICE_CLUSTER_COS").ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0.55)
+}
+
+/// Мин. длительность сегмента (сек) для голосового эмбеддинга (короче — шумный вектор, размечаем соседом).
+const VC_MIN_SEG_SEC: f64 = 0.6;
+
+/// Голосовая кластеризация СЕГМЕНТОВ (#83 global speakers, по указанию юзера): Sortformer даёт ≤4 спикеров
+/// ОДНОВРЕМЕННО в окне, но за всё видео их больше. Эмбеддим вокал каждого сегмента (WeSpeaker) и
+/// кластеризуем по cosine -> присваиваем КАЖДОМУ сегменту глобальную голосовую метку "v{k}". Находит
+/// персонажей больше Sortformer'а (слитых/пропущенных, напр. мужского) и сливает один голос из разных окон
+/// в одного. Возвращает КЛОН проекта с переразмеченными segment.speaker; None -> нет модели/вокала/1 кластер
+/// (оставляем Sortformer-разметку). Дорого (эмбеддинг на сегмент), но только при включённом кастинге.
+fn refine_speakers_by_voice(paths: &AnalyzePaths, proj: &Project, progress: &Progress) -> Option<Project> {
+    // ОПЫТНОЕ (по умолчанию ВЫКЛ): голосовая переразметка находит >Sortformer персонажей, НО на шумном
+    // аудио (короткие сегменты + муз.остаток) single-linkage не сходится к истинному числу — либо
+    // фрагментирует одного на много, либо схлопывает. Пока не доведён метод (центроидное дослияние /
+    // spectral с оценкой K) — включается флагом DUB_VOICE_REDIARIZE=1; порог DUB_VOICE_CLUSTER_COS (~0.4).
+    if std::env::var("DUB_VOICE_REDIARIZE").ok().as_deref() != Some("1") {
+        return None;
+    }
+    let vocals = {
+        let clean = paths.work_dir.join("vocals16_clean.wav");
+        let raw = paths.work_dir.join("vocals16.wav");
+        if clean.is_file() {
+            clean
+        } else if raw.is_file() {
+            raw
+        } else {
+            return None;
+        }
+    };
+    let onnx = std::env::var("DUB_FACES_WESPEAKER")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| dub_faces::wespeaker_path(&paths.models_root));
+    if !onnx.is_file() {
+        return None;
+    }
+    // Кэш эмбеддингов (тюнинг порога без пере-эмбеддинга ~4мин): casting/vc_embs.json = {seg_count, idxs, embs}.
+    let cache = paths.work_dir.join("casting").join("vc_embs.json");
+    let mut idxs: Vec<usize> = Vec::new();
+    let mut embs: Vec<Vec<f32>> = Vec::new();
+    let cached = std::fs::read_to_string(&cache)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .filter(|v| v.get("seg_count").and_then(|x| x.as_u64()) == Some(proj.segments.len() as u64));
+    if let Some(v) = cached {
+        idxs = serde_json::from_value(v.get("idxs").cloned().unwrap_or_default()).unwrap_or_default();
+        embs = serde_json::from_value(v.get("embs").cloned().unwrap_or_default()).unwrap_or_default();
+    }
+    if idxs.is_empty() || idxs.len() != embs.len() {
+        // Эмбеддим вокал каждого достаточно длинного сегмента.
+        idxs.clear();
+        embs.clear();
+        let mut embedder = dub_faces::VoiceEmbedder::load(&onnx).ok()?;
+        let tmp = paths.work_dir.join("casting_vc.wav");
+        for (i, s) in proj.segments.iter().enumerate() {
+            if (s.end - s.start) < VC_MIN_SEG_SEC {
+                continue;
+            }
+            let end = s.end.min(s.start + 6.0).max(s.start + 0.05);
+            if crate::media::trim(&vocals, &tmp, s.start, end, 16_000).is_err() {
+                continue;
+            }
+            if let Ok(v) = embedder.embed_wav(&tmp) {
+                idxs.push(i);
+                embs.push(v);
+            }
+        }
+        let _ = std::fs::remove_file(&tmp);
+        let _ = std::fs::create_dir_all(cache.parent().unwrap_or(&paths.work_dir));
+        let _ = std::fs::write(
+            &cache,
+            serde_json::json!({ "seg_count": proj.segments.len(), "idxs": idxs, "embs": embs }).to_string(),
+        );
+    }
+    if embs.len() < 2 {
+        return None;
+    }
+    let labels = dub_asr::cluster_embeddings(&embs, voice_cluster_cos());
+    let k = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
+    let orig: std::collections::HashSet<&String> = proj.segments.iter().filter_map(|s| s.speaker.as_ref()).collect();
+    if k <= 1 || k <= orig.len() {
+        // Кластеризация не дала БОЛЬШЕ персонажей, чем Sortformer -> не переразмечаем (не рискуем).
+        return None;
+    }
+    // seg_idx -> голосовая метка (для эмбеддированных).
+    let mut seg_label: HashMap<usize, usize> = HashMap::new();
+    for (j, &i) in idxs.iter().enumerate() {
+        seg_label.insert(i, labels[j]);
+    }
+    // Переразметка клона: короткие/невекторизованные сегменты -> метка ближайшего по времени эмбеддированного.
+    let mut refined = proj.clone();
+    for (i, s) in refined.segments.iter_mut().enumerate() {
+        let lbl = seg_label.get(&i).copied().or_else(|| {
+            let mid = (s.start + s.end) / 2.0;
+            idxs.iter()
+                .min_by(|&&a, &&b| {
+                    let da = (((proj.segments[a].start + proj.segments[a].end) / 2.0) - mid).abs();
+                    let db = (((proj.segments[b].start + proj.segments[b].end) / 2.0) - mid).abs();
+                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .and_then(|&j| seg_label.get(&j).copied())
+        });
+        if let Some(l) = lbl {
+            s.speaker = Some(format!("v{l}"));
+        }
+    }
+    emit(
+        progress,
+        "cast_detect",
+        &format!("голосовых кластеров: {k} (Sortformer нашёл {}); персонажи по голосу", orig.len()),
+    );
+    Some(refined)
+}
+
 /// Прогнать стадию кастинга. proj уже собран транскрипт-стадией (segments + speaker). Пишет casting.json
 /// в work_dir и аватарки в work_dir/casting/. `casting_ref` — slug профиля app-библиотеки для применения
 /// к этому ролику; `content_type` — "real"|"anime".
@@ -49,6 +167,12 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
     }
     let anime = content_type.eq_ignore_ascii_case("anime");
 
+    // 0) ГОЛОСОВАЯ ПЕРЕРАЗМЕТКА СПИКЕРОВ (#83, по указанию юзера): Sortformer ≤4 в окне, а персонажей
+    //    больше — кластеризуем вокал по сегментам (WeSpeaker) и работаем по голосовым меткам. Дальше вся
+    //    speaker-driven логика (персонаж=спикер) идёт по УТОЧНЁННЫМ меткам -> находит >4 и мужского.
+    let refined = refine_speakers_by_voice(paths, proj, progress);
+    let proj: &Project = refined.as_ref().unwrap_or(proj);
+
     // 1) СПИКЕРЫ по суммарному времени речи (главные персонажи первыми) — первичка кастинга.
     let ranked = speakers_by_talktime(proj);
     if ranked.is_empty() {
@@ -58,10 +182,10 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
     let ids: Vec<String> = ranked.iter().map(|(s, _, _)| s.clone()).collect();
     emit(progress, "cast_detect", &format!("персонажей-спикеров: {} (ранжированы по времени речи)", ranked.len()));
 
-    // 2) Пол (F0) + голос (WeSpeaker: 256-d эмбеддинг + образец-фраза) — per-speaker, аудио.
-    // Пол по F0 — только для РЕАЛЬНОГО контента. На мультях/аниме стилизованные голоса дают неверный F0
-    // (напр. все «female»), а пол в UI — факт: лучше «неизвестно», чем гадать (see never-guess).
-    let genders = if anime { HashMap::new() } else { speaker_genders(paths, proj, &ids) };
+    // 2) Пол (F0) + голос (WeSpeaker: 256-d эмбеддинг + образец-фраза) — per-speaker, аудио. F0 считаем и
+    // для аниме: после голосовой кластеризации каждый кластер — ОДИН голос, F0 на его чистой реплике
+    // надёжнее (мужской кластер -> мужской). Неуверенный замер всё равно -> "" (gender_label не гадает).
+    let genders = speaker_genders(paths, proj, &ids);
     let (voice_embeddings, speaker_samples) = speaker_voices(paths, proj, &ids, progress);
 
     // 3) Детектор+эмбеддер ЛИЦА по типу контента (только для аватара). Нет моделей -> без аватаров.
