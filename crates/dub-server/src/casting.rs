@@ -39,8 +39,9 @@ const MAX_AVATAR_CAND: usize = 14;
 /// Порог косинуса голосовой кластеризации сегментов (WeSpeaker). Выше -> больше персонажей (строже
 /// различает голоса). Env DUB_VOICE_CLUSTER_COS. 0 или отсутствие модели -> без переразметки.
 fn voice_cluster_cos() -> f32 {
-    // Порог остановки AHC average-linkage (косинус центроидов). ~0.5 для WeSpeaker. Env DUB_VOICE_CLUSTER_COS.
-    std::env::var("DUB_VOICE_CLUSTER_COS").ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0.5)
+    // Порог остановки AHC average-linkage (косинус центроидов WeSpeaker). 0.3 подтверждён на чистом аудио
+    // (Avatar live-action: 4 Sortformer -> 10 персонажей, мужские найдены). Env DUB_VOICE_CLUSTER_COS.
+    std::env::var("DUB_VOICE_CLUSTER_COS").ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0.3)
 }
 
 /// Мин. длительность сегмента (сек) для голосового эмбеддинга (короче — шумный вектор, размечаем соседом).
@@ -111,11 +112,11 @@ fn ahc_average(embs: &[Vec<f32>], threshold: f32) -> Vec<usize> {
 /// в одного. Возвращает КЛОН проекта с переразмеченными segment.speaker; None -> нет модели/вокала/1 кластер
 /// (оставляем Sortformer-разметку). Дорого (эмбеддинг на сегмент), но только при включённом кастинге.
 fn refine_speakers_by_voice(paths: &AnalyzePaths, proj: &Project, progress: &Progress) -> Option<Project> {
-    // ОПЫТНОЕ (по умолчанию ВЫКЛ): голосовая переразметка находит >Sortformer персонажей, НО на шумном
-    // аудио (короткие сегменты + муз.остаток) single-linkage не сходится к истинному числу — либо
-    // фрагментирует одного на много, либо схлопывает. Пока не доведён метод (центроидное дослияние /
-    // spectral с оценкой K) — включается флагом DUB_VOICE_REDIARIZE=1; порог DUB_VOICE_CLUSTER_COS (~0.4).
-    if std::env::var("DUB_VOICE_REDIARIZE").ok().as_deref() != Some("1") {
+    // Голосовая переразметка ВКЛючена по умолчанию (юзер хочет >4 персонажей): AHC average-linkage находит
+    // персонажей больше Sortformer (Avatar: 4->10, мужские найдены). На ОЧЕНЬ шумном/старом моно-аудио
+    // (Ghostbusters) кластеризация менее точна — тогда отключить DUB_VOICE_REDIARIZE=0. Порог
+    // DUB_VOICE_CLUSTER_COS (дефолт 0.3).
+    if std::env::var("DUB_VOICE_REDIARIZE").ok().as_deref() == Some("0") {
         return None;
     }
     let vocals = {
