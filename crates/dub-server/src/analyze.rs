@@ -797,6 +797,24 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
             proj.audio.translate_style = prev.audio.translate_style;
         }
     }
+    // #115 ИНЖЕКЦИЯ ОПИСАНИЙ ПЕРСОНАЖЕЙ: при casting_ref подмешиваем speech_note профиля в translate_style
+    // ДО перевода — Gemma переводит реплики с учётом манеры речи/характера каждого персонажа. Профиль
+    // грузим по slug из app-библиотеки. Дополняет (не затирает) явный стиль перевода.
+    if !args.casting_ref.trim().is_empty() {
+        if let Some(prof) = crate::casting_library::load_profile_casting(&paths.repo_root, args.casting_ref.trim()) {
+            let notes = crate::casting::speech_notes_to_style(&prof);
+            if !notes.is_empty() {
+                proj.audio.translate_style = if proj.audio.translate_style.trim().is_empty() {
+                    notes
+                } else {
+                    format!("{}; {}", proj.audio.translate_style, notes)
+                };
+                emit(progress, "translate", &format!(
+                    "описания персонажей из профиля кастинга -> стиль перевода ({} симв.)",
+                    proj.audio.translate_style.len()));
+            }
+        }
+    }
     proj.meta = Meta {
         video: paths.input.to_string_lossy().into_owned(),
         duration: meta.duration,
@@ -874,6 +892,31 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
             args.content_type.clone()
         };
         crate::casting::stage(paths, &proj, &args.casting_ref, &eff_ct, progress);
+
+        // #115 АВТО-ПРИМЕНЕНИЕ ПЕРЕНЕСЁННЫХ ГОЛОСОВ: при casting_ref кросс-матч проставил персонажам
+        // dub_voice из профиля (в casting.json). Строим позиционный voice-CSV по спикерам ЭТОЙ серии и
+        // кладём в proj.audio.voice -> РЕНДЕР сразу озвучит правильными голосами, без ручного «Применить».
+        if !args.casting_ref.trim().is_empty() {
+            if let Some(casting) = dub_faces::load_casting(&paths.work_dir.join("casting.json")) {
+                let vmap = crate::casting::casting_voice_map(&casting);
+                if vmap.values().any(|v| v.is_some()) {
+                    let mut spk_ids: Vec<String> = proj
+                        .segments
+                        .iter()
+                        .map(|s| s.speaker.clone().unwrap_or_else(|| "0".to_string()))
+                        .collect();
+                    spk_ids.sort();
+                    spk_ids.dedup();
+                    let old_name = proj.audio.voice.name.clone();
+                    let old_is_voice = proj.audio.voice.mode == "voice";
+                    let csv = crate::casting::merge_voice_csv(&spk_ids, &vmap, old_name.as_deref(), old_is_voice);
+                    proj.audio.voice.mode = "voice".to_string();
+                    proj.audio.voice.name = Some(csv);
+                    let n = casting.characters.iter().filter(|c| !c.dub_voice.trim().is_empty() && !c.dub_voice.eq_ignore_ascii_case("clone")).count();
+                    emit(progress, "casting", &format!("перенесённые голоса профиля применены к дубляжу ({n} персонаж(ей))"));
+                }
+            }
+        }
     } else if args.casting {
         emit(progress, "casting", "аудио-режим: без видео, кастинг персонажей не нужен");
     }
