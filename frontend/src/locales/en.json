@@ -470,6 +470,8 @@
     "speechPlaceholder": "e.g. gruff and sarcastic, speaks fast, elderly",
     "voice": "Dubbing voice",
     "voiceClone": "Clone from video",
+    "contentReal": "Real faces",
+    "contentAnime": "Cartoon / anime",
     "gender": {
       "male": "Male",
       "female": "Female",

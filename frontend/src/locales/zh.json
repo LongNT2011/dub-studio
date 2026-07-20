@@ -470,6 +470,8 @@
     "speechPlaceholder": "例如 粗犷而讽刺、语速快、年长",
     "voice": "配音",
     "voiceClone": "从视频克隆",
+    "contentReal": "Real faces",
+    "contentAnime": "Cartoon / anime",
     "gender": {
       "male": "男",
       "female": "女",

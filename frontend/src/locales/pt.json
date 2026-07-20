@@ -470,6 +470,8 @@
     "speechPlaceholder": "ex. rude e sarcástico, fala rápido, idoso",
     "voice": "Voz de dublagem",
     "voiceClone": "Clonar do vídeo",
+    "contentReal": "Real faces",
+    "contentAnime": "Cartoon / anime",
     "gender": {
       "male": "Masculino",
       "female": "Feminino",

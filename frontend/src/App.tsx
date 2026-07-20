@@ -18,10 +18,6 @@ function fmtT(s: number) {
   const m = Math.floor(s / 60), sec = Math.floor(s % 60), d = Math.floor((s * 10) % 10);
   return `${m}:${String(sec).padStart(2, "0")}.${d}`;
 }
-// timecode m:ss — компактный вид для слайдера перемотки и транскрипта
-function fmtMS(s: number) {
-  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-}
 
 // Имя файла из пути (Windows/POSIX-разделители); fallback — сам путь.
 const baseName = (path: string) => path.split(/[\\/]/).pop() || path;
@@ -679,6 +675,9 @@ function DropZone() {
   // Персист как глобальный дефолт (как стиль перевода/громкость) — чтобы серию роликов дубить одним кастингом.
   const [castingRef, setCastingRef] = useState<string>(() => localStorage.getItem("dub-casting-ref") ?? "");
   const setCastingRefSaved = (v: string) => { setCastingRef(v); localStorage.setItem("dub-casting-ref", v); };
+  // Тип контента кастинга (#115): real (SCRFD+LVFace) | anime (детектор рисованных лиц + CCIP). Персист.
+  const [contentType, setContentType] = useState<string>(() => localStorage.getItem("dub-content-type") ?? "real");
+  const setContentTypeSaved = (v: string) => { setContentType(v); localStorage.setItem("dub-content-type", v); };
   // Список профилей библиотеки — грузим лениво, когда галка кастинга включена (не засорять UI при выкл.).
   const [castLib, setCastLib] = useState<{ slug: string; name: string; char_count: number }[]>([]);
   const refreshCastLib = () => api.castingLibrary().then((r) => setCastLib(r.casts)).catch(() => {});
@@ -797,7 +796,8 @@ function DropZone() {
       const effCasting = !audioOnly && (audio === "dub" || audio === "voiceover") && castingOn;
       // Готовый кастинг из библиотеки применяем только когда кастинг реально включён (та же видимость, что у галки).
       const effCastingRef = effCasting ? castingRef : "";
-      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated, trStyleText, effCasting, effCastingRef);
+      const effContentType = effCasting ? contentType : "real";
+      const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated, trStyleText, effCasting, effCastingRef, effContentType);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       if (audio === "voiceover") await api.patch(project_id, { op: "voiceover_gain", gain_db: voGain });   // громкость оригинала со старта -> рендер ниже подхватит
       // Сохранить оригинальную дорожку (#113): 2-я аудиодорожка при mux рендера. Только dub/voiceover, не аудио-режим.
@@ -1089,6 +1089,18 @@ function DropZone() {
                         {t("comp.casting")}
                         <span title={t("comp.castingHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
                       </label>
+                    )}
+                    {/* ТИП КОНТЕНТА (#115): реальные лица (SCRFD+LVFace) | мультфильм/аниме (детектор рисованных
+                        лиц + CCIP). Виден только при вкл. кастинге. Сегмент-контрол из двух кнопок. */}
+                    {showCasting && castingOn && (
+                      <div className="mt-1.5 inline-flex rounded-lg border border-[var(--color-border)] overflow-hidden text-[11px] w-fit">
+                        {([["real", t("casting.contentReal")], ["anime", t("casting.contentAnime")]] as const).map(([v, lbl]) => (
+                          <button key={v} type="button" onClick={() => setContentTypeSaved(v)}
+                            className={`px-2.5 py-1 transition ${contentType === v ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
+                            {lbl}
+                          </button>
+                        ))}
+                      </div>
                     )}
                     {/* ПРИМЕНИТЬ ГОТОВЫЙ КАСТИНГ (#115): профиль из библиотеки -> analyze(casting_ref=). Виден только при вкл. кастинге. */}
                     {showCasting && castingOn && (

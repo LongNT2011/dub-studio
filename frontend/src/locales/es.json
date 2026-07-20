@@ -470,6 +470,8 @@
     "speechPlaceholder": "p. ej. brusco y sarcástico, habla rápido, mayor",
     "voice": "Voz de doblaje",
     "voiceClone": "Clonar del vídeo",
+    "contentReal": "Real faces",
+    "contentAnime": "Cartoon / anime",
     "gender": {
       "male": "Masculino",
       "female": "Femenino",
