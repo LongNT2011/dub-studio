@@ -1,6 +1,7 @@
 //! Пресеты настроек под железо: автоопределение GPU/VRAM (NVML) -> рекомендованный пресет квантов, но
 //! юзер применяет любой сам. Пресет = бандл selection-ключей (tts/mt/asr_engine + or_*_on). «Облако»
-//! включает OpenRouter на все стадии — чтобы запускалось даже на слабом ПК без своей GPU.
+//! выносит тяжёлые модели (LLM/vision/TTS) в OpenRouter — разгрузка GPU и скорость. Сепарация,
+//! диаризация и локальный ASR остаются на GPU, поэтому NVIDIA всё равно нужна.
 //!
 //! Кванты: Higgs TTS q8_0>q6_k>q4_k_m, Gemma q8_0>q6_k>q5_0>q4_0. Больше VRAM -> выше квант.
 //! backend cuda/cpu тут НЕ трогаем — он авто-детектится по наличию CUDA-либ.
@@ -61,7 +62,7 @@ pub const PRESETS: &[Preset] = &[
     Preset {
         id: "cloud",
         title: "Облако (OpenRouter)",
-        subtitle: "Всё в облаке — работает даже на слабом ПК без GPU (нужен ключ + выбор моделей)",
+        subtitle: "Тяжёлые модели в облако — разгрузка GPU и скорость на слабой NVIDIA-карте (нужен ключ + выбор моделей)",
         min_vram_gb: 0.0,
         keys: &[("or_llm_on", "1"), ("or_vision_on", "1"), ("or_tts_on", "1")],
     },
@@ -101,7 +102,7 @@ pub fn recommend() -> HardwareRecommendation {
     let name_lc = hw.gpu_name.to_lowercase();
 
     let (recommended, reason) = if !has_gpu {
-        ("cloud", "NVIDIA GPU не найдена — облако (OpenRouter) запустится на любом ПК".to_string())
+        ("cloud", "NVIDIA GPU не найдена — облако снимет тяжёлые модели, но сепарация/диаризация всё равно требуют NVIDIA".to_string())
     } else if name_lc.contains("5090") {
         ("rtx5090", format!("Обнаружена {} — максимальные кванты", hw.gpu_name))
     } else if name_lc.contains("4090") {
