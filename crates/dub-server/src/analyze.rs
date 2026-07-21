@@ -307,6 +307,17 @@ fn emit(progress: &Progress, stage: &str, msg: &str) {
     progress(json!({ "stage": stage, "msg": msg }));
 }
 
+/// speaker-метка сегмента (Option<String>) -> i64 для dub-translate Seg. Метки бывают числовые ("0") ИЛИ
+/// голосовые ("v0" после recluster_segments) — снимаем префикс 'v' перед парсом, иначе nspk схлопывается в 1
+/// и «диалог из N спикеров»-хинт теряется. ЕДИНАЯ точка для translate/remix/re-lang (были 3 копии, 2
+/// разъехались — ревью #3). Пусто/непарсится -> 0 (питон-дефолт speaker=0).
+pub fn speaker_to_i64(speaker: Option<&str>) -> i64 {
+    speaker
+        .map(|x| x.trim_start_matches('v'))
+        .and_then(|x| x.parse::<i64>().ok())
+        .unwrap_or(0)
+}
+
 /// _has_speech (порт pipeline.py:66-78): есть ли РЕАЛЬНАЯ дубляж-годная речь? ASR галлюцинирует на
 /// музыке/неподдерживаемом языке — обычно короткая фраза повторяется (заполняет таймлайн, но почти без
 /// РАЗНООБРАЗИЯ слов). Гейтим по разнообразию слов + покрытию: uniq>=0.35 и coverage>=0.10. Пустой
@@ -805,8 +816,9 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     }
     // #115 ИНЖЕКЦИЯ ОПИСАНИЙ ПЕРСОНАЖЕЙ: при casting_ref подмешиваем speech_note профиля в translate_style
     // ДО перевода — Gemma переводит реплики с учётом манеры речи/характера каждого персонажа. Профиль
-    // грузим по slug из app-библиотеки. Дополняет (не затирает) явный стиль перевода.
-    if !args.casting_ref.trim().is_empty() {
+    // грузим по slug из app-библиотеки. Дополняет (не затирает) явный стиль перевода. Гейтим по args.casting
+    // тоже — иначе casting_ref без включённого кастинга протёк бы описания в промпт без применения профиля.
+    if args.casting && !args.casting_ref.trim().is_empty() {
         if let Some(prof) = crate::casting_library::load_profile_casting(&paths.repo_root, args.casting_ref.trim()) {
             let notes = crate::casting::speech_notes_to_style(&prof);
             if !notes.is_empty() {
@@ -948,7 +960,9 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
                     let csv = crate::casting::merge_voice_csv(&spk_ids, &vmap, old_name.as_deref(), old_is_voice);
                     proj.audio.voice.mode = "voice".to_string();
                     proj.audio.voice.name = Some(csv);
-                    let n = casting.characters.iter().filter(|c| !c.dub_voice.trim().is_empty() && !c.dub_voice.eq_ignore_ascii_case("clone")).count();
+                    // Считаем по ОТФИЛЬТРОВАННОМУ vmap (не по casting.characters) — иначе персонажи с
+                    // отсутствующим в voices/ голосом (сброшены в клон выше) попадают в счётчик.
+                    let n = vmap.values().filter(|v| v.is_some()).count();
                     emit(progress, "casting", &format!("перенесённые голоса профиля применены к дубляжу ({n} персонаж(ей))"));
                 }
             }

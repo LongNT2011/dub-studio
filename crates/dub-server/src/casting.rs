@@ -828,10 +828,9 @@ fn load_prev_casting(
 ) -> Option<Casting> {
     let slug = casting_ref.trim();
     if !slug.is_empty() {
-        let safe = slug.len() <= 128
-            && slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-            && !slug.contains("..");
-        if safe {
+        // Единый slug-guard (общий с load_profile_casting/delete/avatar) — не дублируем предикаты, чтобы
+        // при ужесточении is_safe_slug не осталось дыры на этом пути.
+        if crate::casting_library::is_safe_slug(slug) {
             let prof = paths.repo_root.join("casting_library").join(slug).join("casting.json");
             if let Some(c) = load_casting(&prof) {
                 emit(progress, "cast_speaker", &format!("применяю профиль библиотеки: {slug}"));

@@ -1090,8 +1090,8 @@ function DropZone() {
                         <span title={t("comp.castingHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
                       </label>
                     )}
-                    {/* ТИП КОНТЕНТА (#115): реальные лица (SCRFD+LVFace) | мультфильм/аниме (детектор рисованных
-                        лиц + CCIP). Виден только при вкл. кастинге. Сегмент-контрол из двух кнопок. */}
+                    {/* ТИП КОНТЕНТА (#115): авто (Gemma-детект) | реальные лица (SCRFD+LVFace) | мультфильм/аниме
+                        (детектор рисованных лиц + CCIP). Виден только при вкл. кастинге. Сегмент-контрол из трёх кнопок. */}
                     {showCasting && castingOn && (
                       <div className="mt-1.5 inline-flex rounded-lg border border-[var(--color-border)] overflow-hidden text-[11px] w-fit">
                         {([["auto", t("casting.contentAuto")], ["real", t("casting.contentReal")], ["anime", t("casting.contentAnime")]] as const).map(([v, lbl]) => (

@@ -202,7 +202,7 @@ pub async fn remix_project(
             .segments
             .iter()
             .map(|s| {
-                let spk = s.speaker.as_deref().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0);
+                let spk = crate::analyze::speaker_to_i64(s.speaker.as_deref());
                 Seg::new(s.src_text.clone(), spk)
             })
             .collect();

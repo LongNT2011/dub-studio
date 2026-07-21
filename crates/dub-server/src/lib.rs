@@ -1601,7 +1601,7 @@ async fn export_lang(
             .segments
             .iter()
             .map(|s| {
-                let spk = s.speaker.as_deref().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0);
+                let spk = crate::analyze::speaker_to_i64(s.speaker.as_deref());
                 // Вручную добавленные фразы имеют пустой src_text — их перевод берём из текущего tgt_text
                 // (он на СТАРОМ целевом языке), иначе flat_run их пропустит и они останутся на старом языке.
                 let src = if s.src_text.trim().is_empty() { s.tgt_text.clone() } else { s.src_text.clone() };

@@ -114,7 +114,10 @@ pub fn character_similarity(a: &Character, b: &Character) -> f32 {
     let voice = both_cos(&a.voice_embedding, &b.voice_embedding);
     match (face, voice) {
         (Some(f), Some(v)) => v.max((f + v) * 0.5),
-        (Some(f), None) => f,
+        // Голос ОТСУТСТВУЕТ (клип спикера < мин.длины) — подтвердить лицо нечем. Лицо ненадёжно (кадр
+        // слушателя), поэтому в одиночку требуем ВЫСОКОЙ уверенности: пенализируем (нужен f≥0.71 при пороге
+        // 0.5), иначе шумный лицевой матч перенёс бы чужой голос. Согласовано с half-weight лица выше.
+        (Some(f), None) => f * 0.7,
         (None, Some(v)) => v,
         (None, None) => -1.0,
     }

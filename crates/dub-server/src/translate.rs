@@ -145,14 +145,7 @@ pub fn stage(
         .segments
         .iter()
         .map(|s| {
-            // speaker бывает числовой ("0","1") ИЛИ переразмеченный по голосу ("v0","v1"):
-            // снимаем префикс 'v' перед парсом, иначе nspk схлопывается в 1 и диалог-хинт теряется.
-            let spk = s
-                .speaker
-                .as_deref()
-                .map(|x| x.trim_start_matches('v'))
-                .and_then(|x| x.parse::<i64>().ok())
-                .unwrap_or(0);
+            let spk = crate::analyze::speaker_to_i64(s.speaker.as_deref());
             let mut seg = Seg::new(s.src_text.clone(), spk);
             seg.start = s.start;
             seg.end = s.end;

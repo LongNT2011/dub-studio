@@ -41,3 +41,6 @@ target2/
 scratchpad/
 logs/
 demos/
+
+# тест-видео кастинга (#115) — НЕ в репозиторий (419МБ), только на диске для E2E
+frontend/public/*.mp4
