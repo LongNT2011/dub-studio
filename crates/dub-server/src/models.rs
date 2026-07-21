@@ -77,6 +77,7 @@ pub fn is_selection_key(key: &str) -> bool {
             | "llama_ubatch"    // размер prefill-батча Gemma (меньше = меньше пиковый буфер графа prefill)
             | "higgs_ref_secs"  // длина реф-клипа клона голоса (меньше = меньше prefill Higgs; <12с спасает 32ГБ)
             | "bench"           // пер-стадийный бенчмарк (bench.json + ⏱ в журнале); галка в настройках, ВЫКЛ по умолчанию
+            | "duck_on"         // дакинг фона под дубляжом (приглушать фон под речью); ВЫКЛ по умолчанию — не всем нужен
             // Облачные модели (OpenRouter) — опциональная замена тяжёлого локального LLM/TTS. Всё ВЫКЛ по умолчанию.
             | "or_key"          // API-ключ OpenRouter (хранится локально в active.json, не логируется)
             | "or_llm_on"       // "1" -> перевод через OpenRouter chat вместо локальной Gemma
@@ -86,6 +87,9 @@ pub fn is_selection_key(key: &str) -> bool {
             | "or_tts_on"       // "1" -> TTS через облако вместо локального Higgs
             | "or_tts_model"    // id TTS-модели OpenRouter (напр. "openai/gpt-4o-mini-tts")
             | "or_tts_voice"    // голос по умолчанию для облачного TTS (напр. "alloy")
+            | "or_tts_autocast" // БЕТА: автокастинг голосов по полу спикера (муж->муж/жен->жен); ВКЛ по умолчанию
+            | "or_asr_on"       // "1" -> транскрипция (ASR) через OpenRouter вместо локального Parakeet/Whisper
+            | "or_asr"          // id STT-модели OpenRouter (напр. "openai/whisper-large-v3")
     )
 }
 
@@ -105,35 +109,53 @@ pub fn openrouter_stage_on(mroot: &Path, stage: &str) -> bool {
         "llm" => "or_llm_on",
         "vision" => "or_vision_on",
         "tts" => "or_tts_on",
+        "asr" => "or_asr_on",
         _ => return false,
     };
     pick(&sel, flag) == Some("1")
 }
 
-/// id облачной модели для стадии: "llm" -> or_llm (дефолт google/gemini-2.5-flash);
-/// "vision" -> or_vision, пусто -> or_llm; "tts" -> or_tts_model (дефолт openai/gpt-4o-mini-tts).
+/// id облачной модели для стадии: "llm" -> or_llm; "vision" -> or_vision, пусто -> or_llm;
+/// "tts" -> or_tts_model. НИКАКОГО хардкода id — модель только из выбора юзера (динамический список из
+/// API, юзер выбирает сам). Пусто -> вызывающий обязан честно упасть с понятной ошибкой «модель не выбрана».
 pub fn openrouter_model(mroot: &Path, stage: &str) -> String {
     let sel = load_selection(mroot);
     match stage {
-        "llm" => pick(&sel, "or_llm").unwrap_or("google/gemini-2.5-flash").to_string(),
-        "vision" => pick(&sel, "or_vision")
-            .or_else(|| pick(&sel, "or_llm"))
-            .unwrap_or("google/gemini-2.5-flash")
-            .to_string(),
-        "tts" => pick(&sel, "or_tts_model").unwrap_or("openai/gpt-4o-mini-tts").to_string(),
+        "llm" => pick(&sel, "or_llm").unwrap_or("").to_string(),
+        "vision" => pick(&sel, "or_vision").or_else(|| pick(&sel, "or_llm")).unwrap_or("").to_string(),
+        "tts" => pick(&sel, "or_tts_model").unwrap_or("").to_string(),
+        "asr" => pick(&sel, "or_asr").unwrap_or("").to_string(),
         _ => String::new(),
     }
 }
 
-/// Голос облачного TTS (or_tts_voice, дефолт "alloy" — совместим с OpenAI-моделями).
+/// Включена ли облачная транскрипция (ASR через OpenRouter) — флаг + ключ + выбранная модель.
+pub fn openrouter_asr_on(mroot: &Path) -> bool {
+    openrouter_stage_on(mroot, "asr") && !openrouter_model(mroot, "asr").trim().is_empty()
+}
+
+/// Голос облачного TTS по умолчанию (or_tts_voice). Без хардкода — пусто, если не задан (при автокастинге
+/// голос подбирается по полу спикера; при отсутствии и того, и другого TTS честно падает).
 pub fn openrouter_tts_voice(mroot: &Path) -> String {
-    pick(&load_selection(mroot), "or_tts_voice").unwrap_or("alloy").to_string()
+    pick(&load_selection(mroot), "or_tts_voice").unwrap_or("").to_string()
+}
+
+/// БЕТА: включён ли автокастинг облачных голосов по полу спикера. ВКЛ по умолчанию (это и есть желаемое
+/// поведение); ВЫКЛ ("0") -> все спикеры одним дефолтным голосом (or_tts_voice).
+pub fn openrouter_autocast(mroot: &Path) -> bool {
+    pick(&load_selection(mroot), "or_tts_autocast") != Some("0")
 }
 
 /// Включён ли пер-стадийный бенчмарк (галка в настройках -> active.json "bench"="1"). По умолчанию ВЫКЛ:
 /// фоновый семплер NVML/sysinfo и bench.json нужны только для сравнения настроек, не в обычной работе.
 pub fn bench_enabled(mroot: &Path) -> bool {
     pick(&load_selection(mroot), "bench") == Some("1")
+}
+
+/// Включён ли дакинг фона под дубляжом (приглушать фон под речью). ВЫКЛ по умолчанию — не всем нужен;
+/// без него фон в дубляже звучит на полной громкости под голосом. Настройка "duck_on"="1".
+pub fn duck_enabled(mroot: &Path) -> bool {
+    pick(&load_selection(mroot), "duck_on") == Some("1")
 }
 
 /// Прочитать числовой слот выбора (llama_ubatch/higgs_ref_secs) из active.json. Значение может лежать

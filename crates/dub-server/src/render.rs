@@ -723,6 +723,38 @@ fn build_dub(
         Some(e)
     };
 
+    // Автокастинг облачных голосов по полу спикера: мужскому спикеру — мужской голос, женскому — женский,
+    // разным спикерам — разные. Пол — F0-замер (как в кастинге), голоса модели — динамически из API, пол
+    // голоса — из спеки провайдера. Только в облачном режиме (локальный Higgs клонирует реальные рефы).
+    // Пусто -> облачный TTS уйдёт на дефолтный голос настроек (or_tts_voice).
+    let cloud_voice_map: std::collections::HashMap<String, String> = if cloud_tts_on
+        && crate::models::openrouter_autocast(&paths.models_root)
+    {
+        let mut spk_ids: Vec<String> = proj
+            .segments
+            .iter()
+            .map(|s| s.speaker.clone().unwrap_or_else(|| "0".into()))
+            .collect();
+        spk_ids.sort();
+        spk_ids.dedup();
+        let genders = crate::casting::speaker_genders_wd(&paths.work_dir, proj, &spk_ids);
+        let m = crate::cloud_voices::assign(&paths.models_root, &genders, &proj.tgt_lang);
+        if !m.is_empty() {
+            let mut desc: Vec<String> = m
+                .iter()
+                .map(|(k, v)| {
+                    let g = genders.get(k).map(String::as_str).unwrap_or("?");
+                    format!("{k}({g})→{v}")
+                })
+                .collect();
+            desc.sort();
+            emit(progress, "tts", &format!("автокастинг облачных голосов: {}", desc.join(", ")));
+        }
+        m
+    } else {
+        std::collections::HashMap::new()
+    };
+
     // placed = [(at, wav_path, dur)]. cursor-aware fit (как в питоне). dur мерится ЗДЕСЬ (в цикле
     // укладки) и хранится рядом — дакинг-блоки строятся из него БЕЗ повторного ffprobe (перф [22]).
     // Имя seg-файла и слот next.start — по индексу fi в ПОЛНОМ списке proj.segments.
@@ -777,9 +809,13 @@ fn build_dub(
         if need_synth {
             if cloud_tts_on {
             // Облачный TTS: wav-байты OpenRouter пишем ПРЯМО в seg-файл (без декода/перекодировки).
-            // Голос — дефолтный из настроек (пер-спикерный маппинг — отдельным шагом). Провал -> оригинал
+            // Голос — из автокастинга по полу спикера (пусто -> дефолт настроек). Провал -> оригинал
             // сегмента (ноль немых мест), как локальный фолбэк.
-            match crate::cloud_tts::synth_audio(&paths.models_root, tgt, "") {
+            let cv = cloud_voice_map
+                .get(s.speaker.as_deref().unwrap_or("0"))
+                .map(String::as_str)
+                .unwrap_or("");
+            match crate::cloud_tts::synth_audio(&paths.models_root, tgt, cv) {
                 Ok(wav) => {
                     std::fs::write(&raw, &wav).map_err(|e| format!("запись облачного seg{fi}: {e}"))?;
                 }
@@ -1152,13 +1188,20 @@ fn build_dub(
         // реагировал на мгновенную амплитуду TTS и давал «качели» на микропаузах внутри фраз. Требование
         // юзера: «дубляж громче фона, но фон НЕ гробить» (−12 дБ срезали весь фон). Каскад фолбэков:
         // огибающая -> sidechain -> прямой mix.
-        emit(progress, "mix", &format!("сведение: инструментал + дубль-вокал (дакинг-огибающая, {} блоков)", speech_blocks.len()));
         let new_audio = wd.join("new_audio.m4a");
-        if media::mix_env(&dub, &inst, &speech_blocks, &new_audio).is_err() {
-            emit(progress, "mix", "огибающая недоступна -> сайдчейн-дакинг");
-            if media::mix_ducked(&dub, &inst, &new_audio).is_err() {
-                emit(progress, "mix", "sidechain недоступен -> прямой mix");
-                media::mix(&dub, &inst, &new_audio)?;
+        // Дакинг фона под дубляжом — ОПЦИЯ (duck_on), ВЫКЛ по умолчанию: не всем нужен, многим фон нужен
+        // на полной громкости. Выкл -> прямой mix (фон 1:1). Вкл -> огибающая −3дБ (каскад фолбэков).
+        if !crate::models::duck_enabled(&paths.models_root) {
+            emit(progress, "mix", "сведение: инструментал + дубль-вокал (дакинг ВЫКЛ — фон полный)");
+            media::mix(&dub, &inst, &new_audio)?;
+        } else {
+            emit(progress, "mix", &format!("сведение: инструментал + дубль-вокал (дакинг ВКЛ, огибающая, {} блоков)", speech_blocks.len()));
+            if media::mix_env(&dub, &inst, &speech_blocks, &new_audio).is_err() {
+                emit(progress, "mix", "огибающая недоступна -> сайдчейн-дакинг");
+                if media::mix_ducked(&dub, &inst, &new_audio).is_err() {
+                    emit(progress, "mix", "sidechain недоступен -> прямой mix");
+                    media::mix(&dub, &inst, &new_audio)?;
+                }
             }
         }
         new_audio

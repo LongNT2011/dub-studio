@@ -837,10 +837,17 @@ fn gender_label(f0: f64) -> Option<&'static str> {
 /// Пол каждого спикера по медиане F0 на чистом вокале (vocals16_clean.wav / vocals16.wav). Нет вокала ->
 /// пустая карта (без пола). Переиспользует crate::f0 (тот же путь, что voice_slots #114).
 fn speaker_genders(paths: &AnalyzePaths, proj: &Project, speakers: &[String]) -> HashMap<String, String> {
+    speaker_genders_wd(&paths.work_dir, proj, speakers)
+}
+
+/// Пол каждого спикера по медиане F0 (Гц) на длиннейшей реплике из чистого вокала. Версия по work_dir —
+/// вызывается из render (RenderPaths) для автокастинга облачных голосов. Нет вокала/шумный замер -> спикер
+/// без пола (в out не попадает), матчер тогда возьмёт ротацию по всем голосам.
+pub fn speaker_genders_wd(work_dir: &Path, proj: &Project, speakers: &[String]) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let vocals = {
-        let clean = paths.work_dir.join("vocals16_clean.wav");
-        let raw = paths.work_dir.join("vocals16.wav");
+        let clean = work_dir.join("vocals16_clean.wav");
+        let raw = work_dir.join("vocals16.wav");
         if clean.is_file() {
             clean
         } else if raw.is_file() {
@@ -857,7 +864,7 @@ fn speaker_genders(paths: &AnalyzePaths, proj: &Project, speakers: &[String]) ->
             .filter(|s| s.speaker.as_deref().unwrap_or("0") == spk)
             .max_by(|a, b| (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap_or(std::cmp::Ordering::Equal));
         let Some(seg) = cand else { continue };
-        let tmp = paths.work_dir.join(format!("casting_f0_{}.wav", sanitize(spk)));
+        let tmp = work_dir.join(format!("casting_f0_{}.wav", sanitize(spk)));
         let end = seg.end.min(seg.start + 30.0).max(seg.start + 0.05);
         if crate::media::trim(&vocals, &tmp, seg.start, end, 16_000).is_err() {
             continue;

@@ -115,7 +115,12 @@ export const api = {
   setSelection: (key: string, value: string) => postJson<Record<string, string>>("/engine/select", { key, value }),
   // Облачные модели (OpenRouter): проверка ключа + фильтрованный каталог по модальности (llm/vision/tts).
   openrouterVerify: (key: string) => postJson<{ ok: boolean; data?: { label?: string; limit?: number; usage?: number }; error?: unknown }>("/engine/openrouter/verify", { key }),
-  openrouterModels: (kind: "llm" | "vision" | "tts") => getJson<{ models: { id: string; name: string; context?: number }[] }>(`/engine/openrouter/models?kind=${kind}`),
+  openrouterModels: (kind: "llm" | "vision" | "tts" | "asr") => getJson<{ models: { id: string; name: string; context?: number }[] }>(`/engine/openrouter/models?kind=${kind}`),
+  // Голоса TTS-модели с полом/возрастом/русским (встроенный справочник) — для дропдауна + автокастинга.
+  openrouterVoices: (model: string) => getJson<{ voices: { name: string; gender: string; age: string; ru: boolean }[]; supportsRussian: boolean | null }>(`/engine/openrouter/voices?model=${encodeURIComponent(model)}`),
+  // Пресеты железа: список + детект GPU/VRAM + рекомендация; применение пишет кванты/облако в active.json.
+  hwPresets: () => getJson<{ presets: { id: string; title: string; subtitle: string }[]; hardware: { gpuName: string; totalVramGb: number; totalRamGb: number; hasGpu: boolean; recommended: string; reason: string } }>("/engine/presets"),
+  applyPreset: (id: string) => postJson<{ ok: boolean; id: string; applied: { key: string; value: string }[] }>("/engine/preset", { id }),
   voices: () => getJson<{ voices: string[] }>("/voices"),
   recordDevices: () => getJson<{ devices: string[] }>("/record/devices"),
   recordLevel: () => getJson<{ level: number }>("/record/level"),

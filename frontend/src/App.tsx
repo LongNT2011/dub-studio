@@ -87,6 +87,11 @@ function ModelsSection() {
   // секции ремаунтил пикер и сбрасывал выбор на дефолт. Ключ = ids[0] группы.
   const [picks, setPicks] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);            // ошибки скачки/импорта — показываем, не глотаем
+  // Облачные движки OpenRouter — НЕ отдельный блок, а альтернатива локальному движку ВНУТРИ каждой группы
+  // (перевод: Gemma|OpenRouter, TTS: Higgs|OpenRouter), как Parakeet|Whisper в ASR. Ключ общий на все стадии.
+  const [orModels, setOrModels] = useState<Record<string, { id: string }[]>>({});
+  const [orVoices, setOrVoices] = useState<{ name: string; gender: string; age: string; ru: boolean }[]>([]);
+  const [ttsRu, setTtsRu] = useState<boolean | null>(null);
   const loadCap = () => api.capabilities().then((c) => {
     setCap(c);
     const s = c.selection ?? {};
@@ -95,6 +100,21 @@ function ModelsSection() {
   }).catch(() => {});
   const refresh = () => { api.setupStatus().then(setStatus).catch(() => {}); loadCap(); };
   useEffect(() => { refresh(); }, []);
+  const selv = (k: string) => cap?.selection?.[k] ?? "";
+  const hasOrKey = (cap?.selection?.or_key ?? "").trim().length > 0;
+  const setSel = (k: string, v: string) => api.setSelection(k, v).then(loadCap).catch(() => {});
+  // Каталоги моделей по стадиям — динамически из OpenRouter, как только есть рабочий ключ (без хардкода id).
+  useEffect(() => {
+    if (!hasOrKey) return;
+    (["llm", "vision", "tts", "asr"] as const).forEach((kind) =>
+      api.openrouterModels(kind).then((r) => setOrModels((m) => ({ ...m, [kind]: r.models }))).catch(() => {}));
+  }, [hasOrKey]);
+  // Голоса выбранной облачной TTS-модели (пол/возраст/русский) для дропдауна + предупреждения о русском.
+  const orTtsModel = cap?.selection?.or_tts_model ?? "";
+  useEffect(() => {
+    if (!orTtsModel) { setOrVoices([]); setTtsRu(null); return; }
+    api.openrouterVoices(orTtsModel).then((r) => { setOrVoices(r.voices); setTtsRu(r.supportsRussian); }).catch(() => {});
+  }, [orTtsModel]);
   const dl = async (id: string) => {
     if (prog) return;
     setProg({ id, pct: 0 }); setErr(null);
@@ -200,6 +220,23 @@ function ModelsSection() {
 
   const rowOf = (id: string) => { const c = get(id); return c ? <Row key={id} {...c} /> : null; };
 
+  // Тумблер движка «локально | OpenRouter» — тот же вид, что переключатель Parakeet|Whisper в группе ASR.
+  const orRowCls = "px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]";
+  const EngineTabs = ({ cloud, onLocal, onCloud, localLabel }: { cloud: boolean; onLocal: () => void; onCloud: () => void; localLabel: string }) => (
+    <div className="flex gap-1 mb-1.5">
+      <button onClick={onLocal} className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${!cloud ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>{localLabel}</button>
+      <button onClick={onCloud} disabled={!hasOrKey} title={hasOrKey ? "" : "Введите ключ OpenRouter выше"}
+        className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${cloud ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"} disabled:opacity-40`}>OpenRouter</button>
+    </div>
+  );
+  const orSelectCls = "w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none";
+  const OrModelSelect = ({ kind, k, empty }: { kind: "llm" | "vision" | "tts" | "asr"; k: string; empty: string }) => (
+    <select value={selv(k)} onChange={(e) => setSel(k, e.target.value)} className={orSelectCls}>
+      <option value="">{empty}</option>
+      {(orModels[kind] ?? []).map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+    </select>
+  );
+
   const browse = async () => {
     if (prog) return;
     try { const r = await api.setupBrowse(); if (r.picked) setStatus(r.status); } catch { /* ignore */ }
@@ -217,21 +254,60 @@ function ModelsSection() {
           <button onClick={() => setErr(null)} className="shrink-0 text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={12} /></button>
         </div>
       )}
+      {/* Общий ключ OpenRouter — включает облачный движок в группах ниже (переиспользуемый компонент). */}
+      <div className="mb-3"><OpenRouterKey onSaved={loadCap} /></div>
       <Group label={t("settings.roleTts")}>
-        <VariantPicker base="Higgs Audio v3" ids={["higgs", "higgs-q6_k", "higgs-q4_k_m"]} />
-        {rowOf("higgs-engine")}
+        <EngineTabs cloud={selv("or_tts_on") === "1"} localLabel="Higgs Audio v3" onLocal={() => setSel("or_tts_on", "0")} onCloud={() => setSel("or_tts_on", "1")} />
+        {selv("or_tts_on") === "1" ? (
+          <div className={`${orRowCls} space-y-2`}>
+            <OrModelSelect kind="tts" k="or_tts_model" empty="— выбрать TTS-модель —" />
+            {ttsRu === false && <div className="text-[11px] text-[var(--color-warn)]">⚠ Модель не поддерживает русский — выберите другую для русского дубляжа.</div>}
+            <div className="flex items-center gap-2">
+              <button onClick={() => setSel("or_tts_autocast", (selv("or_tts_autocast") || "1") !== "0" ? "0" : "1")}
+                className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${(selv("or_tts_autocast") || "1") !== "0" ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface)] border border-[var(--color-border)]"}`}>
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${(selv("or_tts_autocast") || "1") !== "0" ? "left-[18px]" : "left-0.5"}`} />
+              </button>
+              <span className="text-[12px]">Автокастинг голосов</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-accent)]/20 text-[var(--color-accent)] uppercase tracking-wider">бета</span>
+            </div>
+            {(selv("or_tts_autocast") || "1") !== "0" ? (
+              <div className="text-[11px] text-[var(--color-muted)]">🎭 Голос по полу спикера автоматически, разным спикерам — разные.</div>
+            ) : (
+              <select value={selv("or_tts_voice")} onChange={(e) => setSel("or_tts_voice", e.target.value)} className={orSelectCls}>
+                <option value="">— один голос на всех —</option>
+                {orVoices.map((v) => <option key={v.name} value={v.name}>{v.gender === "male" ? "♂" : v.gender === "female" ? "♀" : "•"} {v.name}{v.age === "teen" || v.age === "child" ? ` · ${v.age}` : ""}</option>)}
+              </select>
+            )}
+          </div>
+        ) : (
+          <>
+            <VariantPicker base="Higgs Audio v3" ids={["higgs", "higgs-q6_k", "higgs-q4_k_m"]} />
+            {rowOf("higgs-engine")}
+          </>
+        )}
       </Group>
       <Group label={t("settings.roleAsr")}>
-        {/* Движок ASR: Parakeet-TDT (GPU, дефолт) ИЛИ Whisper (много моделей + квантов, CPU из коробки). */}
+        {/* Движок ASR: Parakeet-TDT (GPU, дефолт) / Whisper (локально, CPU) / OpenRouter (облако). */}
         <div className="flex gap-1 mb-1.5">
-          {["parakeet", "whisper"].map((e) => (
-            <button key={e} onClick={() => { setAsrEngine(e); api.setSelection("asr_engine", e).catch(() => {}); }}
-              className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${asrEngine === e ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>
-              {e === "parakeet" ? "Parakeet-TDT" : "Whisper"}
-            </button>
-          ))}
+          {[{ id: "parakeet", label: "Parakeet-TDT", cloud: false }, { id: "whisper", label: "Whisper", cloud: false }, { id: "openrouter", label: "OpenRouter", cloud: true }].map((e) => {
+            const asrCloud = selv("or_asr_on") === "1";
+            const active = e.cloud ? asrCloud : (!asrCloud && asrEngine === e.id);
+            const dis = e.cloud && !hasOrKey;
+            return (
+              <button key={e.id} disabled={dis} title={dis ? "Введите ключ OpenRouter выше" : ""}
+                onClick={() => { if (e.cloud) { setSel("or_asr_on", "1"); } else { setSel("or_asr_on", "0"); setAsrEngine(e.id); api.setSelection("asr_engine", e.id).catch(() => {}); } }}
+                className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${active ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"} disabled:opacity-40`}>
+                {e.label}
+              </button>
+            );
+          })}
         </div>
-        {asrEngine === "parakeet" ? (
+        {selv("or_asr_on") === "1" ? (
+          <div className={`${orRowCls} space-y-2`}>
+            <OrModelSelect kind="asr" k="or_asr" empty="— выбрать STT-модель —" />
+            <div className="text-[11px] text-[var(--color-muted)]">Транскрипция через облако — тяжёлые локальные ASR-модели качать не нужно.</div>
+          </div>
+        ) : asrEngine === "parakeet" ? (
           <VariantPicker base="Parakeet-TDT 0.6B v3" ids={["parakeet", "parakeet-fp32"]} />
         ) : (
           <>
@@ -255,8 +331,25 @@ function ModelsSection() {
         )}
       </Group>
       <Group label={t("settings.roleMt")}>
-        <VariantPicker base="Gemma-4 12B QAT + vision" ids={["gemma", "gemma-q5_0", "gemma-q6_k", "gemma-q8_0"]} />
-        {rowOf("llama")}
+        <EngineTabs cloud={selv("or_llm_on") === "1"} localLabel="Gemma-4 12B" onLocal={() => setSel("or_llm_on", "0")} onCloud={() => setSel("or_llm_on", "1")} />
+        {selv("or_llm_on") === "1" ? (
+          <div className={`${orRowCls} space-y-2`}>
+            <OrModelSelect kind="llm" k="or_llm" empty="— выбрать модель перевода —" />
+            <div className="flex items-center gap-2 pt-0.5">
+              <button onClick={() => setSel("or_vision_on", selv("or_vision_on") === "1" ? "0" : "1")}
+                className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${selv("or_vision_on") === "1" ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface)] border border-[var(--color-border)]"}`}>
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${selv("or_vision_on") === "1" ? "left-[18px]" : "left-0.5"}`} />
+              </button>
+              <span className="text-[12px]">Vision-анализ кадров через облако</span>
+            </div>
+            {selv("or_vision_on") === "1" && <OrModelSelect kind="vision" k="or_vision" empty="как модель перевода" />}
+          </div>
+        ) : (
+          <>
+            <VariantPicker base="Gemma-4 12B QAT + vision" ids={["gemma", "gemma-q5_0", "gemma-q6_k", "gemma-q8_0"]} />
+            {rowOf("llama")}
+          </>
+        )}
       </Group>
       <Group label={t("settings.roleSep")}>
         <VariantPicker base="Mel-Band Roformer voc_fv6" ids={["roformer", "roformer-q5", "roformer-q4"]} />
@@ -292,67 +385,71 @@ function ModelsSection() {
   );
 }
 
-// Облачные модели (OpenRouter): опциональная замена тяжёлых локальных LLM/vision/TTS запросами к API.
-// Ключ + пер-часть тумблеры + id моделей хранятся в active.json (api.setSelection).
-function CloudModelsSection() {
-  const [sel, setSel] = useState<Record<string, string>>({});
-  const [keyInput, setKeyInput] = useState("");
-  const [showKey, setShowKey] = useState(false);
+// Пресет под железо: автоопределение GPU/VRAM -> рекомендованные кванты, но юзер применяет любой сам.
+// Облачный пресет включает OpenRouter на все стадии — работает даже на слабом ПК без своей GPU.
+// Переиспользуемая строка ключа OpenRouter (настройки И первый запуск). onSaved — после успешной проверки.
+function OpenRouterKey({ onSaved }: { onSaved?: () => void }) {
+  const [key, setKey] = useState("");
+  const [show, setShow] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  useEffect(() => {
-    api.capabilities().then((c) => {
-      const s = (c.selection ?? {}) as Record<string, string>;
-      setSel(s);
-      setKeyInput(s.or_key ?? "");
-    }).catch(() => {});
-  }, []);
-  const set = (k: string, v: string) => { setSel((p) => ({ ...p, [k]: v })); api.setSelection(k, v).catch(() => {}); };
-  const isOn = (k: string) => sel[k] === "1";
-  const hasKey = (sel.or_key ?? "").trim().length > 0;
+  const [has, setHas] = useState(false);
+  useEffect(() => { api.capabilities().then((c) => { const k = c.selection?.or_key ?? ""; setKey(k); setHas(k.trim().length > 0); }).catch(() => {}); }, []);
   const verify = async () => {
     setVerifying(true); setMsg(null);
     try {
-      const r = await api.openrouterVerify(keyInput.trim());
-      if (r.ok) { set("or_key", keyInput.trim()); setMsg({ ok: true, text: "Ключ рабочий — сохранён" }); }
+      const r = await api.openrouterVerify(key.trim());
+      if (r.ok) { await api.setSelection("or_key", key.trim()); setHas(true); setMsg({ ok: true, text: "Ключ рабочий — сохранён" }); onSaved?.(); }
       else setMsg({ ok: false, text: "Ключ не принят OpenRouter" });
     } catch { setMsg({ ok: false, text: "OpenRouter недоступен" }); }
     setVerifying(false);
   };
-  const inp = "w-full px-2 py-1 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] text-[12px] mono focus:border-[var(--color-accent)] outline-none";
-  const Toggle = ({ k }: { k: string }) => (
-    <button onClick={() => hasKey && set(k, isOn(k) ? "0" : "1")} disabled={!hasKey}
-      className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${isOn(k) && hasKey ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface-2)] border border-[var(--color-border)]"} ${!hasKey ? "opacity-40 cursor-not-allowed" : ""}`}>
-      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${isOn(k) && hasKey ? "left-[18px]" : "left-0.5"}`} />
-    </button>
-  );
   return (
-    <div className="mt-4 pt-3 border-t border-[var(--color-border)]">
-      <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)] mb-2">Облачные модели · OpenRouter</div>
-      <p className="text-[12px] text-[var(--color-muted)] leading-relaxed mb-2.5">
-        Опционально: снять с ПК самую тяжёлую часть — гонять LLM-перевод, vision и TTS через OpenRouter вместо локальных моделей. Ключ хранится локально.
-      </p>
-      <div className="flex gap-2 mb-1">
-        <input type={showKey ? "text" : "password"} value={keyInput} onChange={(e) => setKeyInput(e.target.value)}
-          placeholder="sk-or-v1-…" className={`${inp} flex-1`} />
-        <button onClick={() => setShowKey((s) => !s)} title="показать ключ"
-          className="px-2 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]">{showKey ? <EyeOff size={13} /> : <Eye size={13} />}</button>
-        <button onClick={verify} disabled={verifying || !keyInput.trim()}
-          className="px-3 py-1 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] text-[12px] hover:border-[var(--color-accent)] disabled:opacity-40 transition-colors">{verifying ? "…" : "Проверить"}</button>
+    <div className="px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
+      <div className="flex items-center gap-2 mb-1">
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${has ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
+        <span className="text-[12px] font-medium">Ключ OpenRouter</span>
+        <span className="mono text-[10px] text-[var(--color-muted)]">для облачных движков (перевод / TTS)</span>
       </div>
-      {msg && <div className={`text-[11px] mb-2 ${msg.ok ? "text-[var(--color-accent)]" : "text-[var(--color-warn)]"}`}>{msg.text}</div>}
-      {!hasKey && <div className="text-[11px] text-[var(--color-muted)]/70 mb-2">Проверьте ключ, чтобы включить облачные части.</div>}
-
-      <div className="flex items-center gap-2 mb-1.5"><Toggle k="or_llm_on" /><span className="text-[13px]">Перевод (LLM)</span></div>
-      <input value={sel.or_llm ?? ""} onChange={(e) => set("or_llm", e.target.value)} placeholder="google/gemini-2.5-flash" className={`${inp} mb-3`} />
-
-      <div className="flex items-center gap-2 mb-1.5"><Toggle k="or_vision_on" /><span className="text-[13px]">Vision (анализ кадров)</span></div>
-      <input value={sel.or_vision ?? ""} onChange={(e) => set("or_vision", e.target.value)} placeholder="пусто = как модель перевода" className={`${inp} mb-3`} />
-
-      <div className="flex items-center gap-2 mb-1.5"><Toggle k="or_tts_on" /><span className="text-[13px]">Озвучка (TTS)</span></div>
       <div className="flex gap-2">
-        <input value={sel.or_tts_model ?? ""} onChange={(e) => set("or_tts_model", e.target.value)} placeholder="openai/gpt-4o-mini-tts" className={`${inp} flex-1`} />
-        <input value={sel.or_tts_voice ?? ""} onChange={(e) => set("or_tts_voice", e.target.value)} placeholder="alloy" className={`${inp} w-24`} />
+        <input type={show ? "text" : "password"} value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-or-v1-…"
+          className="flex-1 px-2 py-1 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] text-[12px] mono focus:border-[var(--color-accent)] outline-none" />
+        <button onClick={() => setShow((s) => !s)} className="px-2 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]">{show ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+        <button onClick={verify} disabled={verifying || !key.trim()} className="px-3 py-1 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] text-[12px] hover:border-[var(--color-accent)] disabled:opacity-40">{verifying ? "…" : "Проверить"}</button>
+      </div>
+      {msg && <div className={`text-[11px] mt-1 ${msg.ok ? "text-[var(--color-accent)]" : "text-[var(--color-warn)]"}`}>{msg.text}</div>}
+    </div>
+  );
+}
+
+function PresetsSection({ onApplied }: { onApplied?: () => void }) {
+  const [data, setData] = useState<Awaited<ReturnType<typeof api.hwPresets>> | null>(null);
+  const [applied, setApplied] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.hwPresets().then(setData).catch(() => {}); }, []);
+  const apply = async (id: string) => {
+    setBusy(true);
+    try { await api.applyPreset(id); setApplied(id); onApplied?.(); } catch { /* ignore */ }
+    setBusy(false);
+  };
+  const hw = data?.hardware;
+  const cur = applied ?? hw?.recommended ?? "";
+  const curP = data?.presets.find((p) => p.id === cur);
+  return (
+    <div className="mb-4 pb-3 border-b border-[var(--color-border)]">
+      <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)] mb-1.5">Пресет под железо</div>
+      <div className="px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
+        <div className="flex items-center gap-2.5">
+          <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--color-accent)]" />
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium truncate">{hw ? (hw.hasGpu ? `${hw.gpuName} · ${hw.totalVramGb.toFixed(0)} ГБ VRAM` : "NVIDIA GPU не найдена") : "…"}</div>
+            <div className="mono text-[10px] text-[var(--color-muted)] truncate">{curP?.subtitle ?? `ОЗУ ${hw?.totalRamGb.toFixed(0) ?? "?"} ГБ`}</div>
+          </div>
+          <select value={cur} onChange={(e) => apply(e.target.value)} disabled={busy}
+            className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-50">
+            {(data?.presets ?? []).map((p) => <option key={p.id} value={p.id}>{p.title}{p.id === hw?.recommended ? " ★" : ""}</option>)}
+          </select>
+        </div>
       </div>
     </div>
   );
@@ -387,7 +484,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
             <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${bench ? "left-[18px]" : "left-0.5"}`} />
           </button>
         </label>
-        <div className="overflow-y-auto flex-1 -mr-2 pr-2"><CloudModelsSection /><ModelsSection /></div>
+        <div className="overflow-y-auto flex-1 -mr-2 pr-2"><PresetsSection /><ModelsSection /></div>
       </div>
     </div>
   );
@@ -3059,6 +3156,14 @@ function FirstRun() {
 
         <div className="mt-4 rounded-lg border border-[var(--color-accent)]/30 bg-[color-mix(in_oklab,var(--color-accent)_8%,transparent)] px-3.5 py-2.5 text-[12.5px] leading-snug text-[var(--color-text)]">
           <span className="font-semibold text-[var(--color-accent)]">{t("setup.pickNoteTitle")}</span> {t("setup.pickNote")}
+        </div>
+
+        {/* Пресет под железо + ключ OpenRouter: выбрал «Облако» → облачные движки, локальные модели ниже
+            становятся необязательными (не тянешь лишние гигабайты). Refresh обновляет чеклист под выбор. */}
+        <div className="mt-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3 space-y-2">
+          <PresetsSection onApplied={() => { refresh().catch(() => {}); }} />
+          <OpenRouterKey onSaved={() => { refresh().catch(() => {}); }} />
+          <div className="text-[11px] text-[var(--color-muted)] leading-snug">Выбрал <span className="text-[var(--color-text)]">Облако</span> и ввёл ключ? Тяжёлые локальные модели ниже можно не качать — перевод и озвучка пойдут через OpenRouter.</div>
         </div>
 
         <div className="mt-4 space-y-2">

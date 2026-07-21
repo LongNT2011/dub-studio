@@ -59,8 +59,12 @@ pub fn open(o: &LlmOpen, mode: LlmMode) -> Result<LlmProvider, String> {
         let key = crate::models::openrouter_key(o.models_root)
             .ok_or("OpenRouter включён, но ключ не задан")?;
         let model = crate::models::openrouter_model(o.models_root, stage);
-        let client = ChatClient::openrouter(key, model).map_err(|e| e.to_string())?;
-        return Ok(LlmProvider::Remote { client });
+        // Модель не выбрана (без хардкода id) — облако невозможно; тихо откатываемся на локаль
+        // вместо пустого id в API (fail-safe, как и вся стадия).
+        if !model.trim().is_empty() {
+            let client = ChatClient::openrouter(key, model).map_err(|e| e.to_string())?;
+            return Ok(LlmProvider::Remote { client });
+        }
     }
 
     if !o.llama_bin.is_file() {

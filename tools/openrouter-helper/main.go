@@ -5,15 +5,18 @@
 //   tts    {model, input, voice, format, out}                                                -> {ok, cost}
 //   stt    {model, audio_b64, format, language}                                              -> {text, cost}
 //   models {output_modalities?, input_modalities?}                                           -> {models:[{id,name}]}
+//   voices {model}                                                                            -> {voices:[...]}
 //   verify {}                                                                                 -> {ok, credits}
 package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	openrouter "github.com/OpenRouterTeam/go-sdk"
 	"github.com/OpenRouterTeam/go-sdk/models/components"
@@ -51,7 +54,7 @@ func str(m map[string]any, k string) string {
 
 func main() {
 	if len(os.Args) < 2 {
-		die(fmt.Errorf("usage: openrouter-helper <chat|tts|stt|models|verify>"))
+		die(fmt.Errorf("usage: openrouter-helper <chat|tts|stt|models|voices|verify>"))
 	}
 	key := os.Getenv("OPENROUTER_API_KEY")
 	if key == "" {
@@ -96,6 +99,36 @@ func main() {
 		raw, _ := json.Marshal(res.Result)
 		os.Stdout.Write(raw)
 		os.Stdout.Write([]byte("\n"))
+
+	case "stt":
+		// Облачная транскрипция: wav-файл -> base64 -> verbose_json с сегментами (start/end/text) для пайплайна.
+		audioPath := str(in, "audio")
+		raw, err := os.ReadFile(audioPath)
+		die(err)
+		rf := components.STTRequestResponseFormatVerboseJSON
+		req := components.STTRequest{
+			Model:                  str(in, "model"),
+			InputAudio:             components.STTInputAudio{Data: base64.StdEncoding.EncodeToString(raw), Format: "wav"},
+			ResponseFormat:         &rf,
+			TimestampGranularities: []components.STTTimestampGranularity{components.STTTimestampGranularitySegment},
+		}
+		if lang := str(in, "language"); lang != "" {
+			req.Language = &lang
+		}
+		res, err := s.Stt.CreateTranscription(ctx, req)
+		die(err)
+		out(map[string]any{"text": res.Text, "segments": res.Segments, "language": res.Language, "duration": res.Duration})
+
+	case "voices":
+		// Голоса конкретной TTS-модели (Models.Get -> supported_voices). id = "author/slug".
+		id := str(in, "model")
+		author, slug, ok := strings.Cut(id, "/")
+		if !ok {
+			die(fmt.Errorf("id модели без '/': %s", id))
+		}
+		res, err := s.Models.Get(ctx, author, slug)
+		die(err)
+		out(map[string]any{"voices": res.Data.SupportedVoices})
 
 	case "verify":
 		res, err := s.Credits.GetCredits(ctx)

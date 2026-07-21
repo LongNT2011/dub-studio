@@ -83,6 +83,41 @@ pub async fn openrouter_verify(State(st): State<AppState>, Json(body): Json<Valu
     }
 }
 
+// ─── Пресеты железа: GET /engine/presets (список + детект GPU + рекомендация), POST /engine/preset {id} ──
+pub async fn presets_list(State(_st): State<AppState>) -> Response {
+    let rec = tokio::task::spawn_blocking(crate::presets::recommend)
+        .await
+        .unwrap_or_else(|_| crate::presets::recommend());
+    let list: Vec<Value> = crate::presets::PRESETS
+        .iter()
+        .map(|p| json!({ "id": p.id, "title": p.title, "subtitle": p.subtitle }))
+        .collect();
+    Json(json!({ "presets": list, "hardware": rec })).into_response()
+}
+
+pub async fn preset_apply(State(st): State<AppState>, Json(body): Json<Value>) -> Response {
+    let id = body.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    match crate::presets::apply(&st.models_root, &id) {
+        Ok(applied) => Json(json!({
+            "ok": true,
+            "id": id,
+            "applied": applied.iter().map(|(k, v)| json!({ "key": k, "value": v })).collect::<Vec<_>>(),
+        }))
+        .into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, e).into_response(),
+    }
+}
+
+// GET /engine/openrouter/voices?model=<id> — голоса TTS-модели с полом/возрастом/русским из встроенного
+// справочника (voice_db, собран роем). Для дропдауна выбора голоса + автокастинга. Нет в справочнике ->
+// пустой список (юзер введёт голос вручную).
+pub async fn openrouter_voices(Query(q): Query<HashMap<String, String>>) -> Response {
+    let model = q.get("model").cloned().unwrap_or_default();
+    let voices = crate::cloud_voices::list(&model).cloned().unwrap_or_default();
+    let ru = crate::cloud_voices::model_supports_russian(&model);
+    Json(json!({ "voices": voices, "supportsRussian": ru })).into_response()
+}
+
 // ─── PATCH /engine/opts ─────────────────────────────────────────────────────
 // Свап слота модели (asr/tts/llm/vision) в рантайме. У порта OPTS иммутабелен внутри AppState
 // (Arc<EngineOpts>), а модели резолвятся путями из окружения/дефолтов — рантайм-свап без пересоздания

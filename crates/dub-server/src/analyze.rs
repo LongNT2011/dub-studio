@@ -664,6 +664,33 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         let n = diar.as_ref().map(|d| d.n_speakers).unwrap_or(1).max(1);
         emit(progress, "asr", &format!("субтитры импортированы: {} реплик, {} спикер(ов)", segs.len(), n));
         (segs, n)
+    } else if crate::models::openrouter_asr_on(&paths.models_root) {
+        // Облачная транскрипция (OpenRouter STT): сегменты из облака, спикеров раздаём диаризацией (как
+        // локальный ASR). Тяжёлые Parakeet/Whisper не нужны — облачный пресет для слабых ПК.
+        bench.stage("asr");
+        emit(progress, "asr", "транскрипция через облако (OpenRouter STT)");
+        let raw = crate::cloud_asr::transcribe(&paths.models_root, &asr_wav, &args.src_lang)
+            .map_err(|e| format!("облачный STT: {e}"))?;
+        let turns: &[dub_asr::Turn] = diar.as_ref().map(|d| d.turns.as_slice()).unwrap_or(&[]);
+        let nsp = diar.as_ref().map(|d| d.n_speakers).unwrap_or(1).max(1);
+        let segs: Vec<Segment> = raw
+            .into_iter()
+            .enumerate()
+            .map(|(i, (st, en, tx))| Segment {
+                id: format!("s{i}"),
+                start: st,
+                end: en,
+                speaker: Some(if turns.is_empty() { "0".to_string() } else { speaker_for(st, en, turns) }),
+                src_text: tx,
+                tgt_text: String::new(),
+                voice: None,
+                dirty: false,
+                ckpt: None,
+                extra: Default::default(),
+            })
+            .collect();
+        emit(progress, "asr", &format!("облако: {} реплик, {} спикер(ов)", segs.len(), nsp));
+        (segs, nsp)
     } else {
         // Движок выбран настройкой (Parakeet/Whisper) — analyze не знает деталей (build_engine).
         bench.stage("asr");

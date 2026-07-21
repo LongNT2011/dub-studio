@@ -867,10 +867,28 @@ pub struct SetupStatus {
 }
 
 pub fn setup_status(repo_root: &Path) -> SetupStatus {
-    let comps: Vec<ComponentStatus> = manifest()
+    let mut comps: Vec<ComponentStatus> = manifest()
         .iter()
         .map(|c| component_status(repo_root, c))
         .collect();
+    // Облачный пресет (OpenRouter) снимает ОБЯЗАТЕЛЬНОСТЬ тяжёлых локальных движков: если стадия перевода/
+    // TTS идёт через облако (флаг + ключ), её локальную модель качать НЕ обязательно — не гейтит ready и не
+    // преселектится на первом запуске (юзер выбрал облако -> не тянет ненужные гигабайты Gemma/Higgs).
+    let mroot = repo_root.join("models");
+    let cloud_llm = crate::models::openrouter_stage_on(&mroot, "llm");
+    let cloud_tts = crate::models::openrouter_stage_on(&mroot, "tts");
+    let cloud_asr = crate::models::openrouter_asr_on(&mroot);
+    for c in comps.iter_mut() {
+        if c.requirement != Requirement::Required {
+            continue;
+        }
+        let is_gemma = c.id.starts_with("gemma") || c.id == "llama";
+        let is_higgs = c.id.starts_with("higgs");
+        let is_asr = c.id.starts_with("parakeet") || c.id.starts_with("whisper");
+        if (cloud_llm && is_gemma) || (cloud_tts && is_higgs) || (cloud_asr && is_asr) {
+            c.requirement = Requirement::Optional;
+        }
+    }
     // ready = всё СКАЧИВАЕМОЕ/бандл-обязательное на месте. External (драйвер NVIDIA) НЕ гейтит: его
     // detect_driver() (LoadLibraryW nvcuda.dll) даёт ложные негативы (нет NVIDIA / DLL не в пути / CPU-бокс)
     // -> раньше первый экран ВИСЕЛ на 100%, хотя всё скачано (баг-репорт). Драйвер остаётся строкой-

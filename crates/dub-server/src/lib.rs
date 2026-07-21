@@ -10,7 +10,9 @@ mod analyze;
 mod bench;
 mod casting;
 mod casting_library;
+mod cloud_asr;
 mod cloud_tts;
+mod cloud_voices;
 mod compose;
 mod endpoints;
 mod llm_provider;
@@ -18,6 +20,7 @@ mod openrouter_cli;
 mod f0;
 mod frame;
 mod hw;
+mod presets;
 mod jobs;
 mod media;
 mod models;
@@ -313,7 +316,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/engine/opts", axum::routing::patch(endpoints::set_opts))
         .route("/engine/select", post(endpoints::select_model))
         .route("/engine/openrouter/models", get(endpoints::openrouter_models))
+        .route("/engine/openrouter/voices", get(endpoints::openrouter_voices))
         .route("/engine/openrouter/verify", post(endpoints::openrouter_verify))
+        .route("/engine/presets", get(endpoints::presets_list))
+        .route("/engine/preset", post(endpoints::preset_apply))
         // «Первый запуск»: статус компонентов + автозакачка недостающего (SSE через ту же job-машину).
         .route("/setup/status", get(setup_status))
         .route("/setup/download", post(setup_download))
