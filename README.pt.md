@@ -33,7 +33,7 @@
 
 **Dub Studio** transforma qualquer vídeo em uma versão dublada para outro idioma —— **com o timbre do falante clonado, legendas traduzidas e o texto embutido localizado sobre o próprio quadro**. Solte um clipe e um passe automático inteligente cria o primeiro rascunho; depois um editor ao vivo coloca **cada legenda, voz, caixa de desfoque, fonte e título** sob seu controle com pré-visualização instantânea.
 
-Tudo roda **100% na sua máquina** —— sem nuvem, sem upload, sem assinatura. Nem o seu material nem a sua voz saem do computador.
+Por padrão tudo roda **localmente na sua máquina** —— sem nuvem, sem assinatura: nem o seu material nem a sua voz saem do computador. E se o seu PC for fraco (não roda o Gemma/Higgs local) ou você quiser mais velocidade e qualidade, as partes pesadas (tradução, visão, TTS, transcrição) podem **opcionalmente** ir para a nuvem via **OpenRouter** —— cada motor escolhido separadamente (local ↔ nuvem), com vozes atribuídas automaticamente por sexo do falante (beta). A chave fica guardada localmente; tudo desativado por padrão.
 
 Esta é a **v2 —— uma reescrita totalmente nativa**. Sem Python embutido, sem torch, sem wheels CUDA. Todo o pipeline é **Rust + motores nativos C++/CUDA (GGUF/ONNX)**: um processo, início rápido, baixo consumo de VRAM. Modelos, motores, runtime CUDA/VC++ e ffmpeg são **baixados e instalados pelo próprio app** no primeiro uso —— o único passo manual é o driver NVIDIA.
 

@@ -225,7 +225,7 @@ function ModelsSection() {
   const EngineTabs = ({ cloud, onLocal, onCloud, localLabel }: { cloud: boolean; onLocal: () => void; onCloud: () => void; localLabel: string }) => (
     <div className="flex gap-1 mb-1.5">
       <button onClick={onLocal} className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${!cloud ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>{localLabel}</button>
-      <button onClick={onCloud} disabled={!hasOrKey} title={hasOrKey ? "" : "Введите ключ OpenRouter выше"}
+      <button onClick={onCloud} disabled={!hasOrKey} title={hasOrKey ? "" : "Введите ключ OpenRouter ниже (Облачные настройки)"}
         className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${cloud ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"} disabled:opacity-40`}>OpenRouter</button>
     </div>
   );
@@ -254,8 +254,6 @@ function ModelsSection() {
           <button onClick={() => setErr(null)} className="shrink-0 text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={12} /></button>
         </div>
       )}
-      {/* Общий ключ OpenRouter — включает облачный движок в группах ниже (переиспользуемый компонент). */}
-      <div className="mb-3"><OpenRouterKey onSaved={loadCap} /></div>
       <Group label={t("settings.roleTts")}>
         <EngineTabs cloud={selv("or_tts_on") === "1"} localLabel="Higgs Audio v3" onLocal={() => setSel("or_tts_on", "0")} onCloud={() => setSel("or_tts_on", "1")} />
         {selv("or_tts_on") === "1" ? (
@@ -294,7 +292,7 @@ function ModelsSection() {
             const active = e.cloud ? asrCloud : (!asrCloud && asrEngine === e.id);
             const dis = e.cloud && !hasOrKey;
             return (
-              <button key={e.id} disabled={dis} title={dis ? "Введите ключ OpenRouter выше" : ""}
+              <button key={e.id} disabled={dis} title={dis ? "Введите ключ OpenRouter ниже (Облачные настройки)" : ""}
                 onClick={() => { if (e.cloud) { setSel("or_asr_on", "1"); } else { setSel("or_asr_on", "0"); setAsrEngine(e.id); api.setSelection("asr_engine", e.id).catch(() => {}); } }}
                 className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${active ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"} disabled:opacity-40`}>
                 {e.label}
@@ -381,6 +379,30 @@ function ModelsSection() {
           );
         })}
       </Group>
+      {/* Облачные настройки OpenRouter — В КОНЦЕ: фишка приложения локальная/портативная, облако вторично
+          (опция для слабых ПК/скорости). Ключ + число параллельных потоков; сам выбор облачного движка —
+          в группах выше рядом с локальным (Higgs|OpenRouter и т.д.). */}
+      <div className="mt-2 pt-3 border-t border-[var(--color-border)]">
+        <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-1.5">Облачные настройки · OpenRouter</div>
+        <div className="space-y-2">
+          <OpenRouterKey onSaved={loadCap} />
+          {hasOrKey && (
+            <div className={orRowCls}>
+              <div className="flex items-center gap-2.5">
+                <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--color-muted)]" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium truncate">Параллельные потоки</div>
+                  <div className="mono text-[10px] text-[var(--color-muted)] truncate">чанки в N коннектов — быстрее облачные ASR/TTS/перевод (1 = без многопоточности)</div>
+                </div>
+                <select value={selv("or_concurrency") || "6"} onChange={(e) => setSel("or_concurrency", e.target.value)}
+                  className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none">
+                  {["1", "2", "4", "6", "8", "12", "16"].map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -457,11 +479,10 @@ function PresetsSection({ onApplied }: { onApplied?: () => void }) {
 
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const [cap, setCap] = useState<Capabilities | null>(null);
   const [sfx, setSfx] = useState(sfxEnabled());
   // Пер-стадийный бенчмарк (bench.json + ⏱ в журнале) — ВЫКЛ по умолчанию, состояние на бэке (active.json).
   const [bench, setBench] = useState(false);
-  useEffect(() => { api.capabilities().then((c) => { setCap(c); setBench(c.selection?.bench === "1"); }).catch(() => {}); }, []);
+  useEffect(() => { api.capabilities().then((c) => { setBench(c.selection?.bench === "1"); }).catch(() => {}); }, []);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center glass-scrim anim-fade" onClick={onClose}>
       <div className="w-[min(92vw,600px)] max-h-[86vh] flex flex-col rounded-xl glass-panel anim-pop p-5" onClick={(e) => e.stopPropagation()}>
@@ -469,7 +490,6 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
           <span className="font-semibold">{t("settings.title")}</span>
           <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)]"><X size={16} /></button>
         </div>
-        <div className="mono text-[11px] text-[var(--color-muted)] mb-3">{cap ? `${cap.device} · ${cap.tts_quant}` : "…"}</div>
         <label className="flex items-center justify-between gap-3 mb-3">
           <span className="text-[13px] text-[var(--color-text)] inline-flex items-center gap-2"><Music size={14} className="text-[var(--color-muted)]" />{t("settings.sounds")}</span>
           <button onClick={() => { const v = !sfx; setSfx(v); setSfxEnabled(v); if (v) playSfx("notify"); }} title={t("settings.sounds")}
@@ -860,6 +880,13 @@ function DropZone() {
   const setTrStyleSaved = (v: string) => { setTrStyle(v); localStorage.setItem("dub-tr-style-choice", v); };
   const setTrStyleCustomSaved = (v: string) => { setTrStyleCustom(v); localStorage.setItem("dub-tr-style-custom", v); };
   // Сохранить оригинальную дорожку (#113): 2-я аудиодорожка + контейнер вывода (mp4|mkv). Персист.
+  // Дакинг фона под дубляжом — опция дубляжа (active.json duck_on), ВЫКЛ по умолчанию (не всем нужен).
+  const [duckOn, setDuckOn] = useState(false);
+  useEffect(() => { api.capabilities().then((c) => setDuckOn(c.selection?.duck_on === "1")).catch(() => {}); }, []);
+  const setDuckSaved = (v: boolean) => { setDuckOn(v); api.setSelection("duck_on", v ? "1" : "0").catch(() => {}); };
+  // Блюр-подложка под сожжёнными субтитрами — опция (не всем нужна), дефолт ВКЛ; патчится в проект после analyze.
+  const [subBlur, setSubBlur] = useState<boolean>(() => localStorage.getItem("dub-sub-blur") !== "0");
+  const setSubBlurSaved = (v: boolean) => { setSubBlur(v); localStorage.setItem("dub-sub-blur", v ? "1" : "0"); };
   const [keepOrig, setKeepOrig] = useState<boolean>(() => localStorage.getItem("dub-keep-orig") === "1");
   const [container, setContainer] = useState<"mp4" | "mkv">(() => (localStorage.getItem("dub-container") === "mkv" ? "mkv" : "mp4"));
   const setKeepOrigSaved = (v: boolean) => { setKeepOrig(v); localStorage.setItem("dub-keep-orig", v ? "1" : "0"); };
@@ -963,6 +990,8 @@ function DropZone() {
       const { job_id } = await api.analyze(project_id, tgt, eMode, src, eSubs, eRewrite, eBurn, audioOnly ? false : detectText, !audioOnly && !!subsFile && subsTranslated, trStyleText, effCasting, effCastingRef, effContentType);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") s.setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       if (audio === "voiceover") await api.patch(project_id, { op: "voiceover_gain", gain_db: voGain });   // громкость оригинала со старта -> рендер ниже подхватит
+      // Блюр-подложка под субтитрами — опция дубляжа/субтитров (дефолт вкл). Патчим, когда сабы вжигаются.
+      if (eBurn && eSubs !== "none" && !audioOnly) await api.patch(project_id, { op: "sub_blur", on: subBlur });
       // Сохранить оригинальную дорожку (#113): 2-я аудиодорожка при mux рендера. Только dub/voiceover, не аудио-режим.
       if (keepOrig && !audioOnly && (audio === "dub" || audio === "voiceover"))
         await api.patch(project_id, { op: "keep_original", keep: true, container });
@@ -1156,7 +1185,9 @@ function DropZone() {
             const showCasting = !audioOnly && isVoiced;   // #115: кастинг имеет смысл только при дубляже видео
             const showFunny = isVoiced;
             const showVoGain = audio === "voiceover";
-            const showAdvanced = showTrStyle || showKeepOrig || showDetect || showCasting || showFunny || showVoGain;
+            const showDuck = audio === "dub" && !audioOnly;   // дакинг фона — опция дубляжа
+            const showBlur = showSubs && subs !== "none" && burn;   // блюр-подложка — только когда сабы реально вжигаются
+            const showAdvanced = showTrStyle || showKeepOrig || showDetect || showCasting || showFunny || showVoGain || showDuck || showBlur;
             return (
               <>
                 {/* ГОЛОСА (#114): клон из видео (дефолт) или слоты из библиотеки. */}
@@ -1237,12 +1268,29 @@ function DropZone() {
                         )}
                       </div>
                     )}
+                    {/* ДАКИНГ ФОНА ПОД ДУБЛЯЖОМ — опция (не всем нужен): вкл = фон приглушается под голосом,
+                        выкл (дефолт) = фон на полной громкости. */}
+                    {showDuck && (
+                      <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit" title="Приглушать фон под голосом. Выкл — фон звучит на полной громкости.">
+                        <input type="checkbox" checked={duckOn} onChange={(e) => setDuckSaved(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
+                        Приглушать фон под голосом
+                        <span title="Дакинг: фон тише под речью дубляжа. Выкл — фон полный." onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
+                      </label>
+                    )}
                     {/* ДЕТЕКЦИЯ ВШИТОГО ТЕКСТА (OCR). */}
                     {showDetect && (
                       <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit">
                         <input type="checkbox" checked={detectText} onChange={(e) => setDetectText(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
                         {t("comp.detect")}
                         <span title={t("comp.detectHint")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
+                      </label>
+                    )}
+                    {/* БЛЮР-ПОДЛОЖКА ПОД СУБТИТРАМИ — опция (не всем нужна): выкл = текст без размытой подложки. */}
+                    {showBlur && (
+                      <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit" title="Размытая подложка под субтитрами для читаемости. Выкл — текст без подложки.">
+                        <input type="checkbox" checked={subBlur} onChange={(e) => setSubBlurSaved(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
+                        Блюр-подложка под субтитрами
+                        <span title="Размытая подложка под субтитрами. Выкл — без подложки." onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
                       </label>
                     )}
                     {/* КАСТИНГ ПЕРСОНАЖЕЙ (#115): доп. проход по кадрам -> база персонажей (аватар/голос). Опц., дефолт ВЫКЛ. */}

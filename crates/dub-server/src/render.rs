@@ -776,6 +776,36 @@ fn build_dub(
     let mut fit_total = 0usize;
     let mut fit_over_cap = 0usize;
     let mut drift_escalations = 0usize; // сегменты, где кап atempo эскалирован для догона синка (#116)
+    // ПАРАЛЛЕЛЬНЫЙ ПРЕ-СИНТЕЗ облачного TTS: OpenRouter держит десятки конкурентных запросов, поэтому все
+    // сегменты к синтезу гоним в N потоков (настройка or_concurrency) ДО последовательной укладки — она
+    // потом просто подхватит уже готовые seg-файлы (network-latency больше не по одному). Провал сегмента ->
+    // файл отсутствует -> цикл ниже синтезирует его сам (ретрай/фолбэк).
+    if cloud_tts_on {
+        let conc = crate::models::openrouter_concurrency(&paths.models_root);
+        let mut jobs: Vec<(PathBuf, String, String)> = Vec::new();
+        for &(fi, s) in segs.iter() {
+            if seg_keep(s) {
+                continue;
+            }
+            let tgt = s.tgt_text.trim();
+            if tgt.is_empty() {
+                continue;
+            }
+            let sid: String = s.id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            let sid = if sid.is_empty() { format!("i{fi}") } else { sid };
+            let raw = wd.join(format!("seg_{sid}.wav"));
+            if !((regen_dub && s.dirty) || !raw.is_file()) {
+                continue; // уже в кэше
+            }
+            let voice = cloud_voice_map.get(s.speaker.as_deref().unwrap_or("0")).cloned().unwrap_or_default();
+            jobs.push((raw, tgt.to_string(), voice));
+        }
+        if jobs.len() > 1 && conc > 1 {
+            emit(progress, "tts", &format!("облачный TTS: {} сегментов в {} параллельных потоков", jobs.len(), conc));
+            let ok = crate::cloud_tts::synth_batch(&paths.models_root, jobs, conc);
+            emit(progress, "tts", &format!("облачный TTS: пре-синтез готов ({ok} сегментов)"));
+        }
+    }
     for &(fi, s) in segs.iter() {
         // Кэш-файл сегмента — ПО ЕГО ID, не по индексу fi. Кэш переиспользуется между рендерами (не-dirty
         // сегменты не ре-синтезируются). При индекс-имени удаление/перестановка сегмента сдвигает индексы —

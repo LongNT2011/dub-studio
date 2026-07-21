@@ -3,8 +3,12 @@
 //! (без декода/перекодировки — запрет тупых перегенераций). Дальнейший fit_to_slot (ffmpeg) читает mp3
 //! ОДИН раз. Модель/голос — только из настроек юзера (or_tts_model/or_tts_voice), без хардкода.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::AtomicU64;
+
+/// Уникализатор temp-файлов синтеза (для потокобезопасности synth_batch).
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(target_os = "windows")]
 const FFMPEG: &str = "ffmpeg.exe";
@@ -32,8 +36,10 @@ pub fn synth_audio(models_root: &Path, text: &str, voice: &str) -> Result<Vec<u8
     }
 
     let repo = crate::openrouter_cli::repo_from_models(models_root);
-    // helper пишет аудио в файл; формат подбирает сам (pcm для gemini, mp3 для voxtral) и сообщает.
-    let tmp = std::env::temp_dir().join(format!("dub_cloud_tts_{}.bin", std::process::id()));
+    // helper пишет аудио в файл. Имя УНИКАЛЬНО (pid + атомарный счётчик) — иначе параллельные потоки
+    // синтеза (synth_batch) писали бы в один и тот же temp по pid и гонка портила бы аудио.
+    let uid = TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = std::env::temp_dir().join(format!("dub_cloud_tts_{}_{}.bin", std::process::id(), uid));
     let payload = serde_json::json!({
         "model": model,
         "input": text,
@@ -69,4 +75,41 @@ pub fn synth_audio(models_root: &Path, text: &str, voice: &str) -> Result<Vec<u8
         return Err(format!("облачный TTS: слишком короткое аудио ({} байт)", bytes.len()));
     }
     Ok(bytes)
+}
+
+/// Параллельный пре-синтез: гонит `jobs` (out-путь, текст, голос) в `concurrency` потоков (OpenRouter
+/// держит десятки конкурентных запросов). Каждый успешный сегмент пишется в свой out-файл; провал ->
+/// файл не создаётся (основной цикл ретраит/фолбэкнет на оригинал). Возвращает число успешных.
+pub fn synth_batch(models_root: &Path, jobs: Vec<(PathBuf, String, String)>, concurrency: usize) -> usize {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let n = jobs.len();
+    if n == 0 {
+        return 0;
+    }
+    let workers = concurrency.max(1).min(n);
+    let next = Arc::new(AtomicUsize::new(0));
+    let done = Arc::new(AtomicUsize::new(0));
+    let jobs = Arc::new(jobs);
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            let next = next.clone();
+            let done = done.clone();
+            let jobs = jobs.clone();
+            let mroot = models_root.to_path_buf();
+            scope.spawn(move || loop {
+                let i = next.fetch_add(1, Ordering::SeqCst);
+                if i >= jobs.len() {
+                    break;
+                }
+                let (out, text, voice) = &jobs[i];
+                if let Ok(bytes) = synth_audio(&mroot, text, voice) {
+                    if std::fs::write(out, &bytes).is_ok() {
+                        done.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
+            });
+        }
+    });
+    done.load(Ordering::Relaxed)
 }

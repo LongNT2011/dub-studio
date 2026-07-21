@@ -20,7 +20,7 @@
 
 ## What it is
 
-**Dub Studio** is a portable dubbing studio for Windows: drop in a short clip and get it re-voiced into another language — **with the original timbre cloned, translated captions, and localized on-screen text**. It runs **100% locally**: nothing leaves your machine, neither footage nor voiceprint. A smart auto-pass produces the first draft; then a live editor puts **every caption, voice, blur box, font, and title** under your control with instant preview.
+**Dub Studio** is a portable dubbing studio for Windows: drop in a short clip and get it re-voiced into another language — **with the original timbre cloned, translated captions, and localized on-screen text**. It runs **locally by default**: nothing leaves your machine, neither footage nor voiceprint — and the heavy stages (translation, vision, TTS, transcription) can **optionally** be offloaded to the cloud via **OpenRouter** (per-engine, for weak PCs or extra speed/quality; voices auto-cast by speaker gender, beta). A smart auto-pass produces the first draft; then a live editor puts **every caption, voice, blur box, font, and title** under your control with instant preview.
 
 This is **v2 — a fully native rewrite**. The previous version dragged along an embeddable Python, torch, CUDA wheels, and llama-cpp-python — gigabytes of setup and a fragile install. Now the whole pipeline is rewritten in **Rust + native C++/CUDA engines (GGUF/ONNX)**: one process, fast startup, low VRAM, **zero Python at runtime**. Everything heavy — models, engines, CUDA/VC++ DLLs, ffmpeg — the app **downloads and installs itself with a button** on first run. The only manual step is the NVIDIA driver.
 

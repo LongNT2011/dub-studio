@@ -90,6 +90,7 @@ pub fn is_selection_key(key: &str) -> bool {
             | "or_tts_autocast" // БЕТА: автокастинг голосов по полу спикера (муж->муж/жен->жен); ВКЛ по умолчанию
             | "or_asr_on"       // "1" -> транскрипция (ASR) через OpenRouter вместо локального Parakeet/Whisper
             | "or_asr"          // id STT-модели OpenRouter (напр. "openai/whisper-large-v3")
+            | "or_concurrency"  // число параллельных облачных запросов (чанки в N потоков; OpenRouter ~50 конкур.)
     )
 }
 
@@ -132,6 +133,12 @@ pub fn openrouter_model(mroot: &Path, stage: &str) -> String {
 /// Включена ли облачная транскрипция (ASR через OpenRouter) — флаг + ключ + выбранная модель.
 pub fn openrouter_asr_on(mroot: &Path) -> bool {
     openrouter_stage_on(mroot, "asr") && !openrouter_model(mroot, "asr").trim().is_empty()
+}
+
+/// Сколько облачных запросов гнать параллельно (чанки в N потоков). Настройка or_concurrency, дефолт 6,
+/// клэмп 1..=16 (OpenRouter держит ~50 конкурентных; 6 — безопасно и быстро, юзер может поднять).
+pub fn openrouter_concurrency(mroot: &Path) -> usize {
+    sel_num(mroot, "or_concurrency").map(|n| n as usize).unwrap_or(6).clamp(1, 16)
 }
 
 /// Голос облачного TTS по умолчанию (or_tts_voice). Без хардкода — пусто, если не задан (при автокастинге

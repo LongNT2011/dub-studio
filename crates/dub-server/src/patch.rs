@@ -333,6 +333,15 @@ fn op_voiceover_gain(p: &mut Project, edit: &Value) -> PatchResult {
     Ok(())
 }
 
+/// sub_blur — блюр-подложка ПОД сожжёнными субтитрами {on: bool}. Опция (не всем нужна): выкл -> текст без
+/// размытой подложки. Дефолт вкл. Только рендер-настройка (dirty не ставим — вжигание на экспорте).
+fn op_sub_blur(p: &mut Project, edit: &Value) -> PatchResult {
+    if let Some(on) = edit.get("on").and_then(|v| v.as_bool()) {
+        p.render.blur = on;
+    }
+    Ok(())
+}
+
 /// keep_original — экспортировать вторую дорожку с оригиналом {keep: bool, container?: "mp4"|"mkv"}.
 /// Только ремукс на экспорте (дубляж из кэша) — dirty не ставим. Неверный container -> 400.
 fn op_keep_original(p: &mut Project, edit: &Value) -> PatchResult {
@@ -689,6 +698,7 @@ pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
         "regen_all" => op_regen_all(p, edit),
         "gain" => op_gain(p, edit),
         "voiceover_gain" => op_voiceover_gain(p, edit),
+        "sub_blur" => op_sub_blur(p, edit),
         "keep_original" => op_keep_original(p, edit),
         other => Err((400, format!("unknown op {other:?}"))),
     }
