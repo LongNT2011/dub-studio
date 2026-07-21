@@ -90,16 +90,6 @@ pub fn assign(matrix: &[Vec<f64>], speakers: &[String]) -> Linkage {
     out
 }
 
-/// Полная связка: со-встречаемость -> жадный argmax. Обёртка над cooccurrence_matrix + assign.
-pub fn link_faces_to_speakers(
-    clusters_frame_times: &[Vec<f64>],
-    turns: &[SpeakerTurn],
-    speakers: &[String],
-) -> Linkage {
-    let m = cooccurrence_matrix(clusters_frame_times, turns, speakers);
-    assign(&m, speakers)
-}
-
 /// ДИСКРИМИНАТИВНЫЙ score из матрицы со-встречаемости `m` (клетка c,s), с пер-кластерным весом `prominence`
 /// (передний план: крупнее/фронтальнее => важнее). score[c][s] = (M[c][s]² / Σ_s' M[c][s']) · prominence[c].
 /// Первый множитель — эксклюзивность (лицо у МНОГИХ спикеров размазывает M -> мал для каждого; лицо своего
@@ -117,19 +107,6 @@ pub fn discriminative_prominence_score(m: &[Vec<f64>], prominence: &[f64]) -> Ve
         .collect()
 }
 
-/// ДИСКРИМИНАТИВНАЯ связка (лечит «аватар = слушатель») без prominence-веса: см. discriminative_prominence_score
-/// с единичным весом, затем жадный 1:1 argmax. Прод-путь (faces_to_speakers) зовёт scorer напрямую с реальным
-/// prominence — формула ОДНА (эта функция и её тест страхуют её же).
-pub fn link_faces_discriminative(
-    clusters_frame_times: &[Vec<f64>],
-    turns: &[SpeakerTurn],
-    speakers: &[String],
-) -> Linkage {
-    let m = cooccurrence_matrix(clusters_frame_times, turns, speakers);
-    let disc = discriminative_prominence_score(&m, &[]);
-    assign(&disc, speakers)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,13 +115,21 @@ mod tests {
         SpeakerTurn { start: s, end: e, speaker: spk.to_string() }
     }
 
+    // Тестовые обёртки над прод-примитивами: сырая со-встречаемость и дискриминативная.
+    fn cooc_link(times: &[Vec<f64>], turns: &[SpeakerTurn], speakers: &[String]) -> Linkage {
+        assign(&cooccurrence_matrix(times, turns, speakers), speakers)
+    }
+    fn disc_link(times: &[Vec<f64>], turns: &[SpeakerTurn], speakers: &[String]) -> Linkage {
+        assign(&discriminative_prominence_score(&cooccurrence_matrix(times, turns, speakers), &[]), speakers)
+    }
+
     #[test]
     fn links_face_to_cooccurring_speaker() {
         // Кластер 0 в кадре во время реплик спикера "0"; кластер 1 — во время "1".
         let times = vec![vec![0.5, 1.0, 1.5], vec![5.5, 6.0]];
         let turns = vec![turn(0.0, 2.0, "0"), turn(5.0, 7.0, "1")];
         let speakers = vec!["0".to_string(), "1".to_string()];
-        let link = link_faces_to_speakers(&times, &turns, &speakers);
+        let link = cooc_link(&times, &turns, &speakers);
         assert_eq!(link.get(&0), Some(&"0".to_string()));
         assert_eq!(link.get(&1), Some(&"1".to_string()));
     }
@@ -155,7 +140,7 @@ mod tests {
         let times = vec![vec![0.5]];
         let turns = vec![turn(0.0, 1.0, "0"), turn(10.0, 12.0, "2")];
         let speakers = vec!["0".to_string(), "2".to_string()];
-        let link = link_faces_to_speakers(&times, &turns, &speakers);
+        let link = cooc_link(&times, &turns, &speakers);
         assert_eq!(link.get(&0), Some(&"0".to_string()));
         assert!(!link.values().any(|v| v == "2"), "закадровый спикер без лица");
     }
@@ -172,7 +157,7 @@ mod tests {
 
     #[test]
     fn empty_all_empty() {
-        let link = link_faces_to_speakers(&[], &[], &[]);
+        let link = cooc_link(&[], &[], &[]);
         assert!(link.is_empty());
     }
 
@@ -188,10 +173,10 @@ mod tests {
         let turns = vec![turn(0.0, 2.0, "0"), turn(5.0, 7.0, "1")];
         let speakers = vec!["0".to_string(), "1".to_string()];
         // Сырая со-встречаемость назначает слушателя (c0) спикеру — он в кадре больше всех.
-        let raw = link_faces_to_speakers(&times, &turns, &speakers);
+        let raw = cooc_link(&times, &turns, &speakers);
         assert_eq!(raw.get(&0), Some(&"0".to_string()), "сырое: слушатель c0 забирает спикера");
         // Дискриминативная — отдаёт спикерам их ЭКСКЛЮЗИВНЫЕ лица, слушатель без спикера.
-        let disc = link_faces_discriminative(&times, &turns, &speakers);
+        let disc = disc_link(&times, &turns, &speakers);
         assert_eq!(disc.get(&1), Some(&"0".to_string()), "диск: c1 -> спикер 0");
         assert_eq!(disc.get(&2), Some(&"1".to_string()), "диск: c2 -> спикер 1");
         assert!(!disc.contains_key(&0), "диск: слушатель c0 не назначен");

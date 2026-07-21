@@ -57,7 +57,8 @@ const VC_MIN_SEG_SEC: f64 = 0.6;
 /// Агломеративная кластеризация AVERAGE-LINKAGE (по центроидам): сливаем два ближайших по косинусу
 /// кластера (центроид = среднее эмбеддингов членов), пока max-косинус >= threshold. Центроиды денойзят
 /// шум коротких сегментов -> сходится к истинному числу спикеров ЛУЧШЕ single-linkage (тот на шумном
-/// аудио фрагментирует). Возвращает метки 0..k-1 по первому появлению. O(n³) в худшем — n сегментов немного.
+/// аудио фрагментирует). Возвращает метки 0..k-1 по первому появлению. O(n³) в худшем; n = сегменты
+/// (десятки-сотни) и это НЕ горлышко analyze (ASR/TTS/сепарация — минуты), поэтому кэш косинусов не вводим.
 fn ahc_average(embs: &[Vec<f32>], threshold: f32) -> Vec<usize> {
     let n = embs.len();
     if n == 0 {
@@ -121,33 +122,27 @@ fn merge_smallest_into_nearest(embs: &[Vec<f32>], mut labels: Vec<usize>, cap: u
         Some(e) if !e.is_empty() => e.len(),
         _ => return labels,
     };
-    // центроид кластера с меткой `target` по текущим labels.
-    let centroid = |lbls: &[usize], target: usize| -> Vec<f32> {
-        let mut c = vec![0.0f32; dim];
-        let mut cnt = 0usize;
-        for (i, &l) in lbls.iter().enumerate() {
-            if l == target {
-                for d in 0..dim {
-                    c[d] += embs[i][d];
-                }
-                cnt += 1;
-            }
-        }
-        if cnt > 0 {
-            for v in &mut c {
-                *v /= cnt as f32;
-            }
-        }
-        c
-    };
     loop {
         let k = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
         if k <= cap {
             break;
         }
+        // Все центроиды и размеры за ОДИН проход по labels (было: полный скан на каждый кластер).
+        let mut centroids = vec![vec![0.0f32; dim]; k];
         let mut sizes = vec![0usize; k];
-        for &l in &labels {
+        for (i, &l) in labels.iter().enumerate() {
             sizes[l] += 1;
+            let e = &embs[i];
+            for d in 0..dim {
+                centroids[l][d] += e[d];
+            }
+        }
+        for (c, &cnt) in centroids.iter_mut().zip(&sizes) {
+            if cnt > 0 {
+                for v in c {
+                    *v /= cnt as f32;
+                }
+            }
         }
         // самый мелкий населённый кластер (tie-break: меньший индекс)
         let small = match (0..k)
@@ -157,14 +152,13 @@ fn merge_smallest_into_nearest(embs: &[Vec<f32>], mut labels: Vec<usize>, cap: u
             Some(s) => s,
             None => break,
         };
-        let sc = centroid(&labels, small);
         // ближайший по косинусу центроид среди ОСТАЛЬНЫХ населённых
         let mut best = (usize::MAX, f32::MIN);
         for l in 0..k {
             if l == small || sizes[l] == 0 {
                 continue;
             }
-            let c = dub_asr::cosine(&sc, &centroid(&labels, l));
+            let c = dub_asr::cosine(&centroids[small], &centroids[l]);
             if c > best.1 {
                 best = (l, c);
             }
@@ -517,7 +511,7 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
 
 /// Привязка лицо↔спикер по СО-ВСТРЕЧАЕМОСТИ. Собираем лица по всему говорящему таймлайну, узнаём одно и то
 /// же лицо по LVFace-вектору (cluster_faces), считаем дискриминативную со-встречаемость кластеров с реплик-
-/// таймлайном спикеров (link_faces_discriminative) и назначаем каждому спикеру ЕГО лицо. Аватар = медоидный
+/// таймлайном спикеров (discriminative_prominence_score) и назначаем каждому спикеру ЕГО лицо. Аватар = медоидный
 /// кадр кластера. Возвращает speaker_id -> (face_embedding, путь аватара "casting/char_<idx>.jpg").
 #[allow(clippy::too_many_arguments)]
 fn faces_to_speakers(
@@ -644,8 +638,8 @@ fn faces_to_speakers(
             (s / n).max(1.0)
         })
         .collect();
-    // Единая формула score = (M²/Σ)·prominence (dub_faces::discriminative_prominence_score) — та же, что
-    // страхует юнит-тест link_faces_discriminative; локальную копию не держим (без дрейфа).
+    // Единая формула score = (M²/Σ)·prominence (dub_faces::discriminative_prominence_score) — её же
+    // страхует юнит-тест discriminative_beats_bystander; локальную копию не держим (без дрейфа).
     let score = dub_faces::discriminative_prominence_score(&m, &prom);
     // Сначала жадное 1:1 (разным спикерам — РАЗНЫЕ лица там, где возможно): cluster -> speaker.
     let linkage = dub_faces::assign(&score, &speakers);

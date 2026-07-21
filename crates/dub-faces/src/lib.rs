@@ -34,8 +34,7 @@ pub use frames::{
     DEFAULT_FPS,
 };
 pub use link::{
-    assign, cooccurrence_matrix, discriminative_prominence_score, link_faces_discriminative,
-    link_faces_to_speakers, Linkage, SpeakerTurn,
+    assign, cooccurrence_matrix, discriminative_prominence_score, Linkage, SpeakerTurn,
 };
 pub use occluder::{occluder_path, FaceOccluder};
 pub use voice::{voice_cos_threshold, wespeaker_path, VoiceEmbedder, VOICE_DIM};
@@ -368,7 +367,12 @@ pub fn build_casting(
             ts
         })
         .collect();
-    let linkage = link_faces_to_speakers(&frame_times, turns, speakers);
+    // Дискриминативная связка (как прод-путь casting.rs::faces_to_speakers): эксклюзивность лица важнее
+    // числа кадров, иначе «слушатель» в кадре у всех перетягивает спикера. prominence здесь единичный.
+    let linkage = assign(
+        &discriminative_prominence_score(&cooccurrence_matrix(&frame_times, turns, speakers), &[]),
+        speakers,
+    );
 
     // ФИЛЬТР (требование юзера): персонаж = кластер, который ЛИБО говорит (привязан к спикеру), ЛИБО
     // суммарно на экране >= порога. Не говорит И мелькнул на долю секунды -> отбросить (не персонаж).
