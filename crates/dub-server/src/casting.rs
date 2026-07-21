@@ -43,9 +43,12 @@ fn min_face_px() -> f32 {
 /// Порог косинуса голосовой кластеризации сегментов (WeSpeaker). Выше -> больше персонажей (строже
 /// различает голоса). Env DUB_VOICE_CLUSTER_COS. 0 или отсутствие модели -> без переразметки.
 fn voice_cluster_cos() -> f32 {
-    // Порог остановки AHC average-linkage (косинус центроидов WeSpeaker). 0.3 подтверждён на чистом аудио
-    // (Avatar live-action: 4 Sortformer -> 10 персонажей, мужские найдены). Env DUB_VOICE_CLUSTER_COS.
-    std::env::var("DUB_VOICE_CLUSTER_COS").ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0.3)
+    // Порог остановки AHC average-linkage (косинус НОРМИРОВАННЫХ центроидов WeSpeaker, как dub_asr::cosine).
+    // ЗАМЕР на реальных эмбеддингах (Avatar s02e02, casting/vc_embs.json): 0.30 -> k=6 [74,4,1,1,1,1] = КОЛЛАПС
+    // (один блоб = v1=84); 0.40..0.45 -> сбалансировано [19,14,11,8,7,5,...] (главные голоса раздельны). Берём
+    // 0.42 — в зоне баланса; лишние фрагменты сводит merge_smallest_into_nearest до max_chars. Ниже 0.38 нельзя
+    // (центроидный average-linkage схлопывается в гигант). Env DUB_VOICE_CLUSTER_COS.
+    std::env::var("DUB_VOICE_CLUSTER_COS").ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0.42)
 }
 
 /// Мин. длительность сегмента (сек) для голосового эмбеддинга (короче — шумный вектор, размечаем соседом).
@@ -104,6 +107,86 @@ fn ahc_average(embs: &[Vec<f32>], threshold: f32) -> Vec<usize> {
                 labels[pt] = next;
             }
             next += 1;
+        }
+    }
+    labels
+}
+
+/// Свести число голосовых кластеров до <=cap БЕЗ понижения порога AHC (оно схлопывает в один гигант).
+/// Итеративно: берём САМЫЙ МЕЛКИЙ кластер (фрагмент — просодия-разброс одного голоса), доливаем его в
+/// БЛИЖАЙШИЙ по центроиду из остальных; повторяем, пока k>cap. Главные голоса остаются раздельными.
+/// Детерминизм: мелкий выбираем по (size, label), метки перенумеровываем по первому появлению.
+fn merge_smallest_into_nearest(embs: &[Vec<f32>], mut labels: Vec<usize>, cap: usize) -> Vec<usize> {
+    let dim = match embs.first() {
+        Some(e) if !e.is_empty() => e.len(),
+        _ => return labels,
+    };
+    // центроид кластера с меткой `target` по текущим labels.
+    let centroid = |lbls: &[usize], target: usize| -> Vec<f32> {
+        let mut c = vec![0.0f32; dim];
+        let mut cnt = 0usize;
+        for (i, &l) in lbls.iter().enumerate() {
+            if l == target {
+                for d in 0..dim {
+                    c[d] += embs[i][d];
+                }
+                cnt += 1;
+            }
+        }
+        if cnt > 0 {
+            for v in &mut c {
+                *v /= cnt as f32;
+            }
+        }
+        c
+    };
+    loop {
+        let k = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
+        if k <= cap {
+            break;
+        }
+        let mut sizes = vec![0usize; k];
+        for &l in &labels {
+            sizes[l] += 1;
+        }
+        // самый мелкий населённый кластер (tie-break: меньший индекс)
+        let small = match (0..k)
+            .filter(|&l| sizes[l] > 0)
+            .min_by(|&a, &b| sizes[a].cmp(&sizes[b]).then(a.cmp(&b)))
+        {
+            Some(s) => s,
+            None => break,
+        };
+        let sc = centroid(&labels, small);
+        // ближайший по косинусу центроид среди ОСТАЛЬНЫХ населённых
+        let mut best = (usize::MAX, f32::MIN);
+        for l in 0..k {
+            if l == small || sizes[l] == 0 {
+                continue;
+            }
+            let c = dub_asr::cosine(&sc, &centroid(&labels, l));
+            if c > best.1 {
+                best = (l, c);
+            }
+        }
+        if best.0 == usize::MAX {
+            break;
+        }
+        for l in labels.iter_mut() {
+            if *l == small {
+                *l = best.0;
+            }
+        }
+        // компактификация меток (закрыть дыру от влитого кластера), детерминированно по первому появлению
+        let mut remap: HashMap<usize, usize> = HashMap::new();
+        let mut next = 0usize;
+        for l in labels.iter_mut() {
+            let nl = *remap.entry(*l).or_insert_with(|| {
+                let v = next;
+                next += 1;
+                v
+            });
+            *l = nl;
         }
     }
     labels
@@ -214,14 +297,16 @@ pub fn recluster_segments(paths: &AnalyzePaths, segments: &mut [Segment], progre
         .and_then(|s| s.trim().parse().ok())
         .filter(|&n: &usize| n >= 2)
         .unwrap_or(8);
-    let mut thr = voice_cluster_cos();
+    let thr = voice_cluster_cos();
     let mut labels = ahc_average(&embs, thr);
     let mut k = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
-    // Кап на число персонажей: 13 голосов на 16 мин = переразбиение (один персонаж дробится). Пока
-    // кластеров слишком много — снижаем порог (сливает близкие голоса), до разумного числа или пола 0.18.
-    while k > max_chars && thr > 0.18 {
-        thr -= 0.02;
-        labels = ahc_average(&embs, thr);
+    // Кап на число персонажей. ВАЖНО: понижать ПОРОГ AHC при переизбытке кластеров НЕЛЬЗЯ — на низком
+    // пороге центроидный average-linkage СХЛОПЫВАЕТСЯ в один гигантский кластер (замер: thr 0.30 -> k=22
+    // сбалансировано, но кап-петля гнала порог к 0.18 -> один блоб на 84 сегмента = v1). Вместо этого при
+    // k>cap ДОЛИВАЕМ самые МЕЛКИЕ кластеры (просодия-разброс одного голоса: крик/шёпот/шум) в БЛИЖАЙШИЙ по
+    // центроиду — главные голоса остаются раздельными (замер: 0.30 + доливка -> [20,14,12,10,10,8,4,4]).
+    if k > max_chars {
+        labels = merge_smallest_into_nearest(&embs, labels, max_chars);
         k = labels.iter().copied().max().map(|m| m + 1).unwrap_or(0);
     }
     // Число исходных Sortformer-меток (борроу сразу отпускаем — ниже мутируем segments).
