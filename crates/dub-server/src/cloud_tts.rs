@@ -32,27 +32,26 @@ pub fn synth_audio(models_root: &Path, text: &str, voice: &str) -> Result<Vec<u8
     }
 
     let repo = crate::openrouter_cli::repo_from_models(models_root);
-    // helper пишет аудио в файл; отдаём временный путь, потом читаем байты.
-    let tmp = std::env::temp_dir().join(format!("dub_cloud_tts_{}.mp3", std::process::id()));
+    // helper пишет аудио в файл; формат подбирает сам (pcm для gemini, mp3 для voxtral) и сообщает.
+    let tmp = std::env::temp_dir().join(format!("dub_cloud_tts_{}.bin", std::process::id()));
     let payload = serde_json::json!({
         "model": model,
         "input": text,
         "voice": v,
-        "format": "mp3",
         "out": tmp.to_string_lossy(),
     });
     if let Err(e) = crate::openrouter_cli::run_json(&repo, &key, "tts", &payload) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);
     }
-    // mp3 -> wav 24кГц моно PCM16 (пайплайн читает seg как WAV). Одна конвертация вперёд.
+    // helper всегда отдаёт УНИВЕРСАЛЬНЫЙ pcm (сырой 24кГц s16le mono). Оборачиваем в wav ОДИН раз
+    // (пайплайн читает seg как WAV; локальный Higgs так же пишет seg через encode_wav).
     let wav_tmp = tmp.with_extension("wav");
     let out = Command::new(FFMPEG)
         .args([
             "-v", "error",
+            "-f", "s16le", "-ar", "24000", "-ac", "1",
             "-i", &tmp.to_string_lossy(),
-            "-ac", "1",
-            "-ar", "24000",
             "-c:a", "pcm_s16le",
             "-y", &wav_tmp.to_string_lossy(),
         ])

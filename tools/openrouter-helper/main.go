@@ -63,18 +63,19 @@ func main() {
 
 	switch os.Args[1] {
 	case "tts":
-		format := components.SpeechRequestResponseFormatMp3
+		// УНИВЕРСАЛЬНЫЙ формат — pcm (без потерь, 24кГц s16le mono; дефолт SDK). Rust всегда конвертит
+		// pcm->wav. Мультиязычные модели (gemini и пр.) его отдают; per-model перебора нет.
+		rf := components.SpeechRequestResponseFormatPcm
 		req := components.SpeechRequest{
 			Model:          str(in, "model"),
 			Input:          str(in, "input"),
 			Voice:          str(in, "voice"),
-			ResponseFormat: &format,
+			ResponseFormat: &rf,
 		}
 		body, err := s.Tts.CreateSpeech(ctx, req)
 		die(err)
 		defer body.Close()
-		outPath := str(in, "out")
-		f, err := os.Create(outPath)
+		f, err := os.Create(str(in, "out"))
 		die(err)
 		n, err := io.Copy(f, body)
 		f.Close()
