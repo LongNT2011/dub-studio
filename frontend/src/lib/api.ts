@@ -113,6 +113,9 @@ export const api = {
   selectModel: (id: string) => postJson<Record<string, string>>("/engine/select", { id }),
   // Прямая установка слота выбора (движок/модель/квант ASR) без скачивания: {key,value} -> active.json.
   setSelection: (key: string, value: string) => postJson<Record<string, string>>("/engine/select", { key, value }),
+  // Облачные модели (OpenRouter): проверка ключа + фильтрованный каталог по модальности (llm/vision/tts).
+  openrouterVerify: (key: string) => postJson<{ ok: boolean; data?: { label?: string; limit?: number; usage?: number }; error?: unknown }>("/engine/openrouter/verify", { key }),
+  openrouterModels: (kind: "llm" | "vision" | "tts") => getJson<{ models: { id: string; name: string; context?: number }[] }>(`/engine/openrouter/models?kind=${kind}`),
   voices: () => getJson<{ voices: string[] }>("/voices"),
   recordDevices: () => getJson<{ devices: string[] }>("/record/devices"),
   recordLevel: () => getJson<{ level: number }>("/record/level"),

@@ -115,12 +115,22 @@ impl Sampling {
     }
 }
 
-/// Клиент чата к одному llama-server. Держит base_url + blocking reqwest client с большим таймаутом
-/// (генерация целого транскрипта может идти десятки секунд).
+/// Клиент чата к OpenAI-совместимому эндпоинту. По умолчанию — локальный llama-server (base_url =
+/// http://127.0.0.1:PORT, без ключа и без поля model). Для облака (OpenRouter) — `openrouter()`:
+/// base_url = https://openrouter.ai/api, Authorization: Bearer <key>, обязательное поле `model`,
+/// БЕЗ llama-специфичного chat_template_kwargs. Держит blocking reqwest client с большим таймаутом
+/// (генерация целого транскрипта/vision-кадра может идти десятки секунд).
 pub struct ChatClient {
     base_url: String,
     http: reqwest::blocking::Client,
     retries: u32,
+    /// Bearer-токен (OpenRouter/OpenAI); None у локального llama-server.
+    auth: Option<String>,
+    /// id модели в теле запроса (обязателен для OpenRouter). None у llama-server (единственная модель).
+    model: Option<String>,
+    /// Заголовки атрибуции OpenRouter (HTTP-Referer, X-Title) — рекомендованы, не обязательны.
+    referer: Option<String>,
+    title: Option<String>,
 }
 
 impl ChatClient {
@@ -133,7 +143,22 @@ impl ChatClient {
             base_url: base_url.into(),
             http,
             retries: 2,
+            auth: None,
+            model: None,
+            referer: None,
+            title: None,
         })
+    }
+
+    /// Клиент к OpenRouter (OpenAI-совместимый): фиксированный base_url + ключ + id модели. `model`
+    /// подставляется в тело каждого запроса; chat_template_kwargs НЕ шлётся (это llama-специфика).
+    pub fn openrouter(api_key: impl Into<String>, model: impl Into<String>) -> Result<Self, LlmError> {
+        let mut c = Self::new("https://openrouter.ai/api")?;
+        c.auth = Some(api_key.into());
+        c.model = Some(model.into());
+        c.referer = Some("https://github.com/timoncool/dub-studio".to_string());
+        c.title = Some("Dub Studio".to_string());
+        Ok(c)
     }
 
     pub fn with_retries(mut self, n: u32) -> Self {
@@ -141,14 +166,20 @@ impl ChatClient {
         self
     }
 
+    /// remote-режим = задан id модели (OpenRouter/OpenAI): шлём `model`, не шлём chat_template_kwargs.
+    fn is_remote(&self) -> bool {
+        self.model.is_some()
+    }
+
     /// Один вызов /v1/chat/completions -> текст ассистента (сырой, без стрипа <think>). Ретраит на
     /// сетевых/5xx-ошибках (сервер мог ещё догружать слот). Пустой ответ — не ошибка (вернём "").
     pub fn chat(&self, messages: &[Message], s: &Sampling) -> Result<String, LlmError> {
         let url = format!("{}/v1/chat/completions", self.base_url);
-        // enable_thinking=false — как Gemma4ChatHandler(enable_thinking=False) в питоне: без него Gemma-4
-        // сжигает весь max_tokens на reasoning_content, а content приходит пустым (проверено на стенде).
         // top_k/repeat_penalty ВСТАВЛЯЕМ только когда заданы: llama-server отвергает явный null (400).
         let mut body = serde_json::Map::new();
+        if let Some(m) = &self.model {
+            body.insert("model".into(), json!(m)); // OpenRouter требует id модели; llama-server игнорит
+        }
         body.insert(
             "messages".into(),
             Value::Array(messages.iter().map(|m| m.to_value()).collect()),
@@ -163,15 +194,29 @@ impl ChatClient {
         }
         body.insert("max_tokens".into(), json!(s.max_tokens));
         body.insert("stream".into(), json!(false));
-        body.insert(
-            "chat_template_kwargs".into(),
-            json!({"enable_thinking": false}),
-        );
+        if !self.is_remote() {
+            // enable_thinking=false — как Gemma4ChatHandler(enable_thinking=False): без него Gemma-4
+            // сжигает max_tokens на reasoning_content, content пустой. Это llama-специфика — облаку не шлём.
+            body.insert(
+                "chat_template_kwargs".into(),
+                json!({"enable_thinking": false}),
+            );
+        }
         let body = Value::Object(body);
 
         let mut last_err = String::new();
         for attempt in 0..=self.retries {
-            match self.http.post(&url).json(&body).send() {
+            let mut req = self.http.post(&url).json(&body);
+            if let Some(key) = &self.auth {
+                req = req.bearer_auth(key);
+            }
+            if let Some(r) = &self.referer {
+                req = req.header("HTTP-Referer", r);
+            }
+            if let Some(tt) = &self.title {
+                req = req.header("X-Title", tt);
+            }
+            match req.send() {
                 Ok(resp) => {
                     let status = resp.status();
                     if status.is_success() {

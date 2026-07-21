@@ -33,6 +33,82 @@ pub async fn presets() -> Json<Value> {
     Json(json!({ "presets": presets, "reveals": reveals }))
 }
 
+// ─── GET /engine/openrouter/models?kind=llm|vision|tts ──────────────────────
+// Прокси публичного каталога OpenRouter (без ключа), отфильтрованный по модальности для дропдаунов
+// настроек: llm = текст на выходе; vision = image на входе; tts = audio на выходе. Отдаём минимум полей.
+pub async fn openrouter_models(Query(q): Query<HashMap<String, String>>) -> Response {
+    let kind = q.get("kind").cloned().unwrap_or_else(|| "llm".to_string());
+    let fetched = tokio::task::spawn_blocking(|| {
+        let http = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .ok()?;
+        http.get("https://openrouter.ai/api/v1/models").send().ok()?.json::<Value>().ok()
+    })
+    .await
+    .ok()
+    .flatten();
+    let Some(v) = fetched else {
+        return (StatusCode::BAD_GATEWAY, "не удалось получить каталог OpenRouter").into_response();
+    };
+    let has = |m: &Value, dir: &str, want: &str| -> bool {
+        m.get("architecture")
+            .and_then(|a| a.get(dir))
+            .and_then(|x| x.as_array())
+            .map(|a| a.iter().any(|v| v.as_str() == Some(want)))
+            .unwrap_or(false)
+    };
+    let mut out: Vec<Value> = Vec::new();
+    if let Some(arr) = v.get("data").and_then(|d| d.as_array()) {
+        for m in arr {
+            let keep = match kind.as_str() {
+                "vision" => has(m, "input_modalities", "image"),
+                "tts" => has(m, "output_modalities", "audio"),
+                _ => has(m, "output_modalities", "text"),
+            };
+            if keep {
+                out.push(json!({
+                    "id": m.get("id"),
+                    "name": m.get("name"),
+                    "context": m.get("context_length"),
+                    "pricing": m.get("pricing"),
+                }));
+            }
+        }
+    }
+    Json(json!({ "models": out })).into_response()
+}
+
+// ─── POST /engine/openrouter/verify {key} ───────────────────────────────────
+// Проверка ключа OpenRouter: GET /api/v1/key с ключом -> {ok, data}. Ключ приходит из формы (ввод перед
+// сохранением) и НЕ логируется.
+pub async fn openrouter_verify(Json(body): Json<Value>) -> Response {
+    let key = body.get("key").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    if key.is_empty() {
+        return (StatusCode::BAD_REQUEST, "пустой ключ").into_response();
+    }
+    let res = tokio::task::spawn_blocking(move || {
+        let http = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(20))
+            .build()
+            .ok()?;
+        let r = http.get("https://openrouter.ai/api/v1/key").bearer_auth(&key).send().ok()?;
+        let ok = r.status().is_success();
+        let v: Value = r.json().ok()?;
+        Some((ok, v))
+    })
+    .await
+    .ok()
+    .flatten();
+    match res {
+        Some((true, v)) => {
+            Json(json!({ "ok": true, "data": v.get("data").cloned().unwrap_or(v) })).into_response()
+        }
+        Some((false, v)) => Json(json!({ "ok": false, "error": v })).into_response(),
+        None => (StatusCode::BAD_GATEWAY, "OpenRouter недоступен").into_response(),
+    }
+}
+
 // ─── PATCH /engine/opts ─────────────────────────────────────────────────────
 // Свап слота модели (asr/tts/llm/vision) в рантайме. У порта OPTS иммутабелен внутри AppState
 // (Arc<EngineOpts>), а модели резолвятся путями из окружения/дефолтов — рантайм-свап без пересоздания

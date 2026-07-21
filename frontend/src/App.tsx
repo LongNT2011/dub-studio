@@ -292,6 +292,72 @@ function ModelsSection() {
   );
 }
 
+// Облачные модели (OpenRouter): опциональная замена тяжёлых локальных LLM/vision/TTS запросами к API.
+// Ключ + пер-часть тумблеры + id моделей хранятся в active.json (api.setSelection).
+function CloudModelsSection() {
+  const [sel, setSel] = useState<Record<string, string>>({});
+  const [keyInput, setKeyInput] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    api.capabilities().then((c) => {
+      const s = (c.selection ?? {}) as Record<string, string>;
+      setSel(s);
+      setKeyInput(s.or_key ?? "");
+    }).catch(() => {});
+  }, []);
+  const set = (k: string, v: string) => { setSel((p) => ({ ...p, [k]: v })); api.setSelection(k, v).catch(() => {}); };
+  const isOn = (k: string) => sel[k] === "1";
+  const hasKey = (sel.or_key ?? "").trim().length > 0;
+  const verify = async () => {
+    setVerifying(true); setMsg(null);
+    try {
+      const r = await api.openrouterVerify(keyInput.trim());
+      if (r.ok) { set("or_key", keyInput.trim()); setMsg({ ok: true, text: "Ключ рабочий — сохранён" }); }
+      else setMsg({ ok: false, text: "Ключ не принят OpenRouter" });
+    } catch { setMsg({ ok: false, text: "OpenRouter недоступен" }); }
+    setVerifying(false);
+  };
+  const inp = "w-full px-2 py-1 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] text-[12px] mono focus:border-[var(--color-accent)] outline-none";
+  const Toggle = ({ k }: { k: string }) => (
+    <button onClick={() => hasKey && set(k, isOn(k) ? "0" : "1")} disabled={!hasKey}
+      className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${isOn(k) && hasKey ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface-2)] border border-[var(--color-border)]"} ${!hasKey ? "opacity-40 cursor-not-allowed" : ""}`}>
+      <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${isOn(k) && hasKey ? "left-[18px]" : "left-0.5"}`} />
+    </button>
+  );
+  return (
+    <div className="mt-4 pt-3 border-t border-[var(--color-border)]">
+      <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)] mb-2">Облачные модели · OpenRouter</div>
+      <p className="text-[12px] text-[var(--color-muted)] leading-relaxed mb-2.5">
+        Опционально: снять с ПК самую тяжёлую часть — гонять LLM-перевод, vision и TTS через OpenRouter вместо локальных моделей. Ключ хранится локально.
+      </p>
+      <div className="flex gap-2 mb-1">
+        <input type={showKey ? "text" : "password"} value={keyInput} onChange={(e) => setKeyInput(e.target.value)}
+          placeholder="sk-or-v1-…" className={`${inp} flex-1`} />
+        <button onClick={() => setShowKey((s) => !s)} title="показать ключ"
+          className="px-2 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]">{showKey ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+        <button onClick={verify} disabled={verifying || !keyInput.trim()}
+          className="px-3 py-1 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] text-[12px] hover:border-[var(--color-accent)] disabled:opacity-40 transition-colors">{verifying ? "…" : "Проверить"}</button>
+      </div>
+      {msg && <div className={`text-[11px] mb-2 ${msg.ok ? "text-[var(--color-accent)]" : "text-[var(--color-warn)]"}`}>{msg.text}</div>}
+      {!hasKey && <div className="text-[11px] text-[var(--color-muted)]/70 mb-2">Проверьте ключ, чтобы включить облачные части.</div>}
+
+      <div className="flex items-center gap-2 mb-1.5"><Toggle k="or_llm_on" /><span className="text-[13px]">Перевод (LLM)</span></div>
+      <input value={sel.or_llm ?? ""} onChange={(e) => set("or_llm", e.target.value)} placeholder="google/gemini-2.5-flash" className={`${inp} mb-3`} />
+
+      <div className="flex items-center gap-2 mb-1.5"><Toggle k="or_vision_on" /><span className="text-[13px]">Vision (анализ кадров)</span></div>
+      <input value={sel.or_vision ?? ""} onChange={(e) => set("or_vision", e.target.value)} placeholder="пусто = как модель перевода" className={`${inp} mb-3`} />
+
+      <div className="flex items-center gap-2 mb-1.5"><Toggle k="or_tts_on" /><span className="text-[13px]">Озвучка (TTS)</span></div>
+      <div className="flex gap-2">
+        <input value={sel.or_tts_model ?? ""} onChange={(e) => set("or_tts_model", e.target.value)} placeholder="openai/gpt-4o-mini-tts" className={`${inp} flex-1`} />
+        <input value={sel.or_tts_voice ?? ""} onChange={(e) => set("or_tts_voice", e.target.value)} placeholder="alloy" className={`${inp} w-24`} />
+      </div>
+    </div>
+  );
+}
+
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const [cap, setCap] = useState<Capabilities | null>(null);
@@ -321,7 +387,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
             <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${bench ? "left-[18px]" : "left-0.5"}`} />
           </button>
         </label>
-        <div className="overflow-y-auto flex-1 -mr-2 pr-2"><ModelsSection /></div>
+        <div className="overflow-y-auto flex-1 -mr-2 pr-2"><CloudModelsSection /><ModelsSection /></div>
       </div>
     </div>
   );

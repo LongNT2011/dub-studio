@@ -67,6 +67,7 @@ pub struct RenderPaths {
     pub asr: crate::models::AsrChoice, // выбранный ASR-движок — авто-транскрипция реф-клипа (ref_text клона)
     pub bench: bool,           // пер-стадийный бенчмарк (галка настроек, ВЫКЛ по умолчанию)
     pub ref_secs: f64,         // длина реф-клипа клона голоса, сек (настройка «Экономия RAM», дефолт 12.0)
+    pub models_root: PathBuf,  // каталог моделей (active.json) — читаем настройки облачного TTS OpenRouter
 }
 
 pub type Progress<'a> = dyn Fn(Value) + Send + Sync + 'a;
@@ -701,11 +702,17 @@ fn build_dub(
 
     // 4) TTS каждый сегмент через Higgs (audiocpp). Кэш: seg_XXX.wav; не-dirty переиспользуются.
     emit(progress, "tts", &format!("синтез {} сегментов (Higgs clone)", segs.len()));
-    let engine = Arc::new(
-        AudiocppEngine::load(&paths.higgs_dll).map_err(|e| format!("загрузка Higgs DLL: {e}"))?,
-    );
-    engine
-        .load_model(
+    // Облачный TTS (OpenRouter) вместо локального Higgs: тяжёлую DLL + модель НЕ грузим вовсе — в этом и
+    // смысл (снять самую тяжёлую часть). engine=None; синтез идёт по облачной ветке ниже.
+    let cloud_tts_on = crate::models::openrouter_stage_on(&paths.models_root, "tts");
+    let engine: Option<Arc<AudiocppEngine>> = if cloud_tts_on {
+        emit(progress, "tts", "TTS через облако (OpenRouter) — локальный Higgs не загружаем");
+        None
+    } else {
+        let e = Arc::new(
+            AudiocppEngine::load(&paths.higgs_dll).map_err(|e| format!("загрузка Higgs DLL: {e}"))?,
+        );
+        e.load_model(
             &paths.higgs_model_root,
             &paths.higgs_backend,
             paths.higgs_device,
@@ -713,6 +720,8 @@ fn build_dub(
             Some(paths.higgs_quant.as_str()),
         )
         .map_err(|e| format!("Higgs load_model: {e}"))?;
+        Some(e)
+    };
 
     // placed = [(at, wav_path, dur)]. cursor-aware fit (как в питоне). dur мерится ЗДЕСЬ (в цикле
     // укладки) и хранится рядом — дакинг-блоки строятся из него БЕЗ повторного ffprobe (перф [22]).
@@ -766,6 +775,21 @@ fn build_dub(
         // (объявлен на уровне итерации: ниже гейтит и ASR-QC этого сегмента).
         let mut kept_original = false;
         if need_synth {
+            if cloud_tts_on {
+            // Облачный TTS: wav-байты OpenRouter пишем ПРЯМО в seg-файл (без декода/перекодировки).
+            // Голос — дефолтный из настроек (пер-спикерный маппинг — отдельным шагом). Провал -> оригинал
+            // сегмента (ноль немых мест), как локальный фолбэк.
+            match crate::cloud_tts::synth_wav(&paths.models_root, tgt, "") {
+                Ok(wav) => {
+                    std::fs::write(&raw, &wav).map_err(|e| format!("запись облачного seg{fi}: {e}"))?;
+                }
+                Err(e) => {
+                    emit(progress, "tts", &format!("⚠ сегмент {fi}: облачный TTS не удался ({e}) — оригинал"));
+                    media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
+                    kept_original = true;
+                }
+            }
+            } else {
             // Реф: сначала пробуем per-segment ЭМОЦ-реф (обрезок vocals16 самой этой чистой реплики ≥2.5с)
             // — клон наследует эмоцию оригинала в этот момент. Не подошёл (грязная/короткая реплика/пак) ->
             // стабильный identity-реф спикера. ref_text эмоц-рефа = src_text ЭТОГО сегмента (совпадает с
@@ -836,7 +860,8 @@ fn build_dub(
                 // минуты, так что порог чисто разделяет. Ошибка/таймаут -> как дефект (ретрай стохастику
                 // обычно лечит); исчерпали попытки -> ОРИГИНАЛ (сегмент дороже потерять, чем зависший рендер).
                 let vc_to = Duration::from_secs((((s.end - s.start) * 8.0).ceil() as u64).max(45));
-                let (samples, sr) = match voice_clone_guarded(&engine, tgt, &rw.to_string_lossy(), rt, &opts, vc_to) {
+                let eng = engine.as_ref().expect("локальный Higgs (не облако)");
+                let (samples, sr) = match voice_clone_guarded(eng, tgt, &rw.to_string_lossy(), rt, &opts, vc_to) {
                     Ok(v) => v,
                     Err(e) if e.starts_with(ENGINE_STUCK) => return Err(e), // движок завис в DLL — обрыв, не гоняем параллельно
                     Err(e) => {
@@ -902,6 +927,7 @@ fn build_dub(
             } else {
                 consec = 0; // чистая фраза сбрасывает серию
             }
+            } // конец локальной (Higgs) ветки — при облаке wav уже записан выше
         }
         // слот: от текущего onset до старта СЛЕДУЮЩЕГО сегмента ПО ИНДЕКСУ (fi+1) полного списка /
         // конца видео (питон nxt = segs[i+1].start if i+1<len else total).
@@ -938,7 +964,9 @@ fn build_dub(
         // В QC — только реально синтезированное в этом прогоне (кэш уже проверялся в своём прогоне).
         // kept_original (оригинальная реплика вместо неспасаемого выкрика) НЕ сверяем: там исходный
         // язык, ASR-QC счёл бы его браком и пересинтезировал обратно в артефакт.
-        if need_synth && !kept_original && !s.tgt_text.trim().is_empty() {
+        // Higgs-QC (ASR-сверка + пересинтез) — только для локального движка; облачный TTS артефактов-гула
+        // не даёт, а его валидация покрытия идёт отдельным гейтом.
+        if !cloud_tts_on && need_synth && !kept_original && !s.tgt_text.trim().is_empty() {
             qc_list.push((
                 fi,
                 placed.len() - 1,
@@ -1005,7 +1033,7 @@ fn build_dub(
                 .enumerate()
                 {
                     let vc_to = Duration::from_secs((((s.end - s.start) * 8.0).ceil() as u64).max(45));
-                    let (smp, r) = match voice_clone_guarded(&engine, tgtq, &rw.to_string_lossy(), rt, &opts, vc_to) {
+                    let (smp, r) = match voice_clone_guarded(engine.as_ref().expect("локальный Higgs (QC не для облака)"), tgtq, &rw.to_string_lossy(), rt, &opts, vc_to) {
                         Ok(v) => v,
                         Err(e) if e.starts_with(ENGINE_STUCK) => return Err(e), // движок завис — обрыв, не гоняем параллельно
                         Err(_) => continue,

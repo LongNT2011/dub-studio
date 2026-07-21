@@ -77,7 +77,57 @@ pub fn is_selection_key(key: &str) -> bool {
             | "llama_ubatch"    // размер prefill-батча Gemma (меньше = меньше пиковый буфер графа prefill)
             | "higgs_ref_secs"  // длина реф-клипа клона голоса (меньше = меньше prefill Higgs; <12с спасает 32ГБ)
             | "bench"           // пер-стадийный бенчмарк (bench.json + ⏱ в журнале); галка в настройках, ВЫКЛ по умолчанию
+            // Облачные модели (OpenRouter) — опциональная замена тяжёлого локального LLM/TTS. Всё ВЫКЛ по умолчанию.
+            | "or_key"          // API-ключ OpenRouter (хранится локально в active.json, не логируется)
+            | "or_llm_on"       // "1" -> перевод через OpenRouter chat вместо локальной Gemma
+            | "or_llm"          // id LLM-модели перевода (напр. "google/gemini-2.5-flash")
+            | "or_vision_on"    // "1" -> vision-анализ кадров через OpenRouter multimodal
+            | "or_vision"       // id vision-модели (пусто -> берём or_llm, если он multimodal)
+            | "or_tts_on"       // "1" -> TTS через облако вместо локального Higgs
+            | "or_tts_model"    // id TTS-модели OpenRouter (напр. "openai/gpt-4o-mini-tts")
+            | "or_tts_voice"    // голос по умолчанию для облачного TTS (напр. "alloy")
     )
+}
+
+/// API-ключ OpenRouter из active.json (локальное хранение, десктоп). Пусто/нет -> None.
+pub fn openrouter_key(mroot: &Path) -> Option<String> {
+    pick(&load_selection(mroot), "or_key").map(str::to_string)
+}
+
+/// Включён ли облачный путь для стадии `stage` ("llm"|"vision"|"tts"): галка ИЛИ есть ключ.
+/// Требует непустой or_key — без ключа облако невозможно, откатываемся на локальный движок.
+pub fn openrouter_stage_on(mroot: &Path, stage: &str) -> bool {
+    let sel = load_selection(mroot);
+    if pick(&sel, "or_key").is_none() {
+        return false;
+    }
+    let flag = match stage {
+        "llm" => "or_llm_on",
+        "vision" => "or_vision_on",
+        "tts" => "or_tts_on",
+        _ => return false,
+    };
+    pick(&sel, flag) == Some("1")
+}
+
+/// id облачной модели для стадии: "llm" -> or_llm (дефолт google/gemini-2.5-flash);
+/// "vision" -> or_vision, пусто -> or_llm; "tts" -> or_tts_model (дефолт openai/gpt-4o-mini-tts).
+pub fn openrouter_model(mroot: &Path, stage: &str) -> String {
+    let sel = load_selection(mroot);
+    match stage {
+        "llm" => pick(&sel, "or_llm").unwrap_or("google/gemini-2.5-flash").to_string(),
+        "vision" => pick(&sel, "or_vision")
+            .or_else(|| pick(&sel, "or_llm"))
+            .unwrap_or("google/gemini-2.5-flash")
+            .to_string(),
+        "tts" => pick(&sel, "or_tts_model").unwrap_or("openai/gpt-4o-mini-tts").to_string(),
+        _ => String::new(),
+    }
+}
+
+/// Голос облачного TTS (or_tts_voice, дефолт "alloy" — совместим с OpenAI-моделями).
+pub fn openrouter_tts_voice(mroot: &Path) -> String {
+    pick(&load_selection(mroot), "or_tts_voice").unwrap_or("alloy").to_string()
 }
 
 /// Включён ли пер-стадийный бенчмарк (галка в настройках -> active.json "bench"="1"). По умолчанию ВЫКЛ:

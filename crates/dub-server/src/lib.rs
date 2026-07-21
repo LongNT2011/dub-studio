@@ -10,8 +10,10 @@ mod analyze;
 mod bench;
 mod casting;
 mod casting_library;
+mod cloud_tts;
 mod compose;
 mod endpoints;
+mod llm_provider;
 mod f0;
 mod frame;
 mod hw;
@@ -309,6 +311,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/engine/capabilities", get(capabilities))
         .route("/engine/opts", axum::routing::patch(endpoints::set_opts))
         .route("/engine/select", post(endpoints::select_model))
+        .route("/engine/openrouter/models", get(endpoints::openrouter_models))
+        .route("/engine/openrouter/verify", post(endpoints::openrouter_verify))
         // «Первый запуск»: статус компонентов + автозакачка недостающего (SSE через ту же job-машину).
         .route("/setup/status", get(setup_status))
         .route("/setup/download", post(setup_download))
@@ -1467,6 +1471,7 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
         voices_dir: st.voices_dir.clone(),
         asr: models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel),
         ref_secs: models::higgs_ref_secs(&st.models_root),
+        models_root: st.models_root.clone(),
     };
 
     let dir_for_job = dir.clone();
@@ -1576,6 +1581,7 @@ async fn export_lang(
         voices_dir: st.voices_dir.clone(),
         asr: models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel),
         ref_secs: models::higgs_ref_secs(&st.models_root),
+        models_root: st.models_root.clone(),
     };
 
     let dst_for_job = dst_dir.clone();
@@ -1672,6 +1678,7 @@ async fn dub_audio_project(State(st): State<AppState>, AxPath(pid): AxPath<Strin
         voices_dir: st.voices_dir.clone(),
         asr: models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel),
         ref_secs: models::higgs_ref_secs(&st.models_root),
+        models_root: st.models_root.clone(),
     };
     let dir_for_job = dir.clone();
     let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {

@@ -106,27 +106,31 @@ pub fn stage(
         return;
     }
 
-    emit(progress, "translate", "поднимаю llama-server (Gemma + mmproj)");
-    // Лимит prefill-батча из настройки «Экономия RAM» (active.json.llama_ubatch) — против OOM на слабой RAM.
-    let mut opts = ServerOpts::new(&paths.llama_bin, &paths.mt_model)
-        .with_ubatch(crate::models::sel_num(&paths.models_root, "llama_ubatch").map(|f| f as u32));
-    if paths.mmproj.is_file() {
-        opts = opts.with_mmproj(&paths.mmproj);
-    }
-    let srv = match LlamaServer::start(&opts) {
-        Ok(s) => s,
+    // LLM-провайдер: облако OpenRouter (если включено в настройках + есть ключ) ИЛИ локальный llama-server
+    // (Gemma+mmproj). Vision-режим: облаку — multimodal-модель, локали — mmproj. Fail-safe как раньше.
+    let prov = match crate::llm_provider::open(
+        &crate::llm_provider::LlmOpen {
+            llama_bin: &paths.llama_bin,
+            mt_model: &paths.mt_model,
+            mmproj: &paths.mmproj,
+            models_root: &paths.models_root,
+        },
+        crate::llm_provider::LlmMode::Vision,
+    ) {
+        Ok(p) => {
+            emit(progress, "translate", if p.is_remote() {
+                "перевод/vision через облако (OpenRouter)"
+            } else {
+                "поднимаю llama-server (Gemma + mmproj)"
+            });
+            p
+        }
         Err(e) => {
-            emit(progress, "translate", &format!("llama-server не поднялся: {e}; перевод пропущен"));
+            emit(progress, "translate", &format!("LLM недоступен: {e}; перевод пропущен"));
             return;
         }
     };
-    let client = match ChatClient::new(srv.base_url()) {
-        Ok(c) => c,
-        Err(e) => {
-            emit(progress, "translate", &format!("клиент чата: {e}; перевод пропущен"));
-            return;
-        }
-    };
+    let client = prov.client();
 
     // Авто-детект типа контента для кастинга (#115): юзер выбрал «Авто» + кастинг включён -> классифицируем
     // live-action vs анимация Gemma-vision (сервер уже поднят). Только при наличии mmproj (иначе vision нет
@@ -175,7 +179,7 @@ pub fn stage(
     });
 
     // Сервер больше не нужен -> глушим (освобождаем VRAM, как del llm в питоне перед TTS/берном).
-    drop(srv);
+    drop(prov); // глушим локальный llama-server (освобождаем VRAM перед TTS/берном); облако — no-op
 
     let extra = match res {
         Ok(r) => r.extra,
