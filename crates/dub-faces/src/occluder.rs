@@ -49,6 +49,11 @@ impl FaceOccluder {
         }
         let (shape, data) = self.model.run_single(blob)?;
         // выход [1,1,H,W] или [1,H,W]; берём среднее по центральной трети (лицо в центре кропа).
+        // Гард: 4D с C!=1 (мульти-канальный или channel-last [1,H,W,C] экспорт xseg) — раскладка неизвестна,
+        // data[yy*w+xx] прочитал бы мусор -> нейтральная видимость 1.0 (без штрафа), а не случайный.
+        if shape.len() == 4 && shape[1] != 1 {
+            return Ok(1.0);
+        }
         let (h, w) = match shape.len() {
             4 => (shape[2], shape[3]),
             3 => (shape[1], shape[2]),

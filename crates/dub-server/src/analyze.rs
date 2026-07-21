@@ -427,6 +427,10 @@ fn merge_short_turns(segs: &mut Vec<Segment>) {
         return;
     }
     const GAP: f64 = 0.35;
+    // Whisper иногда даёт лёгкое ПЕРЕКРЫТИЕ соседних слов (w[i+1].start < w[i].end) -> отрицательный зазор
+    // на границе огрызков ОДНОЙ фразы. Допускаем небольшой overlap, иначе «If|they find you» с −0.02с не
+    // склеится и озвучится рвано (ровно то, что merge и должен убирать).
+    const OVERLAP: f64 = 0.2;
     const SHORT: f64 = 1.6;
     const MAX_DUR: f64 = 12.0;
     const MAX_CH: usize = 200;
@@ -439,12 +443,12 @@ fn merge_short_turns(segs: &mut Vec<Segment>) {
             let short = (last.end - last.start) < SHORT || (s.end - s.start) < SHORT;
             let dur_ok = (s.end - last.start) <= MAX_DUR;
             let ch_ok = last.src_text.chars().count() + s.src_text.chars().count() < MAX_CH;
-            if same_spk && gap >= 0.0 && gap < GAP && short && dur_ok && ch_ok {
+            if same_spk && gap > -OVERLAP && gap < GAP && short && dur_ok && ch_ok {
                 let lt = last.src_text.trim_end();
                 let rt = s.src_text.trim_start();
                 let sep = if lt.is_empty() || rt.is_empty() { "" } else { " " };
                 last.src_text = format!("{lt}{sep}{rt}");
-                last.end = s.end;
+                last.end = last.end.max(s.end); // overlap: не укорачивать вложенным сегментом
                 // слить пословный тайминг (karaoke) если есть у обоих.
                 if let Some(Value::Array(wr)) = s.extra.get("words") {
                     match last.extra.get_mut("words") {

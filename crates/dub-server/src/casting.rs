@@ -237,6 +237,22 @@ pub fn recluster_segments(paths: &AnalyzePaths, segments: &mut [Segment], progre
         // Кластеризация не дала БОЛЬШЕ персонажей, чем Sortformer -> не переразмечаем (не рискуем).
         return 0;
     }
+    // Sortformer УВЕРЕННО сказал один спикер (orig_count<=1): дробим ТОЛЬКО если новые кластеры реально
+    // населены. Настоящий второй голос имеет заметную долю реплик; горстка сегментов в отдельном кластере —
+    // это разброс просодии ОДНОГО человека (крик/шёпот), а не второй персонаж. Иначе монолог рвётся на
+    // v0/v1 и озвучивается двумя голосами (регресс снятия n_spk-гейта). Требуем 2-й кластер >=2 и >=15%.
+    if orig_count <= 1 {
+        let mut sizes = vec![0usize; k];
+        for &l in &labels {
+            sizes[l] += 1;
+        }
+        sizes.sort_unstable_by(|a, b| b.cmp(a));
+        let second = sizes.get(1).copied().unwrap_or(0);
+        let min_needed = 2.max((labels.len() as f64 * 0.15).ceil() as usize);
+        if second < min_needed {
+            return 0; // разброс просодии одного спикера, не второй голос
+        }
+    }
     // seg_idx -> голосовая метка (для эмбеддированных).
     let mut seg_label: HashMap<usize, usize> = HashMap::new();
     for (j, &i) in idxs.iter().enumerate() {
@@ -322,10 +338,14 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
     for (ci, (spk, dur, lines)) in ranked.iter().enumerate() {
         let (sample_frame, face_emb) =
             avatar_for_speaker(paths, proj, spk, ci, anime, det.as_mut(), emb.as_mut(), occ.as_mut(), &cast_dir, progress);
-        // образец голоса персонажа (проигрывается в UI через /casting/voice).
+        // образец голоса персонажа (проигрывается в UI через /casting/voice). Путь пишем в voice_sample —
+        // резолвится по нему, а не по id (match может сменить id на профильный).
+        let mut voice_sample = String::new();
         if let Some(src) = speaker_samples.get(spk) {
             let dst = cast_dir.join(format!("char_{ci}_voice.wav"));
-            let _ = std::fs::copy(src, &dst);
+            if std::fs::copy(src, &dst).is_ok() {
+                voice_sample = format!("casting/char_{ci}_voice.wav");
+            }
         }
         let has_face = !sample_frame.is_empty();
         emit(
@@ -340,6 +360,7 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
             face_embedding: face_emb,
             voice_embedding: voice_embeddings.get(spk).cloned().unwrap_or_default(),
             sample_frame,
+            voice_sample,
             ..Default::default()
         });
     }
@@ -574,27 +595,36 @@ fn avatar_for_speaker(
             // real: фронтальность по 5 точкам; anime: точек нет -> нейтрально 1.0.
             let front = if anime { 1.0 } else { frontality(&f) };
             let meets = side >= min_px;
-            // Видимость (FaceFusion xseg): доля открытой кожи лица. Закрытое рукой/микрофоном/волосами лицо
-            // -> низкая видимость -> штраф. Считаем только для лиц ≥ min_px (реальные кандидаты) — иначе
-            // лишние прогоны xseg на мелочи. Нет окклюдера -> vis_factor=1 (без штрафа).
+            // База качества: РЕЗКОСТЬ доминирует (против расфокуса/motion-blur), размер — sublinear (sqrt),
+            // чтобы крупное мыльное лицо НЕ побеждало резкое поменьше; + фронтальность × уверенность.
+            let base_q = f.score * sharp * (front + 0.1) * side.sqrt();
+            // Может ли кандидат вообще победить? (meets бьёт !meets; в равном классе — по q). Окклюдер (xseg)
+            // ДОРОГОЙ, а vis_factor≤1 только СНИЖАЕТ q — заведомо проигравшего по base_q он не поднимет.
+            // Поэтому видимость считаем ТОЛЬКО для потенциального победителя (branch-and-bound против
+            // десятков прогонов xseg на кадр в массовках).
+            let can_win = match &best {
+                None => true,
+                Some((_, _, bq, bmeets, _)) => (meets && !*bmeets) || (meets == *bmeets && base_q > *bq),
+            };
+            if !can_win {
+                continue;
+            }
+            // Видимость (FaceFusion xseg): доля открытой кожи. Закрытое рукой/микрофоном/волосами лицо ->
+            // низкая видимость -> штраф. Только для лиц ≥ min_px; нет окклюдера -> vis_factor=1.
             let vis_factor = if meets {
                 if let Some(o) = occ.as_deref_mut() {
                     let crop = square_face_crop(&img, (x1, y1, x2, y2), 0.35);
-                    let vis = o.visibility(&crop).unwrap_or(1.0);
-                    0.15 + 0.85 * vis
+                    0.15 + 0.85 * o.visibility(&crop).unwrap_or(1.0)
                 } else {
                     1.0
                 }
             } else {
                 1.0
             };
-            // Качество: РЕЗКОСТЬ доминирует (против расфокуса/motion-blur), размер — sublinear (sqrt),
-            // чтобы крупное мыльное лицо НЕ побеждало резкое поменьше; + фронтальность × уверенность ×
-            // видимость (не закрыто).
-            let q = f.score * sharp * (front + 0.1) * side.sqrt() * vis_factor;
+            let q = base_q * vis_factor;
+            // После штрафа за окклюзию q мог упасть ниже лучшего — перепроверяем перед заменой.
             let better = match &best {
                 None => true,
-                // любое лицо >= мин.размера бьёт любое мельче; при равном классе — по качеству.
                 Some((_, _, bq, bmeets, _)) => (meets && !*bmeets) || (meets == *bmeets && q > *bq),
             };
             if better {

@@ -721,8 +721,9 @@ fn character_json(c: &dub_faces::Character, pid: &str, proj: &Project, proj_dir:
         .iter()
         .filter(|s| ids.contains(s.speaker.as_deref().unwrap_or("0")))
         .count();
-    // Образец голоса: casting/char_<i>_voice.wav по имени персонажа (char_<i>). Есть файл -> URL, иначе null.
-    let voice_rel = char_voice_rel(&c.id);
+    // Образец голоса: путь из voice_sample (устойчив к смене id при кросс-матче); фолбэк на id-путь для
+    // старых casting.json без поля. Есть файл -> URL, иначе null.
+    let voice_rel = if c.voice_sample.is_empty() { char_voice_rel(&c.id) } else { Some(c.voice_sample.clone()) };
     let voice_sample_url = if voice_rel.as_ref().map(|r| proj_dir.join(r).is_file()).unwrap_or(false) {
         Value::from(format!("/projects/{pid}/casting/voice?id={}", c.id))
     } else {
@@ -829,11 +830,20 @@ async fn casting_voice(
     let Some(casting) = dub_faces::load_casting(&dir.join("casting.json")) else {
         return (StatusCode::NOT_FOUND, "casting not run").into_response();
     };
-    if !casting.characters.iter().any(|c| c.id == id) {
+    let Some(ch) = casting.characters.iter().find(|c| c.id == id) else {
         return (StatusCode::NOT_FOUND, "character not found").into_response();
-    }
-    let Some(rel) = char_voice_rel(id) else {
-        return (StatusCode::BAD_REQUEST, "bad id").into_response();
+    };
+    // Резолвим по voice_sample (id мог смениться при кросс-матче — файл назван по индексу эпизода); фолбэк
+    // на id-путь для старых casting.json. Гард от traversal: только casting/*.wav без "..".
+    let rel = if ch.voice_sample.is_empty() {
+        match char_voice_rel(id) {
+            Some(r) => r,
+            None => return (StatusCode::BAD_REQUEST, "bad id").into_response(),
+        }
+    } else if ch.voice_sample.starts_with("casting/") && !ch.voice_sample.contains("..") {
+        ch.voice_sample.clone()
+    } else {
+        return (StatusCode::BAD_REQUEST, "bad voice path").into_response();
     };
     let p = dir.join(&rel);
     if !p.is_file() {

@@ -414,6 +414,7 @@ pub fn build_casting(
             face_embedding: cl.embedding.clone(),
             voice_embedding: voice_emb,
             sample_frame: String::new(), // проставит вызывающий после сохранения кадра
+            voice_sample: String::new(),
         });
     }
     (casting, clusters, dropped)

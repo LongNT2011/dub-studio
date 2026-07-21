@@ -37,14 +37,14 @@ pub fn classify_content_type_standalone(
     total: f64,
     progress: &Progress,
 ) -> Option<String> {
-    if !paths.llama_bin.is_file() || !paths.mt_model.is_file() {
+    // Без mmproj (vision-проектор) классификация невозможна: слать кадры в text-only модель = молча "real"
+    // с ложным «0 голосов». Нет проектора -> None, вызывающий честно оставит дефолт.
+    if !paths.llama_bin.is_file() || !paths.mt_model.is_file() || !paths.mmproj.is_file() {
         return None;
     }
-    let mut opts = ServerOpts::new(&paths.llama_bin, &paths.mt_model)
-        .with_ubatch(crate::models::sel_num(&paths.models_root, "llama_ubatch").map(|f| f as u32));
-    if paths.mmproj.is_file() {
-        opts = opts.with_mmproj(&paths.mmproj);
-    }
+    let opts = ServerOpts::new(&paths.llama_bin, &paths.mt_model)
+        .with_ubatch(crate::models::sel_num(&paths.models_root, "llama_ubatch").map(|f| f as u32))
+        .with_mmproj(&paths.mmproj);
     let srv = LlamaServer::start(&opts).ok()?;
     let client = ChatClient::new(srv.base_url()).ok()?;
     let tmp = paths.work_dir.join("ctype_frame.png");
@@ -129,8 +129,9 @@ pub fn stage(
     };
 
     // Авто-детект типа контента для кастинга (#115): юзер выбрал «Авто» + кастинг включён -> классифицируем
-    // live-action vs анимация Gemma-vision (сервер уже поднят). Результат в проект; casting-стадия прочитает.
-    if args.casting && args.content_type == "auto" {
+    // live-action vs анимация Gemma-vision (сервер уже поднят). Только при наличии mmproj (иначе vision нет
+    // -> casting-стадия сделает автономный детект/дефолт). Результат в проект; casting-стадия прочитает.
+    if args.casting && args.content_type == "auto" && paths.mmproj.is_file() {
         let tmp = paths.work_dir.join("ctype_frame.png");
         let ct = classify_content_type(&client, &paths.input, &tmp, total, |m| {
             emit(progress, "vision", m);
