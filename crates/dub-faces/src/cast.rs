@@ -34,7 +34,7 @@ pub struct Character {
     /// Эмбеддинг голоса (из speaker_global #83). Пусто = движок эмбеддера голоса недоступен.
     #[serde(default)]
     pub voice_embedding: Vec<f32>,
-    /// Путь к кадру-аватарке (относительно work_dir проекта, напр. "casting/char_0.png").
+    /// Путь к кадру-аватарке (относительно work_dir проекта, напр. "casting/char_0.jpg").
     #[serde(default)]
     pub sample_frame: String,
     /// Путь к образцу голоса (относительно work_dir, напр. "casting/char_0_voice.wav"). ЭПИЗОД-специфичен

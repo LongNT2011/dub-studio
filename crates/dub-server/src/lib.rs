@@ -781,7 +781,7 @@ async fn casting_get(State(st): State<AppState>, AxPath(pid): AxPath<String>) ->
     Json(json!({ "version": casting.version, "characters": chars })).into_response()
 }
 
-/// GET /projects/{pid}/casting/avatar?id=<char_id> — кадр-аватарка персонажа (PNG, с Range).
+/// GET /projects/{pid}/casting/avatar?id=<char_id> — кадр-аватарка персонажа (JPG, с Range).
 async fn casting_avatar(
     State(st): State<AppState>,
     AxPath(pid): AxPath<String>,
@@ -802,7 +802,7 @@ async fn casting_avatar(
     if ch.sample_frame.is_empty() {
         return (StatusCode::NOT_FOUND, "no avatar").into_response();
     }
-    // sample_frame — относительный путь внутри work_dir (casting/char_N.png); отсекаем traversal.
+    // sample_frame — относительный путь внутри work_dir (casting/char_N.jpg); отсекаем traversal.
     if ch.sample_frame.contains("..") {
         return (StatusCode::BAD_REQUEST, "bad path").into_response();
     }
@@ -915,7 +915,7 @@ async fn casting_library_delete(
     }
 }
 
-/// GET /casting/library/{slug}/avatar?id=<char_id> — аватарка персонажа профиля (PNG, с Range).
+/// GET /casting/library/{slug}/avatar?id=<char_id> — аватарка персонажа профиля (JPG/PNG, с Range).
 async fn casting_library_avatar(
     State(st): State<AppState>,
     AxPath(slug): AxPath<String>,
@@ -926,7 +926,8 @@ async fn casting_library_avatar(
         return (StatusCode::BAD_REQUEST, "bad slug").into_response();
     }
     let id = q.get("id").map(|s| s.as_str()).unwrap_or("");
-    // id формата char_<i>; берём аватарку avatars/char_<i>.png (эндпоинт резолвит по id персонажа).
+    // id формата char_<i>; берём аватарку avatars/char_<i>.jpg (нативный JPG), фолбэк на .png для старых
+    // профилей. Эндпоинт резолвит по id персонажа.
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return (StatusCode::BAD_REQUEST, "bad id").into_response();
     }
@@ -938,7 +939,11 @@ async fn casting_library_avatar(
     if !casting.characters.iter().any(|c| c.id == id) {
         return (StatusCode::NOT_FOUND, "character not found").into_response();
     }
-    let p = dir.join("avatars").join(format!("{id}.png"));
+    let avdir = dir.join("avatars");
+    let p = {
+        let jpg = avdir.join(format!("{id}.jpg"));
+        if jpg.is_file() { jpg } else { avdir.join(format!("{id}.png")) }
+    };
     if !p.is_file() {
         return (StatusCode::NOT_FOUND, "avatar file missing").into_response();
     }

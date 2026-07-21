@@ -349,6 +349,23 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
             }
         }
         let has_face = !sample_frame.is_empty();
+        // Голос считаем при наличии играбельного образца ИЛИ эмбеддинга голоса (клонируемого). Не завязываемся
+        // на voice_sample.is_empty() — это лишь «удалась ли копия wav»: транзиентный сбой I/O (Windows-лок) не
+        // должен ронять реального закадрового персонажа.
+        let has_voice =
+            !voice_sample.is_empty() || voice_embeddings.get(spk).map_or(false, |v| !v.is_empty());
+        // Фантом-фильтр: одиночная реплика БЕЗ лица И без голоса = диаризационный/QC-мусор (бит-парт в
+        // establishing-шоте, где лицо не детектится, а голос не прошёл QC). Не персонаж — иначе «?»-карточка
+        // без лица и без голоса. Реальный закадровый персонаж (голос есть, лица нет) и любой многорепличный
+        // остаются. Индекс ci не переиспользуется (аватары char_<ci>.jpg уже сохранены по той же позиции).
+        if !has_face && !has_voice && *lines <= 1 {
+            emit(
+                progress,
+                "cast_speaker",
+                &format!("char_{ci}: спикер {spk} — 1 реплика, ни лица ни голоса -> пропуск (не кастуемый бит-парт)"),
+            );
+            continue;
+        }
         emit(
             progress,
             "cast_speaker",
@@ -396,7 +413,7 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
 /// Привязка лицо↔спикер по СО-ВСТРЕЧАЕМОСТИ. Собираем лица по всему говорящему таймлайну, узнаём одно и то
 /// же лицо по LVFace-вектору (cluster_faces), считаем дискриминативную со-встречаемость кластеров с реплик-
 /// таймлайном спикеров (link_faces_discriminative) и назначаем каждому спикеру ЕГО лицо. Аватар = медоидный
-/// кадр кластера. Возвращает speaker_id -> (face_embedding, путь аватара "casting/char_<idx>.png").
+/// кадр кластера. Возвращает speaker_id -> (face_embedding, путь аватара "casting/char_<idx>.jpg").
 #[allow(clippy::too_many_arguments)]
 fn faces_to_speakers(
     paths: &AnalyzePaths,
@@ -439,7 +456,7 @@ fn faces_to_speakers(
     let mut faces: Vec<FrameFace> = Vec::new();
     let mut face_frame: Vec<std::path::PathBuf> = Vec::new();
     for (k, t) in times.iter().enumerate() {
-        let fp = tmp.join(format!("f{k}.png"));
+        let fp = tmp.join(format!("f{k}.jpg"));
         let img = match extract_frame(&paths.input, *t, &fp) {
             Ok(i) => i,
             Err(_) => continue,
@@ -522,30 +539,50 @@ fn faces_to_speakers(
             (s / n).max(1.0)
         })
         .collect();
-    let score: Vec<Vec<f64>> = m
-        .iter()
-        .enumerate()
-        .map(|(c, row)| {
-            let total: f64 = row.iter().sum();
-            row.iter().map(|&v| if total > 1e-9 { (v * v / total) * prom[c] } else { 0.0 }).collect()
-        })
-        .collect();
+    // Единая формула score = (M²/Σ)·prominence (dub_faces::discriminative_prominence_score) — та же, что
+    // страхует юнит-тест link_faces_discriminative; локальную копию не держим (без дрейфа).
+    let score = dub_faces::discriminative_prominence_score(&m, &prom);
+    // Сначала жадное 1:1 (разным спикерам — РАЗНЫЕ лица там, где возможно): cluster -> speaker.
     let linkage = dub_faces::assign(&score, &speakers);
-
-    // 5) speaker -> cluster; аватар = save_face_crop(медоидного кадра кластера). char-индекс = позиция
-    //    спикера в ranked (совпадает с ci в stage -> имя файла char_<idx>.png консистентно).
-    for (ci, cl) in clusters.iter().enumerate() {
-        let Some(spk) = linkage.get(&ci) else {
+    let mut spk_cluster: HashMap<usize, usize> = HashMap::new(); // индекс_спикера -> индекс_кластера
+    for (&c, spk) in &linkage {
+        if let Some(si) = speakers.iter().position(|s| s == spk) {
+            spk_cluster.insert(si, c);
+        }
+    }
+    // ФОЛБЭК «все лица в кадре»: спикеру БЕЗ лица (1:1 не хватило кластеров, напр. войс раздробил одного
+    // человека на 2 персоны) отдаём его ЛУЧШИЙ по score со-встречающийся кластер — можно уже занятый (дубль-
+    // фрагмент получит то же лицо, что верно; передний план в приоритете через prominence). Пусто остаётся
+    // ТОЛЬКО у реально закадрового спикера (score=0 по всем кластерам — лица нет ни в одной его реплике).
+    for si in 0..speakers.len() {
+        if spk_cluster.contains_key(&si) {
             continue;
-        };
-        let idx = speakers.iter().position(|s| s == spk).unwrap_or(0);
-        let av = cl.avatar; // индекс FrameFace-аватара кластера
-        let out_png = cast_dir.join(format!("char_{idx}.png"));
-        let rel = match save_face_crop(&face_frame[av], faces[av].bbox, 0.35, &out_png) {
-            Ok(()) => format!("casting/char_{idx}.png"),
+        }
+        let mut best_c: Option<usize> = None;
+        let mut best = 0.0f64;
+        for (c, row) in score.iter().enumerate() {
+            if row[si] > best {
+                best = row[si];
+                best_c = Some(c);
+            }
+        }
+        if let Some(c) = best_c {
+            spk_cluster.insert(si, c);
+        }
+    }
+
+    // 5) сохраняем аватар НА КАЖДОГО спикера из его кластера. char-индекс = позиция спикера в ranked
+    //    (== ci в stage -> имя char_<idx>.jpg консистентно). Два спикера с общим кластером получают каждый
+    //    свой char_<idx>.jpg (кроп из того же кадра).
+    for (si, &ci) in &spk_cluster {
+        let cl = &clusters[ci];
+        let av = cl.avatar;
+        let out_jpg = cast_dir.join(format!("char_{si}.jpg"));
+        let rel = match save_face_crop(&face_frame[av], faces[av].bbox, 0.35, &out_jpg) {
+            Ok(()) => format!("casting/char_{si}.jpg"),
             Err(_) => String::new(),
         };
-        out.insert(spk.clone(), (cl.embedding.clone(), rel));
+        out.insert(speakers[*si].clone(), (cl.embedding.clone(), rel));
     }
     let _ = std::fs::remove_dir_all(&tmp);
     out

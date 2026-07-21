@@ -100,24 +100,33 @@ pub fn link_faces_to_speakers(
     assign(&m, speakers)
 }
 
-/// ДИСКРИМИНАТИВНАЯ связка (лечит «аватар = слушатель»): сырое M[c][s] (время лица в кадре во время реплик
-/// спикера s) заменяем на score = M[c][s]² / Σ_s' M[c][s']. Лицо, которое в кадре у МНОГИХ спикеров
-/// (слушатель, всегда на экране), размазывает свою со-встречаемость -> score мал для каждого; лицо,
-/// встречающееся ПРЕИМУЩЕСТВЕННО у своего спикера, -> score ≈ M (эксклюзивность × величина). Затем тот же
-/// жадный 1:1 argmax. Это TF/exclusivity-взвешивание из ASD/диаризация-fusion (MERL/AVA-AVD), без моделей.
+/// ДИСКРИМИНАТИВНЫЙ score из матрицы со-встречаемости `m` (клетка c,s), с пер-кластерным весом `prominence`
+/// (передний план: крупнее/фронтальнее => важнее). score[c][s] = (M[c][s]² / Σ_s' M[c][s']) · prominence[c].
+/// Первый множитель — эксклюзивность (лицо у МНОГИХ спикеров размазывает M -> мал для каждого; лицо своего
+/// спикера -> score ≈ M); второй — приоритет говорящего в кадре над фоновым. `prominence` длиной = числу
+/// строк m (кластеров); пусто/короче -> вес 1.0. ЕДИНЫЙ источник формулы для теста и прод-пути
+/// (faces_to_speakers). TF/exclusivity-взвешивание из ASD/диаризация-fusion (MERL/AVA-AVD), без моделей.
+pub fn discriminative_prominence_score(m: &[Vec<f64>], prominence: &[f64]) -> Vec<Vec<f64>> {
+    m.iter()
+        .enumerate()
+        .map(|(c, row)| {
+            let total: f64 = row.iter().sum();
+            let prom = prominence.get(c).copied().unwrap_or(1.0);
+            row.iter().map(|&v| if total > 1e-9 { (v * v / total) * prom } else { 0.0 }).collect()
+        })
+        .collect()
+}
+
+/// ДИСКРИМИНАТИВНАЯ связка (лечит «аватар = слушатель») без prominence-веса: см. discriminative_prominence_score
+/// с единичным весом, затем жадный 1:1 argmax. Прод-путь (faces_to_speakers) зовёт scorer напрямую с реальным
+/// prominence — формула ОДНА (эта функция и её тест страхуют её же).
 pub fn link_faces_discriminative(
     clusters_frame_times: &[Vec<f64>],
     turns: &[SpeakerTurn],
     speakers: &[String],
 ) -> Linkage {
     let m = cooccurrence_matrix(clusters_frame_times, turns, speakers);
-    let disc: Vec<Vec<f64>> = m
-        .iter()
-        .map(|row| {
-            let total: f64 = row.iter().sum();
-            row.iter().map(|&v| if total > 1e-9 { v * v / total } else { 0.0 }).collect()
-        })
-        .collect();
+    let disc = discriminative_prominence_score(&m, &[]);
     assign(&disc, speakers)
 }
 

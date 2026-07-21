@@ -3,7 +3,7 @@
 //!
 //! Каждый профиль:
 //!   casting.json          — Character[] (face+voice эмбеддинги, имена, голоса, заметки);
-//!   avatars/char_<i>.png  — аватарки персонажей (для карточек в UI);
+//!   avatars/char_<i>.jpg  — аватарки персонажей (для карточек в UI);
 //!   voices/char_<i>.wav   — образцы голоса (проигрывание);
 //!   meta.json             — {name, created, char_count}.
 //!
@@ -148,23 +148,25 @@ pub fn save_profile(
     // casting.json целиком (эмбеддинги нужны для матчинга при применении к другому ролику).
     dub_faces::save_casting(&dir.join("casting.json"), &casting)?;
 
-    // Аватарки + образцы голоса по индексу персонажа. Имя в профиле — стабильное char_<i>.* (эндпоинты
-    // библиотеки резолвят по индексу). sample_frame персонажа указывает на casting/char_<i>.png проекта.
-    let src_cast = proj_dir.join("casting");
-    for (i, ch) in casting.characters.iter().enumerate() {
-        // аватарка: из ch.sample_frame (относительный путь), иначе привычное имя char_<i>.png.
-        let av_src = if !ch.sample_frame.is_empty() && !ch.sample_frame.contains("..") {
-            proj_dir.join(&ch.sample_frame)
-        } else {
-            src_cast.join(format!("char_{i}.png"))
-        };
-        if av_src.is_file() {
-            let _ = std::fs::copy(&av_src, avatars.join(format!("char_{i}.png")));
+    // Имя файла в профиле = id персонажа (эндпоинты библиотеки резолвят avatars/<id>.jpg по id, НЕ по позиции
+    // в списке). Источник — stored-путь персонажа (sample_frame/voice_sample), тот же, что отдают per-project
+    // /casting/avatar и /casting/voice. Так копия устойчива к дыркам в char_<i> (фантом-фильтр пропускает
+    // бит-парты -> id непрерывны не всегда) и к смене id при кросс-матче. Байты как есть (нативный JPG/WAV).
+    for ch in casting.characters.iter() {
+        if ch.id.is_empty() || ch.id.contains("..") || ch.id.contains('/') || ch.id.contains('\\') {
+            continue; // защита от traversal в имени файла
         }
-        // образец голоса: casting/char_<i>_voice.wav (кладёт casting.rs step 5b).
-        let vo_src = src_cast.join(format!("char_{i}_voice.wav"));
-        if vo_src.is_file() {
-            let _ = std::fs::copy(&vo_src, voices.join(format!("char_{i}_voice.wav")));
+        if !ch.sample_frame.is_empty() && !ch.sample_frame.contains("..") {
+            let av_src = proj_dir.join(&ch.sample_frame);
+            if av_src.is_file() {
+                let _ = std::fs::copy(&av_src, avatars.join(format!("{}.jpg", ch.id)));
+            }
+        }
+        if !ch.voice_sample.is_empty() && !ch.voice_sample.contains("..") {
+            let vo_src = proj_dir.join(&ch.voice_sample);
+            if vo_src.is_file() {
+                let _ = std::fs::copy(&vo_src, voices.join(format!("{}_voice.wav", ch.id)));
+            }
         }
     }
 

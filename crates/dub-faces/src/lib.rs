@@ -33,7 +33,10 @@ pub use frames::{
     crop_sharpness, sample_frames, save_face_crop, stream_frames, FrameDisposition, SampledFrame,
     DEFAULT_FPS,
 };
-pub use link::{assign, cooccurrence_matrix, link_faces_discriminative, link_faces_to_speakers, Linkage, SpeakerTurn};
+pub use link::{
+    assign, cooccurrence_matrix, discriminative_prominence_score, link_faces_discriminative,
+    link_faces_to_speakers, Linkage, SpeakerTurn,
+};
 pub use occluder::{occluder_path, FaceOccluder};
 pub use voice::{voice_cos_threshold, wespeaker_path, VoiceEmbedder, VOICE_DIM};
 
@@ -390,7 +393,7 @@ pub fn build_casting(
     }
 
     // id переприсваиваем ПО ОТФИЛЬТРОВАННОМУ порядку (char_0..char_n без дыр) — единый источник для
-    // аватарок char_<i>.png и фронтовых ссылок.
+    // аватарок char_<i>.jpg и фронтовых ссылок.
     let mut casting = Casting::default();
     for (ci, cl) in clusters.iter().enumerate() {
         let speaker = linked[ci].clone();
