@@ -100,6 +100,27 @@ pub fn link_faces_to_speakers(
     assign(&m, speakers)
 }
 
+/// ДИСКРИМИНАТИВНАЯ связка (лечит «аватар = слушатель»): сырое M[c][s] (время лица в кадре во время реплик
+/// спикера s) заменяем на score = M[c][s]² / Σ_s' M[c][s']. Лицо, которое в кадре у МНОГИХ спикеров
+/// (слушатель, всегда на экране), размазывает свою со-встречаемость -> score мал для каждого; лицо,
+/// встречающееся ПРЕИМУЩЕСТВЕННО у своего спикера, -> score ≈ M (эксклюзивность × величина). Затем тот же
+/// жадный 1:1 argmax. Это TF/exclusivity-взвешивание из ASD/диаризация-fusion (MERL/AVA-AVD), без моделей.
+pub fn link_faces_discriminative(
+    clusters_frame_times: &[Vec<f64>],
+    turns: &[SpeakerTurn],
+    speakers: &[String],
+) -> Linkage {
+    let m = cooccurrence_matrix(clusters_frame_times, turns, speakers);
+    let disc: Vec<Vec<f64>> = m
+        .iter()
+        .map(|row| {
+            let total: f64 = row.iter().sum();
+            row.iter().map(|&v| if total > 1e-9 { v * v / total } else { 0.0 }).collect()
+        })
+        .collect();
+    assign(&disc, speakers)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,5 +165,26 @@ mod tests {
     fn empty_all_empty() {
         let link = link_faces_to_speakers(&[], &[], &[]);
         assert!(link.is_empty());
+    }
+
+    #[test]
+    fn discriminative_beats_bystander() {
+        // c0 — «слушатель»/статист: РАВНОМЕРНО в кадре у ОБОИХ спикеров, много (по 4 кадра/реплику).
+        // c1 — лицо спикера 0 (эксклюзивно, но меньше кадров), c2 — лицо спикера 1.
+        let times = vec![
+            vec![0.2, 0.5, 0.8, 1.2, 5.2, 5.5, 5.8, 6.2], // c0: 4 в реплике s0, 4 в s1
+            vec![0.3, 0.6, 0.9],                          // c1: только в реплике s0
+            vec![5.3, 5.6, 5.9],                          // c2: только в реплике s1
+        ];
+        let turns = vec![turn(0.0, 2.0, "0"), turn(5.0, 7.0, "1")];
+        let speakers = vec!["0".to_string(), "1".to_string()];
+        // Сырая со-встречаемость назначает слушателя (c0) спикеру — он в кадре больше всех.
+        let raw = link_faces_to_speakers(&times, &turns, &speakers);
+        assert_eq!(raw.get(&0), Some(&"0".to_string()), "сырое: слушатель c0 забирает спикера");
+        // Дискриминативная — отдаёт спикерам их ЭКСКЛЮЗИВНЫЕ лица, слушатель без спикера.
+        let disc = link_faces_discriminative(&times, &turns, &speakers);
+        assert_eq!(disc.get(&1), Some(&"0".to_string()), "диск: c1 -> спикер 0");
+        assert_eq!(disc.get(&2), Some(&"1".to_string()), "диск: c2 -> спикер 1");
+        assert!(!disc.contains_key(&0), "диск: слушатель c0 не назначен");
     }
 }

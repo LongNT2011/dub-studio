@@ -33,7 +33,7 @@ pub use frames::{
     crop_sharpness, sample_frames, save_face_crop, stream_frames, FrameDisposition, SampledFrame,
     DEFAULT_FPS,
 };
-pub use link::{link_faces_to_speakers, Linkage, SpeakerTurn};
+pub use link::{link_faces_discriminative, link_faces_to_speakers, Linkage, SpeakerTurn};
 pub use occluder::{occluder_path, FaceOccluder};
 pub use voice::{voice_cos_threshold, wespeaker_path, VoiceEmbedder, VOICE_DIM};
 

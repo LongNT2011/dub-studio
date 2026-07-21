@@ -16,8 +16,8 @@ use std::path::Path;
 
 use dub_core::{Project, Segment};
 use dub_faces::{
-    crop_sharpness, frontality, load_casting, occluder_path, save_casting, save_face_crop,
-    AnimeFaceDetector, Casting, CcipEmbedder, Character, Face, FaceOccluder, FacesModels, LvFace,
+    crop_sharpness, frontality, load_casting, save_casting, save_face_crop,
+    AnimeFaceDetector, Casting, CcipEmbedder, Character, Face, FacesModels, LvFace,
     Scrfd, CASTING_VERSION,
 };
 
@@ -33,9 +33,6 @@ const FFMPEG: &str = "ffmpeg";
 fn emit(progress: &Progress, stage: &str, msg: &str) {
     progress(serde_json::json!({ "stage": stage, "msg": msg }));
 }
-
-/// Макс. число кадров-кандидатов на персонажа для поиска аватара (из его говорящих сегментов).
-const MAX_AVATAR_CAND: usize = 24;
 
 /// Мин. сторона bbox лица (px) для «чёткого» аватара: мельче — кроп мылится при показе на ~250px.
 /// Предпочитаем лица >= этого; мельче берём лишь если крупнее не нашлось. Env DUB_FACES_MIN_FACE_PX.
@@ -314,20 +311,24 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
     let genders = speaker_genders(paths, proj, &ids);
     let (voice_embeddings, speaker_samples) = speaker_voices(paths, proj, &ids, progress);
 
-    // 3) Детектор+эмбеддер ЛИЦА по типу контента (только для аватара). Нет моделей -> без аватаров.
+    // 3) Детектор+эмбеддер ЛИЦА по типу контента. Нет моделей -> без аватаров.
     let mut det = load_face_det(&paths.models_root, anime, progress);
     let mut emb = load_face_emb(&paths.models_root, anime, progress);
-    // Окклюдер (FaceFusion xseg): штрафуем кадры с закрытым лицом (рука/микрофон/волосы) при выборе
-    // аватара. Только для реальных лиц; отсутствие модели -> None (аватар выбирается без штрафа).
-    let mut occ = if anime { None } else { load_occluder(&paths.models_root, progress) };
 
     let cast_dir = paths.work_dir.join("casting");
     let _ = std::fs::create_dir_all(&cast_dir);
-    emit(
-        progress,
-        "cast_speaker",
-        if anime { "аниме-детектор лиц по говорящим кадрам" } else { "детектор лиц по говорящим кадрам" },
-    );
+
+    // 3b) ПРИВЯЗКА ЛИЦО↔СПИКЕР по СО-ВСТРЕЧАЕМОСТИ (best-practice: face-recognition + diarization fusion,
+    // MERL/AVA-AVD). Собираем лица по всему говорящему таймлайну, узнаём одно и то же лицо по LVFace-ВЕКТОРУ
+    // (cluster_faces), считаем ДИСКРИМИНАТИВНУЮ со-встречаемость с таймлайном реплик (кто/когда говорит уже
+    // известен из диаризации) и назначаем каждому спикеру ЕГО повторяющееся лицо. Слушатель, мелькающий у
+    // ВСЕХ спикеров, давится. Аватар берётся из этого лица, а не «самое резкое в кадре» — лечит корневой баг
+    // «аватар = слушатель». Возвращает speaker_id -> (медоид-эмбеддинг, путь аватара).
+    let face_map = match (det.as_mut(), emb.as_mut()) {
+        (Some(d), Some(e)) => faces_to_speakers(paths, proj, &ranked, d, e, anime, &cast_dir, progress),
+        _ => std::collections::HashMap::new(),
+    };
+    emit(progress, "cast_speaker", &format!("лиц привязано к спикерам: {} из {}", face_map.len(), ranked.len()));
 
     // 4) На КАЖДОГО спикера: аватар из его говорящих кадров + face-эмбеддинг + образец голоса -> Character.
     let mut casting = Casting {
@@ -336,8 +337,8 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
         characters: Vec::new(),
     };
     for (ci, (spk, dur, lines)) in ranked.iter().enumerate() {
-        let (sample_frame, face_emb) =
-            avatar_for_speaker(paths, proj, spk, ci, anime, det.as_mut(), emb.as_mut(), occ.as_mut(), &cast_dir, progress);
+        // Аватар+эмбеддинг лица из привязки со-встречаемости (3b); нет лица у спикера (закадровый) -> пусто.
+        let (face_emb, sample_frame) = face_map.get(spk).cloned().unwrap_or_default();
         // образец голоса персонажа (проигрывается в UI через /casting/voice). Путь пишем в voice_sample —
         // резолвится по нему, а не по id (match может сменить id на профильный).
         let mut voice_sample = String::new();
@@ -392,6 +393,130 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
     }
 }
 
+/// Привязка лицо↔спикер по СО-ВСТРЕЧАЕМОСТИ. Собираем лица по всему говорящему таймлайну, узнаём одно и то
+/// же лицо по LVFace-вектору (cluster_faces), считаем дискриминативную со-встречаемость кластеров с реплик-
+/// таймлайном спикеров (link_faces_discriminative) и назначаем каждому спикеру ЕГО лицо. Аватар = медоидный
+/// кадр кластера. Возвращает speaker_id -> (face_embedding, путь аватара "casting/char_<idx>.png").
+#[allow(clippy::too_many_arguments)]
+fn faces_to_speakers(
+    paths: &AnalyzePaths,
+    proj: &Project,
+    ranked: &[(String, f64, usize)],
+    det: &mut FaceDet,
+    emb: &mut FaceEmb,
+    anime: bool,
+    cast_dir: &Path,
+    progress: &Progress,
+) -> HashMap<String, (Vec<f32>, String)> {
+    use dub_faces::{FrameFace, SpeakerTurn};
+    let mut out: HashMap<String, (Vec<f32>, String)> = HashMap::new();
+
+    // 1) времена-кандидаты: сэмплируем кадры ВНУТРИ речевых сегментов (~каждые SAMPLE_SEC), кап MAX_SAMPLES.
+    const SAMPLE_SEC: f64 = 0.7;
+    const MAX_SAMPLES: usize = 500;
+    let mut times: Vec<f64> = Vec::new();
+    'outer: for s in &proj.segments {
+        let dur = (s.end - s.start).max(0.0);
+        let n = ((dur / SAMPLE_SEC).floor() as usize).max(1);
+        for j in 0..n {
+            times.push(s.start + (j as f64 + 0.5) * dur / n as f64);
+            if times.len() >= MAX_SAMPLES {
+                break 'outer;
+            }
+        }
+    }
+
+    // 2) детект + эмбед по каждому кадру -> FrameFace[] (+ путь PNG кадра для сохранения аватара).
+    let tmp = cast_dir.join("cand");
+    let _ = std::fs::create_dir_all(&tmp);
+    let min_px = min_face_px();
+    let mut faces: Vec<FrameFace> = Vec::new();
+    let mut face_frame: Vec<std::path::PathBuf> = Vec::new();
+    for (k, t) in times.iter().enumerate() {
+        let fp = tmp.join(format!("f{k}.png"));
+        let img = match extract_frame(&paths.input, *t, &fp) {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+        let dets = match det.detect(&img) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let (iw, ih) = (img.width() as f32, img.height() as f32);
+        for f in dets {
+            let (x1, y1, x2, y2) = (f.x1, f.y1, f.x2, f.y2);
+            let side = (x2 - x1).max(0.0).max((y2 - y1).max(0.0));
+            if side < min_px {
+                continue; // мелкие/фоновые лица не дают устойчивого эмбеддинга (и мылятся в аватаре)
+            }
+            // ГАРД «в кадре»: лицо, обрезанное краем кадра, — плохой аватар (полулицо). Отсекаем касающиеся
+            // border на 1px. Резкость/фронтальность/размер добьёт cluster_faces при выборе аватара кластера.
+            if x1 <= 1.0 || y1 <= 1.0 || x2 >= iw - 1.0 || y2 >= ih - 1.0 {
+                continue;
+            }
+            let embv = emb.embed(&img, &f).unwrap_or_default();
+            if embv.is_empty() {
+                continue;
+            }
+            let sharp = crop_sharpness(&img, (x1, y1, x2, y2));
+            let front = if anime { 1.0 } else { frontality(&f) };
+            faces.push(FrameFace {
+                t: *t,
+                bbox: (x1, y1, x2, y2),
+                score: f.score,
+                sharpness: sharp,
+                frontality: front,
+                embedding: embv,
+            });
+            face_frame.push(fp.clone());
+        }
+    }
+    emit(progress, "cast_speaker", &format!("лиц собрано: {} (сэмплов {})", faces.len(), times.len()));
+    if faces.len() < 2 {
+        let _ = std::fs::remove_dir_all(&tmp);
+        return out;
+    }
+
+    // 3) кластеризация по ВЕКТОРУ -> лица-персоны (медоид + кадр-аватар).
+    let clusters = dub_faces::cluster_faces(&faces, dub_faces::cluster_cos_threshold());
+    emit(progress, "cast_speaker", &format!("лиц-персон (кластеров по вектору): {}", clusters.len()));
+
+    // 4) дискриминативная со-встречаемость с таймлайном реплик -> назначение кластер->спикер.
+    let turns: Vec<SpeakerTurn> = proj
+        .segments
+        .iter()
+        .filter_map(|s| s.speaker.as_ref().map(|spk| SpeakerTurn { start: s.start, end: s.end, speaker: spk.clone() }))
+        .collect();
+    let speakers: Vec<String> = ranked.iter().map(|(s, _, _)| s.clone()).collect();
+    let cluster_times: Vec<Vec<f64>> = clusters
+        .iter()
+        .map(|c| {
+            let mut ts: Vec<f64> = c.members.iter().map(|&i| faces[i].t).collect();
+            ts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            ts
+        })
+        .collect();
+    let linkage = dub_faces::link_faces_discriminative(&cluster_times, &turns, &speakers);
+
+    // 5) speaker -> cluster; аватар = save_face_crop(медоидного кадра кластера). char-индекс = позиция
+    //    спикера в ranked (совпадает с ci в stage -> имя файла char_<idx>.png консистентно).
+    for (ci, cl) in clusters.iter().enumerate() {
+        let Some(spk) = linkage.get(&ci) else {
+            continue;
+        };
+        let idx = speakers.iter().position(|s| s == spk).unwrap_or(0);
+        let av = cl.avatar; // индекс FrameFace-аватара кластера
+        let out_png = cast_dir.join(format!("char_{idx}.png"));
+        let rel = match save_face_crop(&face_frame[av], faces[av].bbox, 0.35, &out_png) {
+            Ok(()) => format!("casting/char_{idx}.png"),
+            Err(_) => String::new(),
+        };
+        out.insert(spk.clone(), (cl.embedding.clone(), rel));
+    }
+    let _ = std::fs::remove_dir_all(&tmp);
+    out
+}
+
 /// Спикеры, отсортированные по суммарной длительности речи (desc), с числом реплик. Главные персонажи
 /// первыми. Tie-break по id (детерминизм). Возвращает (speaker_id, суммарная_длит_сек, число_реплик).
 fn speakers_by_talktime(proj: &Project) -> Vec<(String, f64, usize)> {
@@ -437,37 +562,6 @@ impl FaceEmb {
             FaceEmb::Ccip(c) => c.embed_character(img, face),
         }
     }
-}
-
-/// Загрузить окклюдер лица (xseg). Нет модели/не грузится -> None (аватар без штрафа за окклюзию).
-fn load_occluder(models_root: &Path, progress: &Progress) -> Option<FaceOccluder> {
-    let p = occluder_path(models_root);
-    if !p.is_file() {
-        return None;
-    }
-    match FaceOccluder::load(&p) {
-        Ok(o) => Some(o),
-        Err(e) => {
-            emit(progress, "cast_speaker", &format!("окклюдер не загрузился: {e} — без штрафа за закрытое лицо"));
-            None
-        }
-    }
-}
-
-/// Квадратный кроп лица из кадра с полями `pad` (доля от большей стороны bbox) — вход окклюдера. Клампим
-/// по границам кадра; вырожденный bbox -> 1x1 (окклюдер вернёт нейтральную видимость).
-fn square_face_crop(img: &image::RgbImage, bbox: (f32, f32, f32, f32), pad: f32) -> image::RgbImage {
-    let (x1, y1, x2, y2) = bbox;
-    let (cx, cy) = ((x1 + x2) * 0.5, (y1 + y2) * 0.5);
-    let half = ((x2 - x1).max(y2 - y1) * (1.0 + pad) * 0.5).max(1.0);
-    let (iw, ih) = (img.width() as f32, img.height() as f32);
-    let sx = (cx - half).clamp(0.0, iw - 1.0) as u32;
-    let sy = (cy - half).clamp(0.0, ih - 1.0) as u32;
-    let ex = (cx + half).clamp(0.0, iw) as u32;
-    let ey = (cy + half).clamp(0.0, ih) as u32;
-    let w = ex.saturating_sub(sx).max(1);
-    let h = ey.saturating_sub(sy).max(1);
-    image::imageops::crop_imm(img, sx, sy, w, h).to_image()
 }
 
 fn load_face_det(models_root: &Path, anime: bool, progress: &Progress) -> Option<FaceDet> {
@@ -527,136 +621,6 @@ fn load_face_emb(models_root: &Path, anime: bool, progress: &Progress) -> Option
             }
         }
     }
-}
-
-/// Аватар персонажа: детект лица ТОЛЬКО в кадрах, где этот спикер говорит (его сегменты). Берём кадры из
-/// самых длинных реплик (до MAX_AVATAR_CAND), детектим, выбираем лучшее лицо (score²·резкость·фронтальность·
-/// размер) -> кроп аватара + face-эмбеддинг. Нет детектора/лиц -> ("", []). Возвращает (sample_frame, emb).
-#[allow(clippy::too_many_arguments)]
-fn avatar_for_speaker(
-    paths: &AnalyzePaths,
-    proj: &Project,
-    spk: &str,
-    ci: usize,
-    anime: bool,
-    det: Option<&mut FaceDet>,
-    emb: Option<&mut FaceEmb>,
-    mut occ: Option<&mut FaceOccluder>,
-    cast_dir: &Path,
-    progress: &Progress,
-) -> (String, Vec<f32>) {
-    let Some(det) = det else { return (String::new(), Vec::new()) };
-
-    // Сегменты спикера, по убыванию длительности (в длинных репликах он крупно и на экране).
-    let mut segs: Vec<(f64, f64)> = proj
-        .segments
-        .iter()
-        .filter(|s| s.speaker.as_deref().unwrap_or("0") == spk)
-        .map(|s| (s.start, s.end))
-        .collect();
-    segs.sort_by(|a, b| (b.1 - b.0).partial_cmp(&(a.1 - a.0)).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Таймстемпы-кандидаты: НЕ только середина (в лайв-экшене там часто motion-blur говорящего), а
-    // несколько кадров внутри каждой длинной реплики (каждые ~0.6с) — больше шансов поймать резкий
-    // фронтальный кадр с крупным лицом.
-    let mut times: Vec<f64> = Vec::new();
-    'outer: for (s, e) in &segs {
-        let dur = (e - s).max(0.0);
-        let n = ((dur / 0.6).floor() as usize).clamp(1, 6);
-        for j in 0..n {
-            let frac = (j as f64 + 0.5) / n as f64;
-            times.push(s + dur * frac);
-            if times.len() >= MAX_AVATAR_CAND {
-                break 'outer;
-            }
-        }
-    }
-
-    let min_px = min_face_px();
-    let tmp_dir = cast_dir.join("cand");
-    let _ = std::fs::create_dir_all(&tmp_dir);
-    // Лучшее лицо: (кадр, лицо, качество, лицо>=мин.размера, путь). Предпочитаем лица не мельче min_px
-    // (мельче -> аватар мылится); мелкое берём только если ничего крупнее нет.
-    let mut best: Option<(image::RgbImage, Face, f32, bool, std::path::PathBuf)> = None;
-    for (k, t) in times.iter().enumerate() {
-        let fp = tmp_dir.join(format!("s{}_{k}.png", sanitize(spk)));
-        let img = match extract_frame(&paths.input, *t, &fp) {
-            Ok(i) => i,
-            Err(_) => continue,
-        };
-        let faces = match det.detect(&img) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-        for f in faces {
-            let (x1, y1, x2, y2) = (f.x1, f.y1, f.x2, f.y2);
-            // БОЛЬШАЯ сторона bbox — по ней save_face_crop квадратит аватар (max(bw,bh)·1.7), значит она и
-            // определяет чёткость. min(w,h) браковал бы нормальные ПОРТРЕТНЫЕ лица (85w×140h -> 85<96) в пользу
-            // мелкого near-square. px = сторона, определяющая размер аватара.
-            let side = (x2 - x1).max(0.0).max((y2 - y1).max(0.0));
-            let sharp = crop_sharpness(&img, (x1, y1, x2, y2)); // variance of Laplacian: выше = резче
-            // real: фронтальность по 5 точкам; anime: точек нет -> нейтрально 1.0.
-            let front = if anime { 1.0 } else { frontality(&f) };
-            let meets = side >= min_px;
-            // База качества: РЕЗКОСТЬ доминирует (против расфокуса/motion-blur), размер — sublinear (sqrt),
-            // чтобы крупное мыльное лицо НЕ побеждало резкое поменьше; + фронтальность × уверенность.
-            let base_q = f.score * sharp * (front + 0.1) * side.sqrt();
-            // Может ли кандидат вообще победить? (meets бьёт !meets; в равном классе — по q). Окклюдер (xseg)
-            // ДОРОГОЙ, а vis_factor≤1 только СНИЖАЕТ q — заведомо проигравшего по base_q он не поднимет.
-            // Поэтому видимость считаем ТОЛЬКО для потенциального победителя (branch-and-bound против
-            // десятков прогонов xseg на кадр в массовках).
-            let can_win = match &best {
-                None => true,
-                Some((_, _, bq, bmeets, _)) => (meets && !*bmeets) || (meets == *bmeets && base_q > *bq),
-            };
-            if !can_win {
-                continue;
-            }
-            // Видимость (FaceFusion xseg): доля открытой кожи. Закрытое рукой/микрофоном/волосами лицо ->
-            // низкая видимость -> штраф. Только для лиц ≥ min_px; нет окклюдера -> vis_factor=1.
-            let vis_factor = if meets {
-                if let Some(o) = occ.as_deref_mut() {
-                    let crop = square_face_crop(&img, (x1, y1, x2, y2), 0.35);
-                    0.15 + 0.85 * o.visibility(&crop).unwrap_or(1.0)
-                } else {
-                    1.0
-                }
-            } else {
-                1.0
-            };
-            let q = base_q * vis_factor;
-            // После штрафа за окклюзию q мог упасть ниже лучшего — перепроверяем перед заменой.
-            let better = match &best {
-                None => true,
-                Some((_, _, bq, bmeets, _)) => (meets && !*bmeets) || (meets == *bmeets && q > *bq),
-            };
-            if better {
-                best = Some((img.clone(), f, q, meets, fp.clone()));
-            }
-        }
-    }
-
-    let result = match best {
-        Some((img, face, _q, _meets, fp)) => {
-            let out = cast_dir.join(format!("char_{ci}.png"));
-            let bbox = (face.x1, face.y1, face.x2, face.y2);
-            let sample = match save_face_crop(&fp, bbox, 0.35, &out) {
-                Ok(()) => format!("casting/char_{ci}.png"),
-                Err(e) => {
-                    emit(progress, "cast_speaker", &format!("аватар char_{ci} не сохранён: {e}"));
-                    String::new()
-                }
-            };
-            let embv = match emb {
-                Some(e) => e.embed(&img, &face).unwrap_or_default(),
-                None => Vec::new(),
-            };
-            (sample, embv)
-        }
-        None => (String::new(), Vec::new()),
-    };
-    let _ = std::fs::remove_dir_all(&tmp_dir);
-    result
 }
 
 /// Извлечь один кадр видео в момент t (сек) -> RgbImage. Быстрый seek (-ss ПЕРЕД -i).
