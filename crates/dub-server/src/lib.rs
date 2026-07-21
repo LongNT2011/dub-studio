@@ -14,6 +14,7 @@ mod cloud_tts;
 mod compose;
 mod endpoints;
 mod llm_provider;
+mod openrouter_cli;
 mod f0;
 mod frame;
 mod hw;
@@ -1375,7 +1376,15 @@ async fn analyze_project(
     let pid_for_result = pid.clone();
     let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
         let cb = |ev: Value| progress(ev);
+        // Трекинг затрат OpenRouter в ДОЛЛАРАХ (перевод/vision через облако): total_usage до/после.
+        let cost_before = openrouter_cli::total_usage_usd(&paths.models_root);
         let proj = analyze::run(&args, &paths, &cb)?;
+        if let (Some(b), Some(a)) = (cost_before, openrouter_cli::total_usage_usd(&paths.models_root)) {
+            let spent = (a - b).max(0.0);
+            if spent > 0.0 {
+                cb(json!({ "stage": "cost", "msg": format!("OpenRouter: потрачено ${spent:.4} за анализ (всего использовано ${a:.2})") }));
+            }
+        }
         save_project_atomic(&dir_for_save, &proj)?;
         Ok(json!({ "project_id": pid_for_result, "output": dir_for_save.join("project.json").to_string_lossy() }))
     });
@@ -1483,7 +1492,15 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
         let proj = Project::from_json(&text).map_err(|e| e.to_string())?;
         // regen_dub если есть dirty-сегменты (voice/text/rewrite правились).
         let regen = proj.segments.iter().any(|s| s.dirty);
+        // Трекинг затрат OpenRouter в ДОЛЛАРАХ: total_usage до/после (None -> облако не использовалось).
+        let cost_before = openrouter_cli::total_usage_usd(&paths.models_root);
         render::run(&proj, &paths, regen, &cb)?;
+        if let (Some(b), Some(a)) = (cost_before, openrouter_cli::total_usage_usd(&paths.models_root)) {
+            let spent = (a - b).max(0.0);
+            if spent > 0.0 {
+                cb(json!({ "stage": "cost", "msg": format!("OpenRouter: потрачено ${spent:.4} за прогон (всего использовано ${a:.2})") }));
+            }
+        }
         // Правки запечены в дубляж -> сбросить dirty (перечитать, чтобы не затереть правки во время рендера).
         if regen {
             reset_baked_dirty(&proj, &proj_path, &dir_for_job);

@@ -1,56 +1,73 @@
-//! Облачный TTS через OpenRouter (`POST /api/v1/audio/speech`, createSpeech). Опциональная замена
-//! локального Higgs. Отдаёт СЫРЫЕ wav-байты — их пишем ПРЯМО в seg_<i>.wav дубляжного конвейера, без
-//! декода в сэмплы и без обратной перекодировки (лишние конвертации = зло). Дальнейший fit_to_slot
-//! (ffmpeg) сам читает этот wav и подгоняет темп/частоту под слот, как для локального Higgs.
-//!
-//! Тело запроса: {model, input, voice, response_format:"wav", speed}. Ответ — сырой байтстрим wav
-//! (самоописывающий: частота/каналы в заголовке — ffmpeg-фит не нужно ничего сообщать). НЕ mp3 (лоссы).
-//! Голос — пресетный (or_tts_voice / пер-спикерный). Модели: openai/gpt-4o-mini-tts,
-//! google/gemini-*-flash-tts, mistralai/voxtral-mini-tts, elevenlabs/eleven-turbo-v2 (id в or_tts_model).
+//! Облачный TTS через сайдкар openrouter-helper (Go SDK OpenRouter, операция `tts` -> /audio/speech).
+//! helper пишет mp3-байты в файл; читаем их и отдаём вызывающему, который кладёт ПРЯМО в seg-файл дубляжа
+//! (без декода/перекодировки — запрет тупых перегенераций). Дальнейший fit_to_slot (ffmpeg) читает mp3
+//! ОДИН раз. Модель/голос — только из настроек юзера (or_tts_model/or_tts_voice), без хардкода.
 
 use std::path::Path;
+use std::process::Command;
 
-/// Синтез одной реплики через OpenRouter TTS -> СЫРЫЕ wav-байты (пишутся прямо в seg-файл). `voice` —
-/// голос спикера (пусто -> дефолт из настроек). Ошибка — человекочитаемая строка.
-pub fn synth_wav(models_root: &Path, text: &str, voice: &str) -> Result<Vec<u8>, String> {
+#[cfg(target_os = "windows")]
+const FFMPEG: &str = "ffmpeg.exe";
+#[cfg(not(target_os = "windows"))]
+const FFMPEG: &str = "ffmpeg";
+
+/// Синтез одной реплики через Go-SDK-сайдкар -> WAV-байты 24кГц моно (готовы к записи в seg-файл).
+/// helper отдаёт mp3 (часть моделей, напр. voxtral, только mp3), а конвейер читает seg как WAV (hound),
+/// поэтому ОДИН раз конвертируем mp3->wav (не туда-обратно — это единственная необходимая конвертация,
+/// как локальный Higgs пишет seg через encode_wav). `voice` пусто -> дефолт из настроек.
+pub fn synth_audio(models_root: &Path, text: &str, voice: &str) -> Result<Vec<u8>, String> {
     let key = crate::models::openrouter_key(models_root)
         .ok_or("облачный TTS включён, но ключ OpenRouter не задан")?;
     let model = crate::models::openrouter_model(models_root, "tts");
+    if model.is_empty() {
+        return Err("TTS-модель не выбрана в настройках (Облачные модели · OpenRouter)".into());
+    }
     let v = if voice.trim().is_empty() {
         crate::models::openrouter_tts_voice(models_root)
     } else {
         voice.trim().to_string()
     };
+    if v.is_empty() {
+        return Err("голос TTS не задан в настройках (у каждой модели свои голоса)".into());
+    }
 
-    let http = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(180))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let body = serde_json::json!({
+    let repo = crate::openrouter_cli::repo_from_models(models_root);
+    // helper пишет аудио в файл; отдаём временный путь, потом читаем байты.
+    let tmp = std::env::temp_dir().join(format!("dub_cloud_tts_{}.mp3", std::process::id()));
+    let payload = serde_json::json!({
         "model": model,
         "input": text,
         "voice": v,
-        "response_format": "wav", // без потерь + самоописывающий; пишем байты как есть, без переконвертаций
+        "format": "mp3",
+        "out": tmp.to_string_lossy(),
     });
-    let resp = http
-        .post("https://openrouter.ai/api/v1/audio/speech")
-        .bearer_auth(&key)
-        .header("HTTP-Referer", "https://github.com/timoncool/dub-studio")
-        .header("X-Title", "Dub Studio")
-        .json(&body)
-        .send()
-        .map_err(|e| format!("OpenRouter TTS запрос: {e}"))?;
-    let status = resp.status();
-    let bytes = resp.bytes().map_err(|e| format!("OpenRouter TTS чтение: {e}"))?;
-    if !status.is_success() {
-        let msg = String::from_utf8_lossy(&bytes);
-        return Err(format!(
-            "OpenRouter TTS {status}: {}",
-            msg.trim().chars().take(300).collect::<String>()
-        ));
+    if let Err(e) = crate::openrouter_cli::run_json(&repo, &key, "tts", &payload) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
     }
-    if bytes.len() < 44 {
-        return Err(format!("OpenRouter TTS: слишком короткий ответ ({} байт)", bytes.len()));
+    // mp3 -> wav 24кГц моно PCM16 (пайплайн читает seg как WAV). Одна конвертация вперёд.
+    let wav_tmp = tmp.with_extension("wav");
+    let out = Command::new(FFMPEG)
+        .args([
+            "-v", "error",
+            "-i", &tmp.to_string_lossy(),
+            "-ac", "1",
+            "-ar", "24000",
+            "-c:a", "pcm_s16le",
+            "-y", &wav_tmp.to_string_lossy(),
+        ])
+        .output();
+    let _ = std::fs::remove_file(&tmp);
+    let out = out.map_err(|e| format!("ffmpeg mp3->wav: {e}"))?;
+    if !out.status.success() {
+        let _ = std::fs::remove_file(&wav_tmp);
+        return Err(format!("ffmpeg mp3->wav: {}", String::from_utf8_lossy(&out.stderr).trim()));
     }
-    Ok(bytes.to_vec())
+    let bytes = std::fs::read(&wav_tmp).map_err(|e| format!("чтение облачного wav: {e}"));
+    let _ = std::fs::remove_file(&wav_tmp);
+    let bytes = bytes?;
+    if bytes.len() < 200 {
+        return Err(format!("облачный TTS: слишком короткое аудио ({} байт)", bytes.len()));
+    }
+    Ok(bytes)
 }

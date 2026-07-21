@@ -33,79 +33,53 @@ pub async fn presets() -> Json<Value> {
     Json(json!({ "presets": presets, "reveals": reveals }))
 }
 
-// ─── GET /engine/openrouter/models?kind=llm|vision|tts ──────────────────────
-// Прокси публичного каталога OpenRouter (без ключа), отфильтрованный по модальности для дропдаунов
-// настроек: llm = текст на выходе; vision = image на входе; tts = audio на выходе. Отдаём минимум полей.
-pub async fn openrouter_models(Query(q): Query<HashMap<String, String>>) -> Response {
+// ─── GET /engine/openrouter/models?kind=llm|vision|tts|asr ──────────────────
+// Динамический каталог OpenRouter через сайдкар (Go SDK, операция models с фильтром модальности):
+// llm = output text; vision = input image; tts = output speech; asr = output transcription.
+pub async fn openrouter_models(State(st): State<AppState>, Query(q): Query<HashMap<String, String>>) -> Response {
     let kind = q.get("kind").cloned().unwrap_or_else(|| "llm".to_string());
-    let fetched = tokio::task::spawn_blocking(|| {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .ok()?;
-        http.get("https://openrouter.ai/api/v1/models").send().ok()?.json::<Value>().ok()
+    let Some(key) = crate::models::openrouter_key(&st.models_root) else {
+        return (StatusCode::BAD_REQUEST, "ключ OpenRouter не задан").into_response();
+    };
+    let repo = st.repo_root.clone();
+    let payload = match kind.as_str() {
+        "vision" => json!({ "input_modalities": "image" }),
+        "tts" => json!({ "output_modalities": "speech" }),
+        "asr" => json!({ "output_modalities": "transcription" }),
+        _ => json!({ "output_modalities": "text" }),
+    };
+    let res = tokio::task::spawn_blocking(move || {
+        crate::openrouter_cli::run_json(&repo, &key, "models", &payload)
     })
     .await
-    .ok()
-    .flatten();
-    let Some(v) = fetched else {
-        return (StatusCode::BAD_GATEWAY, "не удалось получить каталог OpenRouter").into_response();
-    };
-    let has = |m: &Value, dir: &str, want: &str| -> bool {
-        m.get("architecture")
-            .and_then(|a| a.get(dir))
-            .and_then(|x| x.as_array())
-            .map(|a| a.iter().any(|v| v.as_str() == Some(want)))
-            .unwrap_or(false)
-    };
-    let mut out: Vec<Value> = Vec::new();
-    if let Some(arr) = v.get("data").and_then(|d| d.as_array()) {
-        for m in arr {
-            let keep = match kind.as_str() {
-                "vision" => has(m, "input_modalities", "image"),
-                "tts" => has(m, "output_modalities", "audio"),
-                _ => has(m, "output_modalities", "text"),
-            };
-            if keep {
-                out.push(json!({
-                    "id": m.get("id"),
-                    "name": m.get("name"),
-                    "context": m.get("context_length"),
-                    "pricing": m.get("pricing"),
-                }));
-            }
+    .unwrap_or_else(|e| Err(e.to_string()));
+    match res {
+        // helper отдаёт ModelsListResponse {data:[...]}; прокидываем data как список.
+        Ok(v) => {
+            let data = v.get("data").cloned().unwrap_or(v);
+            Json(json!({ "models": data })).into_response()
         }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("каталог OpenRouter: {e}")).into_response(),
     }
-    Json(json!({ "models": out })).into_response()
 }
 
 // ─── POST /engine/openrouter/verify {key} ───────────────────────────────────
-// Проверка ключа OpenRouter: GET /api/v1/key с ключом -> {ok, data}. Ключ приходит из формы (ввод перед
-// сохранением) и НЕ логируется.
-pub async fn openrouter_verify(Json(body): Json<Value>) -> Response {
+// Проверка ключа OpenRouter через сайдкар (Go SDK, операция verify -> credits). Ключ из формы (ввод
+// перед сохранением), НЕ логируется.
+pub async fn openrouter_verify(State(st): State<AppState>, Json(body): Json<Value>) -> Response {
     let key = body.get("key").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if key.is_empty() {
         return (StatusCode::BAD_REQUEST, "пустой ключ").into_response();
     }
+    let repo = st.repo_root.clone();
     let res = tokio::task::spawn_blocking(move || {
-        let http = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(20))
-            .build()
-            .ok()?;
-        let r = http.get("https://openrouter.ai/api/v1/key").bearer_auth(&key).send().ok()?;
-        let ok = r.status().is_success();
-        let v: Value = r.json().ok()?;
-        Some((ok, v))
+        crate::openrouter_cli::run_json(&repo, &key, "verify", &json!({}))
     })
     .await
-    .ok()
-    .flatten();
+    .unwrap_or_else(|e| Err(e.to_string()));
     match res {
-        Some((true, v)) => {
-            Json(json!({ "ok": true, "data": v.get("data").cloned().unwrap_or(v) })).into_response()
-        }
-        Some((false, v)) => Json(json!({ "ok": false, "error": v })).into_response(),
-        None => (StatusCode::BAD_GATEWAY, "OpenRouter недоступен").into_response(),
+        Ok(v) => Json(v).into_response(),
+        Err(e) => Json(json!({ "ok": false, "error": e })).into_response(),
     }
 }
 

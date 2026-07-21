@@ -779,7 +779,7 @@ fn build_dub(
             // Облачный TTS: wav-байты OpenRouter пишем ПРЯМО в seg-файл (без декода/перекодировки).
             // Голос — дефолтный из настроек (пер-спикерный маппинг — отдельным шагом). Провал -> оригинал
             // сегмента (ноль немых мест), как локальный фолбэк.
-            match crate::cloud_tts::synth_wav(&paths.models_root, tgt, "") {
+            match crate::cloud_tts::synth_audio(&paths.models_root, tgt, "") {
                 Ok(wav) => {
                     std::fs::write(&raw, &wav).map_err(|e| format!("запись облачного seg{fi}: {e}"))?;
                 }
