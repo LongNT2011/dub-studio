@@ -1357,6 +1357,10 @@ async fn analyze_project(
     // Активный вариант модели резолвится ПРИ КАЖДОЙ джобе (не морозится на старте): скачал/выбрал
     // квант -> применяется без рестарта. См. models::resolve_*.
     let sel = models::load_selection(&st.models_root);
+    // Backend локальных ONNX-стадий (диаризация Sortformer / Parakeet): exec_config читает DUB_ASR_BACKEND
+    // при создании сессии — gpu регистрирует CUDA-EP с error_on_failure (недоступность = ошибка, не тихий
+    // CPU-фоллбек), иначе CPU-провайдер. Задаём из local_backend на КАЖДУЮ джобу (переключение без рестарта).
+    std::env::set_var("DUB_ASR_BACKEND", models::local_backend(&st.models_root));
     let (mt_model, mmproj) = models::resolve_mt(&st.models_root, &sel);
     let asr = models::resolve_asr_choice(&st.repo_root, &st.models_root, &sel);
     eprintln!("[models] analyze: MT={} · ASR={}", mt_model.display(), asr.describe());
@@ -1373,7 +1377,7 @@ async fn analyze_project(
         caption_fps: st.opts.caption_fps,
         import_subs,
         // Сепарация ДО диаризации/ASR (best practices): чистый вокал; stems-кэш общий с рендером.
-        bsroformer_cli: st.bsroformer_cli.clone(),
+        bsroformer_cli: dub_sep::engine_cli(&st.repo_root, models::local_backend(&st.models_root)),
         bsroformer_model: st.bsroformer_model.clone(),
     };
 
@@ -1473,13 +1477,13 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
         bench: models::bench_enabled(&st.models_root),
         work_dir: dir.clone(),
         output: output.clone(),
-        bsroformer_cli: st.bsroformer_cli.clone(),
+        bsroformer_cli: dub_sep::engine_cli(&st.repo_root, models::local_backend(&st.models_root)),
         bsroformer_model: sep_model,
         higgs_dll: st.higgs_dll.clone(),
         higgs_model_root,
         higgs_quant,
         fonts_dir: st.fonts_dir.clone(),
-        higgs_backend: st.opts.device.clone(),
+        higgs_backend: if models::local_backend(&st.models_root) == "cpu" { "cpu".to_string() } else { "cuda".to_string() },
         higgs_device: 0,
         higgs_threads: st.opts.num_threads,
         max_stretch: st.opts.max_stretch as f64,
@@ -1592,13 +1596,13 @@ async fn export_lang(
         bench: models::bench_enabled(&st.models_root),
         work_dir: dst_dir.clone(),
         output: output.clone(),
-        bsroformer_cli: st.bsroformer_cli.clone(),
+        bsroformer_cli: dub_sep::engine_cli(&st.repo_root, models::local_backend(&st.models_root)),
         bsroformer_model: sep_model,
         higgs_dll: st.higgs_dll.clone(),
         higgs_model_root,
         higgs_quant,
         fonts_dir: st.fonts_dir.clone(),
-        higgs_backend: st.opts.device.clone(),
+        higgs_backend: if models::local_backend(&st.models_root) == "cpu" { "cpu".to_string() } else { "cuda".to_string() },
         higgs_device: 0,
         higgs_threads: st.opts.num_threads,
         max_stretch: st.opts.max_stretch as f64,
@@ -1694,13 +1698,13 @@ async fn dub_audio_project(State(st): State<AppState>, AxPath(pid): AxPath<Strin
         bench: models::bench_enabled(&st.models_root),
         work_dir: dir.clone(),
         output: dir.join("output.mp4"),
-        bsroformer_cli: st.bsroformer_cli.clone(),
+        bsroformer_cli: dub_sep::engine_cli(&st.repo_root, models::local_backend(&st.models_root)),
         bsroformer_model: models::resolve_sep(&st.models_root, &sel),
         higgs_dll: st.higgs_dll.clone(),
         higgs_model_root,
         higgs_quant,
         fonts_dir: st.fonts_dir.clone(),
-        higgs_backend: st.opts.device.clone(),
+        higgs_backend: if models::local_backend(&st.models_root) == "cpu" { "cpu".to_string() } else { "cuda".to_string() },
         higgs_device: 0,
         higgs_threads: st.opts.num_threads,
         max_stretch: st.opts.max_stretch as f64,

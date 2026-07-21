@@ -30,12 +30,18 @@ use thiserror::Error;
 /// Конфиг исполнения ONNX. КРИТИЧНО: понижаем уровень оптимизации графа до Level1 — на int8-кванте
 /// Parakeet дефолтный Level3 виснет при создании CPU-сессии на минуты (оптимайзер спинит на
 /// DynamicQuantizeLinear/MatMulInteger). Переопределяется через DUB_ASR_OPT_LEVEL (0..3).
+///
+/// Backend: env DUB_ASR_BACKEND=gpu регистрирует CUDA execution provider с `error_on_failure` — при
+/// недоступности CUDA (нет GPU-сборки onnxruntime / провайдера / cuDNN) создание сессии падает ОШИБКОЙ,
+/// а НЕ тихо откатывается на CPU. Вызывающий (сервер) ловит и показывает юзеру уведомление с выбором
+/// (переключить на CPU / доустановить компонент). Иначе (cpu/пусто) — CPU-провайдер по умолчанию.
 fn exec_config() -> ExecutionConfig {
     use ort::session::builder::GraphOptimizationLevel;
     let level = std::env::var("DUB_ASR_OPT_LEVEL")
         .ok()
         .and_then(|s| s.trim().parse::<u8>().ok())
         .unwrap_or(1);
+    let gpu = std::env::var("DUB_ASR_BACKEND").map(|v| v == "gpu").unwrap_or(false);
     ExecutionConfig::new().with_custom_configure(move |b| {
         let lvl = match level {
             0 => GraphOptimizationLevel::Disable,
@@ -43,7 +49,17 @@ fn exec_config() -> ExecutionConfig {
             3 => GraphOptimizationLevel::Level3,
             _ => GraphOptimizationLevel::Level1,
         };
-        Ok(b.with_optimization_level(lvl)?)
+        let mut b = b.with_optimization_level(lvl)?;
+        #[cfg(feature = "cuda")]
+        {
+            if gpu {
+                // Только CUDA + error_on_failure: недоступность прилетает Err(ort), не тихий CPU-фоллбек.
+                b = b.with_execution_providers([ort::ep::CUDA::default().build().error_on_failure()])?;
+            }
+        }
+        #[cfg(not(feature = "cuda"))]
+        let _ = gpu; // без фичи cuda GPU-режим ловит пре-флайт сервера (сборка без CUDA-провайдера)
+        Ok(b)
     })
 }
 
@@ -96,6 +112,10 @@ fn ensure_ort_dylib() {
             roots.push(cwd.join("models"));
         }
         for r in &roots {
+            // GPU-сборка (cuda13) ПРИОРИТЕТНЕЕ: она суперсет — умеет и CPU-провайдер, и CUDA-EP. Если
+            // скачана, грузим её, чтобы переключение backend gpu<->cpu работало БЕЗ рестарта (dll
+            // фиксируется в процессе при первом касании ort; выбор провайдера — уже в exec_config).
+            cands.push(r.join("runtime").join("onnxruntime-win-x64-gpu_cuda13-1.24.2").join("lib").join("onnxruntime.dll"));
             cands.push(r.join("runtime").join("onnxruntime-win-x64-1.24.2").join("lib").join("onnxruntime.dll"));
         }
         for c in cands {

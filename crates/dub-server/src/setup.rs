@@ -124,6 +124,10 @@ const HF_ROFORMER: &str = "https://huggingface.co/chenmozhijin/BSRoformer-GGUF/r
 // GitHub: BSRoformer.cpp движок win-cuda-13.1.0 zip (chenmozhijin/BSRoformer.cpp v0.1.0).
 const GH_BSROFORMER_ENGINE: &str =
     "https://github.com/chenmozhijin/BSRoformer.cpp/releases/download/v0.1.0/BSRoformer-windows-cuda-13.1.0.zip";
+// GitHub: BSRoformer.cpp CPU-сборка (win-x64-msvc, без CUDA) — сепарация на процессоре: медленнее,
+// но полная функция. Статический exe 671КБ; MSVC-рантайм уже вшит компонентом vcruntime.
+const GH_BSROFORMER_ENGINE_CPU: &str =
+    "https://github.com/chenmozhijin/BSRoformer.cpp/releases/download/v0.1.0/BSRoformer-windows-x64-msvc.zip";
 // GitHub: llama.cpp win-cuda-13.3 (ggml-org/llama.cpp; пин на стабильный билд + cudart-компаньон).
 const GH_LLAMA_BUILD: &str = "b9966";
 const GH_LLAMA: &str =
@@ -131,12 +135,20 @@ const GH_LLAMA: &str =
 // GitHub: onnxruntime 1.24.2 win-x64 (microsoft/onnxruntime) — строго 1.24.2 (rc.12 ABI; иначе дедлок).
 const GH_ORT: &str =
     "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-win-x64-1.24.2.zip";
+// GitHub: onnxruntime 1.24.2 GPU-сборка под CUDA 13 (gpu_cuda13) — CUDA-EP для Parakeet/Sortformer на
+// GPU. Вариант cuda13 переиспользует наши _13-DLL (cudart/cublas), нужен только cuDNN 9 (WHEEL_CUDNN).
+// Содержит onnxruntime.dll(GPU) + onnxruntime_providers_cuda.dll + onnxruntime_providers_shared.dll.
+const GH_ORT_GPU: &str =
+    "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2/onnxruntime-win-x64-gpu_cuda13-1.24.2.zip";
 // GitHub: ffmpeg static win64 GPL (BtbN/FFmpeg-Builds) — тот же источник, что install.bat.
 const GH_FFMPEG: &str =
     "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
 // PyPI-wheel'ы NVIDIA CUDA 13 runtime (те же, что Higgs envdeps.rs — байт-в-байт с локальным CUDA 13.3).
 const WHEEL_CUDART: &str = "https://files.pythonhosted.org/packages/d2/27/b53a5e0397842a5c11f0e1a39d4e5b2f22638a4126e83b3c4e196f62c969/nvidia_cuda_runtime-13.3.29-py3-none-win_amd64.whl";
 const WHEEL_CUBLAS: &str = "https://files.pythonhosted.org/packages/08/8f/890a96ea1ff615100296977cce23296052dcb8c114d4e451201ec39df9bf/nvidia_cublas-13.6.0.2-py3-none-win_amd64.whl";
+// PyPI: cuDNN 9 под CUDA 13 (nvidia-cudnn-cu13) — нужен для CUDA-EP onnxruntime (Parakeet/Sortformer на
+// GPU). Даёт cudnn64_9.dll + split-либы. ≈389 МБ. cudart/cublas _13 уже есть (cuda-runtime выше).
+const WHEEL_CUDNN: &str = "https://files.pythonhosted.org/packages/18/d4/c09b11336981836c3183f28a6ca309e08ad080311edb6ff6c28cecdb5f24/nvidia_cudnn_cu13-9.25.0.15-py3-none-win_amd64.whl";
 // Страница драйверов NVIDIA (кнопка «Открыть сайт» — драйвер DLL-кой не ставится).
 pub const NVIDIA_DRIVER_URL: &str = "https://www.nvidia.com/Download/index.aspx";
 
@@ -526,6 +538,19 @@ pub fn manifest() -> Vec<Component> {
             external_url: None,
         },
         Component {
+            id: "bsroformer-engine-cpu",
+            name: "BSRoformer.cpp движок (CPU)",
+            purpose: "Сепарация на процессоре — режим без NVIDIA (медленнее, полная функция)",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 671_031,
+            files: &[
+                FileSpec { url: GH_BSROFORMER_ENGINE_CPU, dest_rel: "tools/bsroformer-cpu/_engine.zip", size: 671_031, extract: Extract::ZipFlat },
+            ],
+            markers: &[Marker { rel: "tools/bsroformer-cpu/bs_roformer-cli.exe", expect: 0 }],
+            external_url: None,
+        },
+        Component {
             id: "llama",
             name: "llama.cpp сервер (CUDA 13.3)",
             purpose: "Сайдкар-сервер для Gemma (перевод/vision)",
@@ -551,6 +576,19 @@ pub fn manifest() -> Vec<Component> {
             ],
             // dub-asr::ensure_ort_dylib ищет ровно этот путь под models/runtime.
             markers: &[Marker { rel: "models/runtime/onnxruntime-win-x64-1.24.2/lib/onnxruntime.dll", expect: 0 }],
+            external_url: None,
+        },
+        Component {
+            id: "onnxruntime-gpu",
+            name: "ONNX Runtime 1.24.2 GPU (CUDA)",
+            purpose: "CUDA-провайдер для диаризации/Parakeet на GPU (режим local_backend=gpu)",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 288_348_147,
+            files: &[
+                FileSpec { url: GH_ORT_GPU, dest_rel: "models/runtime/_ort_gpu.zip", size: 288_348_147, extract: Extract::ZipTree },
+            ],
+            markers: &[Marker { rel: "models/runtime/onnxruntime-win-x64-gpu_cuda13-1.24.2/lib/onnxruntime.dll", expect: 0 }],
             external_url: None,
         },
         Component {
@@ -583,6 +621,19 @@ pub fn manifest() -> Vec<Component> {
                 Marker { rel: "models/higgs-engine/cublas64_13.dll", expect: 0 },
                 Marker { rel: "models/higgs-engine/cublasLt64_13.dll", expect: 0 },
             ],
+            external_url: None,
+        },
+        Component {
+            id: "cudnn",
+            name: "cuDNN 9 (CUDA 13)",
+            purpose: "Нужен CUDA-провайдеру onnxruntime для диаризации/Parakeet на GPU",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 408_000_000,
+            files: &[
+                FileSpec { url: WHEEL_CUDNN, dest_rel: "models/higgs-engine/_cudnn.whl", size: 0, extract: Extract::WheelDlls },
+            ],
+            markers: &[Marker { rel: "models/higgs-engine/cudnn64_9.dll", expect: 0 }],
             external_url: None,
         },
         Component {
@@ -886,6 +937,22 @@ pub fn setup_status(repo_root: &Path) -> SetupStatus {
         let is_higgs = c.id.starts_with("higgs");
         let is_asr = c.id.starts_with("parakeet") || c.id.starts_with("whisper");
         if (cloud_llm && is_gemma) || (cloud_tts && is_higgs) || (cloud_asr && is_asr) {
+            c.requirement = Requirement::Optional;
+        }
+    }
+    // Backend локальных стадий: в CPU-режиме (без NVIDIA) CUDA-компоненты не нужны — сепарация идёт
+    // CPU-сборкой, тяжёлое в облаке. CPU-движок сепарации становится рекомендованным (преселект на
+    // первом запуске), а CUDA-движок + CUDA-рантайм — необязательными (не тянем лишние гигабайты).
+    // В GPU-режиме наоборот: CPU-движок не нужен.
+    let backend = crate::models::local_backend(&mroot);
+    for c in comps.iter_mut() {
+        if backend == "cpu" {
+            if c.id == "bsroformer-engine-cpu" {
+                c.requirement = Requirement::Recommended;
+            } else if c.id == "bsroformer-engine" || c.id == "cuda-runtime" {
+                c.requirement = Requirement::Optional;
+            }
+        } else if c.id == "bsroformer-engine-cpu" {
             c.requirement = Requirement::Optional;
         }
     }

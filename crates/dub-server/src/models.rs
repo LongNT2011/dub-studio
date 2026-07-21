@@ -73,6 +73,9 @@ pub fn is_selection_key(key: &str) -> bool {
     matches!(
         key,
         "tts" | "asr" | "mt" | "sep" | "asr_engine" | "whisper_model" | "whisper_compute" | "whisper_device"
+            // Локальный backend вычислений (сепарация/диаризация/локальные ASR/TTS): auto|gpu|cpu.
+            // gpu = CUDA, cpu = без NVIDIA (сепарация CPU-сборкой, whisper cpu, onnx CPU-провайдер).
+            | "local_backend"
             // Лимиты RAM (видимые контролы в настройках, НЕ авто-магия): против OOM на слабой памяти.
             | "llama_ubatch"    // размер prefill-батча Gemma (меньше = меньше пиковый буфер графа prefill)
             | "higgs_ref_secs"  // длина реф-клипа клона голоса (меньше = меньше prefill Higgs; <12с спасает 32ГБ)
@@ -92,6 +95,22 @@ pub fn is_selection_key(key: &str) -> bool {
             | "or_asr"          // id STT-модели OpenRouter (напр. "openai/whisper-large-v3")
             | "or_concurrency"  // число параллельных облачных запросов (чанки в N потоков; OpenRouter ~50 конкур.)
     )
+}
+
+/// Локальный backend вычислений (сепарация, диаризация, локальные ASR/TTS): "gpu"|"cpu".
+/// Ключ `local_backend`: "cpu"/"gpu" перекрывают; "auto"/пусто -> по факту наличия NVIDIA-драйвера.
+pub fn local_backend(mroot: &Path) -> &'static str {
+    match pick(&load_selection(mroot), "local_backend") {
+        Some("cpu") => "cpu",
+        Some("gpu") | Some("cuda") => "gpu",
+        _ => {
+            if crate::setup::detect_driver() {
+                "gpu"
+            } else {
+                "cpu"
+            }
+        }
+    }
 }
 
 /// API-ключ OpenRouter из active.json (локальное хранение, десктоп). Пусто/нет -> None.
@@ -252,7 +271,14 @@ pub fn resolve_asr_choice(repo_root: &Path, mroot: &Path, sel: &Value) -> AsrCho
             // имена версионные (cublas64_13 ≠ cublas64_11), cuDNN в дистрибутиве нет вообще. Поэтому:
             // либы лежат -> cuda (GPU в разы быстрее на длинных), нет -> честный cpu БЕЗ попыток и
             // фолбэков. Явная настройка whisper_device перекрывает авто-детект.
-            let auto_dev = if whisper_cuda_libs_present(&bin) { "cuda" } else { "cpu" };
+            // Backend локальных стадий перекрывает авто: cpu -> строго cpu; иначе cuda если либы рядом.
+            let auto_dev = if local_backend(mroot) == "cpu" {
+                "cpu"
+            } else if whisper_cuda_libs_present(&bin) {
+                "cuda"
+            } else {
+                "cpu"
+            };
             let device = pick(sel, "whisper_device").unwrap_or(auto_dev).to_string();
             // Квант: на GPU дефолт float16 (родной для тензорных ядер), на CPU — int8.
             let mut compute = pick(sel, "whisper_compute")

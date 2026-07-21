@@ -7,7 +7,7 @@ description = "axum-сервер Dub Studio: тот же REST/SSE контрак
 
 [dependencies]
 dub-core = { path = "../dub-core" }
-dub-asr = { path = "../dub-asr" }
+dub-asr = { path = "../dub-asr", features = ["cuda"] }
 dub-llm = { path = "../dub-llm" }
 dub-translate = { path = "../dub-translate" }
 dub-sep = { path = "../dub-sep" }

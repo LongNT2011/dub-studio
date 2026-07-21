@@ -20,51 +20,55 @@ pub struct Preset {
     pub keys: &'static [(&'static str, &'static str)],
 }
 
-/// Локальные пресеты выключают облако (or_*_on=0) — идут на своей GPU; «облако» включает все три стадии.
-const LOCAL_CLOUD_OFF: &[(&str, &str)] = &[("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")];
-
 pub const PRESETS: &[Preset] = &[
     Preset {
         id: "rtx5090",
         title: "RTX 5090 (32 ГБ)",
         subtitle: "Максимальное качество — топовые кванты локально",
         min_vram_gb: 30.0,
-        keys: &[("tts", "q8_0"), ("mt", "q8_0"), ("asr_engine", "parakeet"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
+        keys: &[("tts", "q8_0"), ("mt", "q8_0"), ("asr_engine", "parakeet"), ("local_backend", "gpu"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
     },
     Preset {
         id: "rtx4090",
         title: "RTX 4090 (24 ГБ)",
         subtitle: "Максимальное качество — топовые кванты локально",
         min_vram_gb: 22.0,
-        keys: &[("tts", "q8_0"), ("mt", "q8_0"), ("asr_engine", "parakeet"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
+        keys: &[("tts", "q8_0"), ("mt", "q8_0"), ("asr_engine", "parakeet"), ("local_backend", "gpu"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
     },
     Preset {
         id: "gpu16",
         title: "GPU 16 ГБ",
         subtitle: "Высокое качество (4080/4070 Ti и подобные)",
         min_vram_gb: 15.0,
-        keys: &[("tts", "q8_0"), ("mt", "q6_k"), ("asr_engine", "parakeet"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
+        keys: &[("tts", "q8_0"), ("mt", "q6_k"), ("asr_engine", "parakeet"), ("local_backend", "gpu"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
     },
     Preset {
         id: "gpu12",
         title: "GPU 12 ГБ",
         subtitle: "Сбалансированно (3060/4070 и подобные)",
         min_vram_gb: 11.0,
-        keys: &[("tts", "q6_k"), ("mt", "q5_0"), ("asr_engine", "parakeet"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
+        keys: &[("tts", "q6_k"), ("mt", "q5_0"), ("asr_engine", "parakeet"), ("local_backend", "gpu"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
     },
     Preset {
         id: "gpu8",
         title: "GPU 8 ГБ",
         subtitle: "Экономный — лёгкие кванты (3060 Ti/4060)",
         min_vram_gb: 7.0,
-        keys: &[("tts", "q4_k_m"), ("mt", "q4_0"), ("asr_engine", "parakeet"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
+        keys: &[("tts", "q4_k_m"), ("mt", "q4_0"), ("asr_engine", "parakeet"), ("local_backend", "gpu"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
+    },
+    Preset {
+        id: "weak-nvidia-cloud",
+        title: "Слабая NVIDIA + облако",
+        subtitle: "Тяжёлое (перевод/vision/озвучка) в OpenRouter, сепарация и ASR на вашей GPU",
+        min_vram_gb: 0.0,
+        keys: &[("local_backend", "gpu"), ("or_llm_on", "1"), ("or_vision_on", "1"), ("or_tts_on", "1")],
     },
     Preset {
         id: "cloud",
-        title: "Облако (OpenRouter)",
-        subtitle: "Тяжёлые модели в облако — разгрузка GPU и скорость на слабой NVIDIA-карте (нужен ключ + выбор моделей)",
+        title: "CPU + облако (без NVIDIA)",
+        subtitle: "Тяжёлое в OpenRouter, локальное на процессоре — запускается без видеокарты (нужен ключ)",
         min_vram_gb: 0.0,
-        keys: &[("or_llm_on", "1"), ("or_vision_on", "1"), ("or_tts_on", "1")],
+        keys: &[("local_backend", "cpu"), ("or_llm_on", "1"), ("or_vision_on", "1"), ("or_tts_on", "1")],
     },
     Preset {
         id: "custom",
@@ -102,7 +106,7 @@ pub fn recommend() -> HardwareRecommendation {
     let name_lc = hw.gpu_name.to_lowercase();
 
     let (recommended, reason) = if !has_gpu {
-        ("cloud", "NVIDIA GPU не найдена — облако снимет тяжёлые модели, но сепарация/диаризация всё равно требуют NVIDIA".to_string())
+        ("cloud", "NVIDIA GPU не найдена — режим «CPU + облако»: тяжёлое в OpenRouter, локальное на процессоре (медленнее, но работает)".to_string())
     } else if name_lc.contains("5090") {
         ("rtx5090", format!("Обнаружена {} — максимальные кванты", hw.gpu_name))
     } else if name_lc.contains("4090") {

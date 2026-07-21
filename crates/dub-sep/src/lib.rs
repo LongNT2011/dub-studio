@@ -52,6 +52,19 @@ pub fn engine_dir(repo_root: &Path) -> PathBuf {
         .unwrap_or_else(|_| repo_root.join("tools").join("bsroformer"))
 }
 
+/// Каталог CPU-сборки движка (без CUDA): <repo>/tools/bsroformer-cpu.
+pub fn engine_dir_cpu(repo_root: &Path) -> PathBuf {
+    repo_root.join("tools").join("bsroformer-cpu")
+}
+
+/// Путь к CLI движка под backend: "cpu" -> bsroformer-cpu, иначе (gpu) -> bsroformer. БЕЗ тихой
+/// подмены backend — возвращаем ровно путь выбранной сборки; отсутствие ловит пре-флайт и показывает
+/// уведомление (а не молча считает без фона).
+pub fn engine_cli(repo_root: &Path, backend: &str) -> PathBuf {
+    let dir = if backend == "cpu" { engine_dir_cpu(repo_root) } else { engine_dir(repo_root) };
+    dir.join(ENGINE_CLI_FILE)
+}
+
 /// Резолв GGUF-модели: env DUB_STUDIO_BSROFORMER_MODEL, иначе <repo>/models/bsroformer/<MODEL_FILE>.
 pub fn model_path(repo_root: &Path) -> PathBuf {
     std::env::var("DUB_STUDIO_BSROFORMER_MODEL")
