@@ -16,6 +16,8 @@ use dub_captions::{BlurBox, Sub, SubStyle as CapSubStyle, Title as CapTitle};
 use dub_core::{Project, SubStyle as CoreSubStyle, Title as CoreTitle};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc};
+use std::time::Duration;
 
 use crate::media;
 use crate::wavio;
@@ -307,6 +309,43 @@ const VOICEOVER_DUCK_MIN_DB: f64 = -40.0;
 /// по коротким фразам с конкретными рефами).
 const MAX_TTS_ATTEMPTS: usize = 5;
 const CONSECUTIVE_ABORT: usize = 8;
+
+/// voice_clone с ЖЁСТКИМ таймаутом. Higgs-движок (прекомпил-DLL) СТОХАСТИЧЕСКИ виснет навечно на редких
+/// сегментах (CPU-side loop, GPU в простое) — in-process FFI-вызов таймаутом не убить напрямую, но
+/// `Engine: Send+Sync` и есть C-ABI `cancel()`. Гоним синтез в отдельном потоке; по таймауту дёргаем
+/// `cancel()` (сигнал движку прекратить — может не сработать на глухом хэнге) и БРОСАЕМ поток (доживает
+/// в фоне, держит свой Arc-клон движка), а рендер продолжает СЛЕДУЮЩИЙ сегмент на том же движке (Sync).
+/// Так единственный воркер НЕ блокируется навечно (принцип #105). Вызывающий трактует Err как дефект.
+fn voice_clone_guarded(
+    engine: &Arc<AudiocppEngine>,
+    text: &str,
+    ref_wav: &str,
+    ref_text: Option<&str>,
+    opts: &str,
+    timeout: Duration,
+) -> Result<(Vec<f32>, i32), String> {
+    let (tx, rx) = mpsc::channel();
+    let eng = engine.clone();
+    let (t, rw, rt, op) = (
+        text.to_string(),
+        ref_wav.to_string(),
+        ref_text.map(|s| s.to_string()),
+        opts.to_string(),
+    );
+    std::thread::spawn(move || {
+        let r = eng
+            .voice_clone(&t, &rw, rt.as_deref(), &op)
+            .map_err(|e| e.to_string());
+        let _ = tx.send(r); // по таймауту получателя уже нет — send вернёт Err, не паникуем
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(r) => r,
+        Err(_) => {
+            engine.cancel(); // best-effort: сигнал движку остановить текущую генерацию
+            Err(format!("таймаут синтеза >{}с (зависание движка)", timeout.as_secs()))
+        }
+    }
+}
 
 /// Детект TTS-артефакта «гудение» по сэмплам фразы (in-memory, прямо из voice_clone). Речь на клипе >0.4с
 /// всегда имеет паузы (тихие кадры) и большой размах громкости; непрерывный гул — почти без пауз и с
@@ -647,8 +686,9 @@ fn build_dub(
 
     // 4) TTS каждый сегмент через Higgs (audiocpp). Кэш: seg_XXX.wav; не-dirty переиспользуются.
     emit(progress, "tts", &format!("синтез {} сегментов (Higgs clone)", segs.len()));
-    let engine = AudiocppEngine::load(&paths.higgs_dll)
-        .map_err(|e| format!("загрузка Higgs DLL: {e}"))?;
+    let engine = Arc::new(
+        AudiocppEngine::load(&paths.higgs_dll).map_err(|e| format!("загрузка Higgs DLL: {e}"))?,
+    );
     engine
         .load_model(
             &paths.higgs_model_root,
@@ -786,10 +826,28 @@ fn build_dub(
                         "{{\"temperature\":0.15,\"top_p\":0.90,\"top_k\":50,\"max_new_tokens\":{tok_cap},\"ras_win_len\":7,\"ras_win_max_num_repeat\":1,\"return_audio_in_tokens\":true,\"seed\":{seed}}}"
                     ),
                 };
-                let (samples, sr) = engine
-                    .voice_clone(tgt, &rw.to_string_lossy(), rt, &opts)
-                    .map_err(|e| format!("Higgs clone seg{fi}: {e}"))?;
                 attempt += 1;
+                // Таймаут ~8× длины слота (флор 45с): нормальный синтез быстрее реалтайма, зависание —
+                // минуты, так что порог чисто разделяет. Ошибка/таймаут -> как дефект (ретрай стохастику
+                // обычно лечит); исчерпали попытки -> ОРИГИНАЛ (сегмент дороже потерять, чем зависший рендер).
+                let vc_to = Duration::from_secs((((s.end - s.start) * 8.0).ceil() as u64).max(45));
+                let (samples, sr) = match voice_clone_guarded(&engine, tgt, &rw.to_string_lossy(), rt, &opts, vc_to) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        retried = true;
+                        total_retries += 1;
+                        if attempt >= MAX_TTS_ATTEMPTS {
+                            media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
+                            kept_original = true;
+                            emit(progress, "tts", &format!(
+                                "⚠ сегмент {fi}: {MAX_TTS_ATTEMPTS} сбоев/таймаутов синтеза ({e}) — оставлена оригинальная реплика"
+                            ));
+                            break (Vec::new(), 24_000);
+                        }
+                        emit(progress, "tts", &format!("сегмент {fi}: {e} — регенерация ({}/{})", attempt + 1, MAX_TTS_ATTEMPTS));
+                        continue;
+                    }
+                };
                 match synth_defect(&samples, sr, tgt_chars) {
                     None => break (samples, sr), // дефектов не видно — берём
                     Some(kind) => {
@@ -940,7 +998,8 @@ fn build_dub(
                 .into_iter()
                 .enumerate()
                 {
-                    let Ok((smp, r)) = engine.voice_clone(tgtq, &rw.to_string_lossy(), rt, &opts) else { continue };
+                    let vc_to = Duration::from_secs((((s.end - s.start) * 8.0).ceil() as u64).max(45));
+                    let Ok((smp, r)) = voice_clone_guarded(&engine, tgtq, &rw.to_string_lossy(), rt, &opts, vc_to) else { continue };
                     if synth_defect(&smp, r, tgt_chars).is_some() {
                         continue;
                     }
