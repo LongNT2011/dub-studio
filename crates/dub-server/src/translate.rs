@@ -179,6 +179,11 @@ pub fn stage(
     });
 
     // Сервер больше не нужен -> глушим (освобождаем VRAM, как del llm в питоне перед TTS/берном).
+    // ГЕЙТ ПОКРЫТИЯ ПЕРЕВОДА (валидация В пайплайне): сегменты, оставшиеся английскими/непереведёнными
+    // (tgt≈src ИЛИ латиница при нелатинском tgt), доперевести точечно flat_run — пока LLM ещё жив.
+    if res.is_ok() {
+        ensure_translation_coverage(client, &mut segs, &args.src_lang, &proj.tgt_lang, progress);
+    }
     drop(prov); // глушим локальный llama-server (освобождаем VRAM перед TTS/берном); облако — no-op
 
     let extra = match res {
@@ -239,3 +244,86 @@ fn apply_extra(proj: &mut Project, extra: &Value) {
     }
 }
 
+
+/// Целевой язык пишется НЕлатиницей (кириллица/CJK/RTL/индийские/…)? — для детекции «английский пролез».
+fn tgt_expects_non_latin(lang: &str) -> bool {
+    let l = lang.split(['-', '_']).next().unwrap_or(lang).to_ascii_lowercase();
+    matches!(
+        l.as_str(),
+        "ru" | "uk" | "be" | "bg" | "sr" | "mk" | "kk" | "ky" | "tg" | "mn" | "ab" | "os"
+            | "zh" | "ja" | "ko"
+            | "ar" | "fa" | "ur" | "he" | "ps" | "sd"
+            | "el" | "hy" | "ka" | "hi" | "bn" | "pa" | "gu" | "ta" | "te" | "kn" | "ml"
+            | "th" | "lo" | "km" | "my" | "si" | "am"
+    )
+}
+
+/// Сегмент выглядит НЕ переведённым: пусто, равен исходнику, ИЛИ tgt преимущественно латиница при
+/// нелатинском целевом языке (английский «пролез сквозь» перевод).
+fn looks_untranslated(src: &str, tgt: &str, tgt_lang: &str) -> bool {
+    let t = tgt.trim();
+    if t.is_empty() {
+        return true;
+    }
+    if t.eq_ignore_ascii_case(src.trim()) {
+        return true;
+    }
+    if tgt_expects_non_latin(tgt_lang) {
+        let letters = t.chars().filter(|c| c.is_alphabetic()).count();
+        if letters > 0 {
+            let latin = t.chars().filter(|c| c.is_ascii_alphabetic()).count();
+            if (latin as f64) / (letters as f64) > 0.5 {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Гейт покрытия перевода: доперевести сегменты, оставшиеся непереведёнными (english leak), точечным
+/// flat_run по их исходным текстам. До 2 проходов; меняем только реально улучшившиеся tgt; логируем остаток.
+fn ensure_translation_coverage(
+    client: &ChatClient,
+    segs: &mut [Seg],
+    src: &str,
+    tgt_lang: &str,
+    progress: &Progress,
+) {
+    let bad: Vec<usize> = segs
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| !s.text.trim().is_empty() && looks_untranslated(&s.text, &s.tgt, tgt_lang))
+        .map(|(i, _)| i)
+        .collect();
+    if bad.is_empty() {
+        return;
+    }
+    emit(progress, "translate", &format!("покрытие перевода: {} строк без перевода — доперевожу", bad.len()));
+    for _ in 0..2 {
+        let mut sub: Vec<Seg> = bad
+            .iter()
+            .map(|&i| {
+                let mut g = Seg::new(segs[i].text.clone(), segs[i].speaker);
+                g.start = segs[i].start;
+                g.end = segs[i].end;
+                g
+            })
+            .collect();
+        if dub_translate::flat_run(client, &mut sub, src, tgt_lang, true, "").is_err() {
+            break;
+        }
+        for (k, &i) in bad.iter().enumerate() {
+            if !looks_untranslated(&segs[i].text, &sub[k].tgt, tgt_lang) {
+                segs[i].tgt = std::mem::take(&mut sub[k].tgt);
+            }
+        }
+        let still = bad
+            .iter()
+            .filter(|&&i| looks_untranslated(&segs[i].text, &segs[i].tgt, tgt_lang))
+            .count();
+        emit(progress, "translate", &format!("покрытие перевода: осталось {still} без перевода"));
+        if still == 0 {
+            break;
+        }
+    }
+}
