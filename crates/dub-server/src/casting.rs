@@ -487,6 +487,26 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
         }
     }
 
+    // Гарантируем УНИКАЛЬНОСТЬ id: match_cross_episode мог переназначить персонажу id профиля (char_N),
+    // совпавший с id несматченного соседа -> два char_0 в одном casting.json (аватар/голос/правка резолвятся
+    // по first-match id, React-ключи дублируются — ревью-баг). Дубликаты детерминированно пере-суффиксуем.
+    {
+        let mut seen = std::collections::HashSet::new();
+        for ch in &mut casting.characters {
+            if !seen.insert(ch.id.clone()) {
+                let mut n = 2;
+                let uniq = loop {
+                    let cand = format!("{}_{n}", ch.id);
+                    if seen.insert(cand.clone()) {
+                        break cand;
+                    }
+                    n += 1;
+                };
+                ch.id = uniq;
+            }
+        }
+    }
+
     // 6) записать casting.json.
     let path = paths.work_dir.join("casting.json");
     match save_casting(&path, &casting) {
@@ -995,6 +1015,27 @@ pub fn speech_notes_to_style(casting: &Casting) -> String {
         }
     }
     parts.join("; ")
+}
+
+/// Маркер авто-блока пер-персонажных заметок речи в translate_style.
+pub const SPEECH_NOTES_MARK: &str = "per-character voice notes —";
+
+/// Влить заметки речи в translate_style ИДЕМПОТЕНТНО: сначала срезаем предыдущий авто-блок (аппендили в
+/// конец), потом дописываем свежий. Иначе повторный «Применить кастинг» копил дубли блока в промпте Gemma
+/// (ревью-баг). Пустые заметки -> блок убирается вовсе. Пользовательский префикс стиля сохраняется.
+pub fn merge_speech_notes_style(current: &str, notes: &str) -> String {
+    let base = match current.find(SPEECH_NOTES_MARK) {
+        Some(i) => current[..i].trim_end_matches([' ', ';']).trim(),
+        None => current.trim(),
+    };
+    let notes = notes.trim();
+    if notes.is_empty() {
+        base.to_string()
+    } else if base.is_empty() {
+        format!("{SPEECH_NOTES_MARK} {notes}")
+    } else {
+        format!("{base}; {SPEECH_NOTES_MARK} {notes}")
+    }
 }
 
 /// Сентинел клона в позиционном CSV voice.name (#114): "-" => render клонирует голос спикера.

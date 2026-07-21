@@ -310,12 +310,20 @@ const VOICEOVER_DUCK_MIN_DB: f64 = -40.0;
 const MAX_TTS_ATTEMPTS: usize = 5;
 const CONSECUTIVE_ABORT: usize = 8;
 
-/// voice_clone с ЖЁСТКИМ таймаутом. Higgs-движок (прекомпил-DLL) СТОХАСТИЧЕСКИ виснет навечно на редких
-/// сегментах (CPU-side loop, GPU в простое) — in-process FFI-вызов таймаутом не убить напрямую, но
-/// `Engine: Send+Sync` и есть C-ABI `cancel()`. Гоним синтез в отдельном потоке; по таймауту дёргаем
-/// `cancel()` (сигнал движку прекратить — может не сработать на глухом хэнге) и БРОСАЕМ поток (доживает
-/// в фоне, держит свой Arc-клон движка), а рендер продолжает СЛЕДУЮЩИЙ сегмент на том же движке (Sync).
-/// Так единственный воркер НЕ блокируется навечно (принцип #105). Вызывающий трактует Err как дефект.
+/// Грейс после cancel(): ждём, пока отменённая генерация РЕАЛЬНО выйдет из DLL, прежде чем движок снова
+/// тронут ДРУГИМ вызовом. Контракт audiocpp::Engine — single-caller (Send+Sync годен ТОЛЬКО под сериализацией
+/// джоб-очереди, engine.rs). Параллельно тронуть движок, пока прошлый вызов в DLL, = гонка/порча.
+const GUARD_GRACE_SECS: u64 = 20;
+/// Префикс ошибки «движок застрял в DLL после cancel»: вызывающий НЕ ретраит (это был бы конкурентный FFI —
+/// гонка), а ОБРЫВАЕТ рендер. Единственный воркер разблокируется (ошибка), состояние движка не портим.
+const ENGINE_STUCK: &str = "ENGINE_STUCK";
+
+/// voice_clone с ЖЁСТКИМ таймаутом. Higgs (прекомпил-DLL) СТОХАСТИЧЕСКИ виснет на редких сегментах; in-process
+/// FFI не убить, но есть C-ABI `cancel()`. Гоним синтез в отдельном потоке с таймаутом. По таймауту: cancel()
+/// + ЖДЁМ grace, пока поток реально ВЫЙДЕТ из DLL (нельзя трогать движок конкурентно — single-caller контракт).
+/// Вышел -> движок свободен, Err(таймаут) => вызывающий ретраит. Не вышел -> Err(ENGINE_STUCK) => вызывающий
+/// обрывает рендер (НЕ гоняет движок параллельно с зависшим потоком). Так воркер не блокируется навечно и
+/// не ловит гонку FFI.
 fn voice_clone_guarded(
     engine: &Arc<AudiocppEngine>,
     text: &str,
@@ -336,13 +344,20 @@ fn voice_clone_guarded(
         let r = eng
             .voice_clone(&t, &rw, rt.as_deref(), &op)
             .map_err(|e| e.to_string());
-        let _ = tx.send(r); // по таймауту получателя уже нет — send вернёт Err, не паникуем
+        let _ = tx.send(r); // получателя уже нет по таймауту — send вернёт Err, не паникуем
     });
     match rx.recv_timeout(timeout) {
         Ok(r) => r,
         Err(_) => {
-            engine.cancel(); // best-effort: сигнал движку остановить текущую генерацию
-            Err(format!("таймаут синтеза >{}с (зависание движка)", timeout.as_secs()))
+            engine.cancel(); // сигнал движку остановить текущую генерацию
+            // Ждём фактического выхода отменённого вызова из DLL — только тогда движок снова можно трогать.
+            match rx.recv_timeout(Duration::from_secs(GUARD_GRACE_SECS)) {
+                Ok(_) => Err(format!("таймаут синтеза >{}с — отменён, движок свободен", timeout.as_secs())),
+                Err(_) => Err(format!(
+                    "{ENGINE_STUCK}: синтез не отменяется >{}с — рендер прерван (движок завис в DLL)",
+                    timeout.as_secs() + GUARD_GRACE_SECS
+                )),
+            }
         }
     }
 }
@@ -732,17 +747,7 @@ fn build_dub(
         // 'оставить оригинал': вырезаем ИСХОДНУЮ речь сюда, без TTS и без atempo-подгонки (порт _build_dub keep-ветки).
         // Режем СРАЗУ в 24к моно (питон media.trim(..., sr=24000)) — timeline кладёт по sr ПЕРВОГО файла (TTS=24к),
         // без ресемпла; 44.1к-вырез играл бы не на той скорости. Без промежуточного 16к (не терять ВЧ).
-        // Ультра-короткое междометие/реакция ("О.", "Хм.", "А.") — Higgs-движок склонен ЗАВИСНУТЬ либо
-        // артефачить на таком входе (наблюдался вечный hang voice_clone на "Хм." 0.38с; вызов — in-process
-        // FFI в прекомпиленную DLL, безопасно таймаутом не прервать). Оставляем оригинал: ≤3 букв И слот
-        // <0.6с — это междометие/выкрик, языко-универсально (клон не нужен). И hang исключён, и звучит
-        // естественнее синтеза на вырожденно коротком тексте (принцип #105: вырожденный вход не должен
-        // блокировать воркер). ЯВНЫЙ keep_original (флаг юзера) — как раньше.
-        let tiny_interjection = {
-            let letters = s.tgt_text.chars().filter(|c| c.is_alphabetic()).count();
-            letters <= 3 && (s.end - s.start) < 0.6
-        };
-        if seg_keep(s) || tiny_interjection {
+        if seg_keep(s) {
             media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
             let at = s.start.max(cursor);
             let d = media::duration(&raw)?;
@@ -833,6 +838,7 @@ fn build_dub(
                 let vc_to = Duration::from_secs((((s.end - s.start) * 8.0).ceil() as u64).max(45));
                 let (samples, sr) = match voice_clone_guarded(&engine, tgt, &rw.to_string_lossy(), rt, &opts, vc_to) {
                     Ok(v) => v,
+                    Err(e) if e.starts_with(ENGINE_STUCK) => return Err(e), // движок завис в DLL — обрыв, не гоняем параллельно
                     Err(e) => {
                         retried = true;
                         total_retries += 1;
@@ -999,7 +1005,11 @@ fn build_dub(
                 .enumerate()
                 {
                     let vc_to = Duration::from_secs((((s.end - s.start) * 8.0).ceil() as u64).max(45));
-                    let Ok((smp, r)) = voice_clone_guarded(&engine, tgtq, &rw.to_string_lossy(), rt, &opts, vc_to) else { continue };
+                    let (smp, r) = match voice_clone_guarded(&engine, tgtq, &rw.to_string_lossy(), rt, &opts, vc_to) {
+                        Ok(v) => v,
+                        Err(e) if e.starts_with(ENGINE_STUCK) => return Err(e), // движок завис — обрыв, не гоняем параллельно
+                        Err(_) => continue,
+                    };
                     if synth_defect(&smp, r, tgt_chars).is_some() {
                         continue;
                     }

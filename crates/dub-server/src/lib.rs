@@ -983,8 +983,12 @@ async fn casting_save(
             if let Some(v) = e.get("speech_note").and_then(|v| v.as_str()) {
                 ch.speech_note = v.to_string();
             }
-            if let Some(v) = e.get("dub_voice").and_then(|v| v.as_str()) {
-                ch.dub_voice = v.to_string();
+            // dub_voice: строка -> назначить; JSON null (фронт шлёт при очистке поля) -> СБРОС на клон ("").
+            // Ключ отсутствует -> не трогаем. Иначе вернуть голос на клонирование из UI было невозможно.
+            match e.get("dub_voice") {
+                Some(v) if v.is_string() => ch.dub_voice = v.as_str().unwrap_or("").to_string(),
+                Some(v) if v.is_null() => ch.dub_voice = String::new(),
+                _ => {}
             }
             if let Some(v) = e.get("gender").and_then(|v| v.as_str()) {
                 ch.gender = v.to_string();
@@ -1036,14 +1040,7 @@ async fn casting_save(
     // (2) speech_note -> глобальный translate_style (документированное ограничение: ctx_run не берёт
     // пер-спикерный стиль). Дополняем существующий стиль заметками персонажей.
     let notes = casting::speech_notes_to_style(&casting);
-    if !notes.is_empty() {
-        let base = proj.audio.translate_style.trim();
-        proj.audio.translate_style = if base.is_empty() {
-            format!("per-character voice notes — {notes}")
-        } else {
-            format!("{base}; per-character voice notes — {notes}")
-        };
-    }
+    proj.audio.translate_style = casting::merge_speech_notes_style(&proj.audio.translate_style, &notes);
 
     // Сохранить casting.json + project.json.
     if let Err(e) = dub_faces::save_casting(&path, &casting) {

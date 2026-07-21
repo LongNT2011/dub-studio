@@ -822,11 +822,9 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         if let Some(prof) = crate::casting_library::load_profile_casting(&paths.repo_root, args.casting_ref.trim()) {
             let notes = crate::casting::speech_notes_to_style(&prof);
             if !notes.is_empty() {
-                proj.audio.translate_style = if proj.audio.translate_style.trim().is_empty() {
-                    notes
-                } else {
-                    format!("{}; {}", proj.audio.translate_style, notes)
-                };
+                // Идемпотентно (единый маркер-блок): ре-анализ не копит дубли — см. merge_speech_notes_style.
+                proj.audio.translate_style =
+                    crate::casting::merge_speech_notes_style(&proj.audio.translate_style, &notes);
                 emit(progress, "translate", &format!(
                     "описания персонажей из профиля кастинга -> стиль перевода ({} симв.)",
                     proj.audio.translate_style.len()));

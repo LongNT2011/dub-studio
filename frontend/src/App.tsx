@@ -1500,7 +1500,7 @@ function CastingPanel({ pid, characters, voices, onChange }: {
   const { t } = useTranslation();
   // Черновик правок: имя / заметка о речи / голос — редактируются локально, коммит одной кнопкой.
   const [draft, setDraft] = useState<Record<string, { name: string; speech_note: string; voice: string | null }>>(
-    () => Object.fromEntries(characters.map((c) => [c.id, { name: c.name, speech_note: "", voice: c.voice }])),
+    () => Object.fromEntries(characters.map((c) => [c.id, { name: c.name, speech_note: c.speech_note ?? "", voice: c.voice }])),
   );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -1512,7 +1512,7 @@ function CastingPanel({ pid, characters, voices, onChange }: {
   useEffect(() => {
     setDraft((d) => {
       const next: typeof d = {};
-      for (const c of characters) next[c.id] = d[c.id] ?? { name: c.name, speech_note: "", voice: c.voice };
+      for (const c of characters) next[c.id] = d[c.id] ?? { name: c.name, speech_note: c.speech_note ?? "", voice: c.voice };
       return next;
     });
     setImgFail((m) => {
@@ -1612,7 +1612,7 @@ function CastingPanel({ pid, characters, voices, onChange }: {
         <p className="text-[12px] text-[var(--color-muted)] leading-snug mb-3 max-w-2xl">{t("casting.hint")}</p>
         <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}>
           {characters.map((c, i) => {
-            const d = draft[c.id] ?? { name: c.name, speech_note: "", voice: c.voice };
+            const d = draft[c.id] ?? { name: c.name, speech_note: c.speech_note ?? "", voice: c.voice };
             // Есть кадр (URL не null) и он не сломался -> картинка; иначе заглушка-инициал.
             const showImg = !!c.sample_frame_url && !imgFail[c.id];
             return (

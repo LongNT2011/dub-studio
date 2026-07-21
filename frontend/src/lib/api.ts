@@ -54,6 +54,7 @@ export type JobEvent = { type: "progress" | "done" | "error"; stage?: string; pc
 // speaker_ids — какие диаризованные спикеры слились в этого персонажа; sample_frame_url — кадр-аватар.
 export type Character = {
   id: string; name: string; gender: string; voice: string | null;
+  speech_note: string;   // манера речи/характер (уходит в translate_style); round-trip чтобы Apply не стирал перенесённое
   speaker_ids: string[]; sample_frame_url: string | null; line_count: number;   // null -> нет кадра (закадровый), фронт рисует инициал
   voice_sample_url: string | null;   // проигрываемый wav образца голоса (null -> нет образца, кнопки ▶ нет)
 };
