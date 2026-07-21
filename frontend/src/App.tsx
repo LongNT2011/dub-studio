@@ -1268,10 +1268,10 @@ function DropZone() {
                         )}
                       </div>
                     )}
-                    {/* ДАКИНГ ФОНА ПОД ДУБЛЯЖОМ — опция (не всем нужен): вкл = фон приглушается под голосом,
-                        выкл (дефолт) = фон на полной громкости. */}
+                    {/* ДАКИНГ ФОНА ПОД ДУБЛЯЖОМ — опция дубляжа (не всем нужен), ВЫКЛ по умолч.: вкл = фон
+                        тише под голосом, выкл = фон на полной громкости. */}
                     {showDuck && (
-                      <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit" title="Приглушать фон под голосом. Выкл — фон звучит на полной громкости.">
+                      <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit" title="Приглушать фон под голосом в дубляже. Выкл — фон на полной громкости.">
                         <input type="checkbox" checked={duckOn} onChange={(e) => setDuckSaved(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
                         Приглушать фон под голосом
                         <span title="Дакинг: фон тише под речью дубляжа. Выкл — фон полный." onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
