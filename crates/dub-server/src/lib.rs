@@ -1325,8 +1325,9 @@ async fn analyze_project(
         casting: qget("casting", "0") == "1",
         // slug профиля app-библиотеки кастингов (#115): применить к этому ролику. Пусто = без применения.
         casting_ref: qget("casting_ref", ""),
-        // тип контента кастинга (#115): "real" (SCRFD+LVFace) | "anime" (детектор рисованных лиц + CCIP).
-        content_type: qget("content_type", "real"),
+        // тип контента кастинга (#115): "auto" (Gemma-детект) | "real" (SCRFD+LVFace) | "anime" (рисованные
+        // лица + CCIP). Дефолт "auto" в паритет с UI (App.tsx) — при casting=off поле инертно.
+        content_type: qget("content_type", "auto"),
         // «сабы уже на языке перевода» — эффективно только если сабы реально импортированы.
         import_translated: import_subs.is_some() && qget("import_translated", "0") == "1",
     };

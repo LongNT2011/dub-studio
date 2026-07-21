@@ -438,7 +438,7 @@ fn merge_short_turns(segs: &mut Vec<Segment>) {
             let gap = s.start - last.end;
             let short = (last.end - last.start) < SHORT || (s.end - s.start) < SHORT;
             let dur_ok = (s.end - last.start) <= MAX_DUR;
-            let ch_ok = last.src_text.len() + s.src_text.len() < MAX_CH;
+            let ch_ok = last.src_text.chars().count() + s.src_text.chars().count() < MAX_CH;
             if same_spk && gap >= 0.0 && gap < GAP && short && dur_ok && ch_ok {
                 let lt = last.src_text.trim_end();
                 let rt = s.src_text.trim_start();
@@ -736,8 +736,10 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
 
     // Голосовая переразметка спикеров (#115): при кастинге разворачиваем ≤4 Sortformer-спикеров в реальных
     // персонажей по голосу и ПЕРЕРАЗМЕЧАЕМ сегменты (метки «v{k}») -> дубляж по N голосам + верный счётчик
-    // реплик у персонажей (0 реплик больше не бывает). Не для import_subs и single-speaker.
-    if args.casting && paths.import_subs.is_none() && n_spk > 1 {
+    // реплик у персонажей (0 реплик больше не бывает). Не для import_subs. Гейт по n_spk СНЯТ: Sortformer
+    // часто схлопывает многоголосый клип в 1 спикера (шум/моно) — именно этот случай фича и чинит;
+    // внутренний guard recluster (k<=1 || k<=orig) не трогает истинно-односпикерные.
+    if args.casting && paths.import_subs.is_none() {
         let k = crate::casting::recluster_segments(paths, &mut segments, progress);
         if k > 0 {
             emit(progress, "asr", &format!("персонажей по голосу: {k}"));
@@ -883,10 +885,18 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     proj.casting_enabled = args.casting;
     bench.stage("casting");
     if args.casting && meta.width > 0 && meta.height > 0 {
-        // content_type="auto" -> берём тип, определённый Gemma в translate-стадии (proj.audio.content_type);
-        // если детект не отработал (translate пропущен/непонятный ответ) — дефолт "real".
+        // content_type="auto" -> берём тип, определённый Gemma в translate-стадии (proj.audio.content_type).
+        // Если translate пропущен ранним return (same-lang/transcribe/нет LLM) — тип пуст: классифицируем
+        // АВТОНОМНО здесь (иначе анимация молча пойдёт через "real"-детектор). Только тогда, ноль оверхеда
+        // если тип уже определён. Не удалось — честный дефолт "real".
         let eff_ct = if args.content_type == "auto" {
-            let d = proj.audio.content_type.clone();
+            let mut d = proj.audio.content_type.clone();
+            if d.is_empty() {
+                if let Some(ct) = crate::translate::classify_content_type_standalone(paths, meta.duration, progress) {
+                    emit(progress, "casting", &format!("тип контента (авто): {ct}"));
+                    d = ct;
+                }
+            }
             if d.is_empty() { "real".to_string() } else { d }
         } else {
             args.content_type.clone()
@@ -898,7 +908,29 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         // кладём в proj.audio.voice -> РЕНДЕР сразу озвучит правильными голосами, без ручного «Применить».
         if !args.casting_ref.trim().is_empty() {
             if let Some(casting) = dub_faces::load_casting(&paths.work_dir.join("casting.json")) {
-                let vmap = crate::casting::casting_voice_map(&casting);
+                let mut vmap = crate::casting::casting_voice_map(&casting);
+                // Перенесённый из профиля голос может отсутствовать в voices/ ЭТОЙ установки (профиль собран
+                // на другой машине). Без проверки рендер молча свалится на клон. Отсекаем несуществующие ->
+                // клон + явное предупреждение (а не тихая подмена).
+                let voices_dir = std::env::var("DUBENGINE_VOICES")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|_| paths.repo_root.join("voices"));
+                let mut missing: Vec<String> = Vec::new();
+                for v in vmap.values_mut() {
+                    if let Some(nm) = v.clone() {
+                        let exists = ["wav", "mp3"].iter().any(|e| voices_dir.join(format!("{nm}.{e}")).is_file());
+                        if !exists {
+                            missing.push(nm);
+                            *v = None;
+                        }
+                    }
+                }
+                if !missing.is_empty() {
+                    missing.sort();
+                    missing.dedup();
+                    emit(progress, "casting", &format!(
+                        "голоса профиля не найдены в voices/ -> клон: {}", missing.join(", ")));
+                }
                 if vmap.values().any(|v| v.is_some()) {
                     let mut spk_ids: Vec<String> = proj
                         .segments

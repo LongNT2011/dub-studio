@@ -200,7 +200,12 @@ pub fn is_safe_slug(slug: &str) -> bool {
 }
 
 /// Загрузить casting.json профиля библиотеки (для применения как prev при analyze). None если нет/битый.
+/// Тот же slug-guard (is_safe_slug), что и на удаление/аватар — единый барьер от traversal по внешнему
+/// casting_ref (query-параметр без валидации на входе).
 pub fn load_profile_casting(repo_root: &Path, slug: &str) -> Option<dub_faces::Casting> {
+    if !is_safe_slug(slug) {
+        return None;
+    }
     dub_faces::load_casting(&profile_dir(repo_root, slug).join("casting.json"))
 }
 

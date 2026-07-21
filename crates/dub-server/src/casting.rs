@@ -16,8 +16,9 @@ use std::path::Path;
 
 use dub_core::{Project, Segment};
 use dub_faces::{
-    crop_sharpness, frontality, load_casting, save_casting, save_face_crop, AnimeFaceDetector,
-    Casting, CcipEmbedder, Character, Face, FacesModels, LvFace, Scrfd, CASTING_VERSION,
+    crop_sharpness, frontality, load_casting, occluder_path, save_casting, save_face_crop,
+    AnimeFaceDetector, Casting, CcipEmbedder, Character, Face, FaceOccluder, FacesModels, LvFace,
+    Scrfd, CASTING_VERSION,
 };
 
 use crate::analyze::{AnalyzePaths, Progress};
@@ -123,6 +124,20 @@ fn ahc_average(embs: &[Vec<f32>], threshold: f32) -> Vec<usize> {
 /// реплик у персонажей верный, кастинг строится на тех же метках (0 реплик больше не бывает). Возвращает
 /// число кластеров (0 = не размечали: выключено env / нет модели / не дало больше персонажей, чем
 /// Sortformer). ВКЛ по умолчанию; opt-out DUB_VOICE_REDIARIZE=0. Порог DUB_VOICE_CLUSTER_COS.
+/// Детерминированный отпечаток раскладки сегментов (FNV-1a по границам, мс) — ключ инвалидации кэша
+/// эмбеддингов при изменении числа/границ сегментов между билдами.
+fn segments_fingerprint(segs: &[Segment]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for s in segs {
+        for t in [s.start, s.end] {
+            let ms = (t * 1000.0).round() as i64 as u64;
+            h ^= ms;
+            h = h.wrapping_mul(0x100000001b3);
+        }
+    }
+    h
+}
+
 pub fn recluster_segments(paths: &AnalyzePaths, segments: &mut [Segment], progress: &Progress) -> usize {
     if std::env::var("DUB_VOICE_REDIARIZE").ok().as_deref() == Some("0") {
         return 0;
@@ -147,14 +162,20 @@ pub fn recluster_segments(paths: &AnalyzePaths, segments: &mut [Segment], progre
     if !onnx.is_file() {
         return 0;
     }
-    // Кэш эмбеддингов (тюнинг порога без пере-эмбеддинга): casting/vc_embs.json = {seg_count, idxs, embs}.
+    // Кэш эмбеддингов (тюнинг порога без пере-эмбеддинга): casting/vc_embs.json = {seg_count, fp, idxs, embs}.
+    // fp — отпечаток ГРАНИЦ сегментов: если константы merge_short_turns изменились между билдами и дали иную
+    // раскладку при СОВПАВШЕМ count, fp разойдётся -> кэш инвалидируется (idxs не мапятся на чужие сегменты).
     let cache = paths.work_dir.join("casting").join("vc_embs.json");
+    let fp = segments_fingerprint(segments);
     let mut idxs: Vec<usize> = Vec::new();
     let mut embs: Vec<Vec<f32>> = Vec::new();
     let cached = std::fs::read_to_string(&cache)
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .filter(|v| v.get("seg_count").and_then(|x| x.as_u64()) == Some(segments.len() as u64));
+        .filter(|v| {
+            v.get("seg_count").and_then(|x| x.as_u64()) == Some(segments.len() as u64)
+                && v.get("fp").and_then(|x| x.as_u64()) == Some(fp)
+        });
     if let Some(v) = cached {
         idxs = serde_json::from_value(v.get("idxs").cloned().unwrap_or_default()).unwrap_or_default();
         embs = serde_json::from_value(v.get("embs").cloned().unwrap_or_default()).unwrap_or_default();
@@ -185,7 +206,7 @@ pub fn recluster_segments(paths: &AnalyzePaths, segments: &mut [Segment], progre
         let _ = std::fs::create_dir_all(cache.parent().unwrap_or(&paths.work_dir));
         let _ = std::fs::write(
             &cache,
-            serde_json::json!({ "seg_count": segments.len(), "idxs": idxs, "embs": embs }).to_string(),
+            serde_json::json!({ "seg_count": segments.len(), "fp": fp, "idxs": idxs, "embs": embs }).to_string(),
         );
     }
     if embs.len() < 2 {
@@ -280,6 +301,9 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
     // 3) Детектор+эмбеддер ЛИЦА по типу контента (только для аватара). Нет моделей -> без аватаров.
     let mut det = load_face_det(&paths.models_root, anime, progress);
     let mut emb = load_face_emb(&paths.models_root, anime, progress);
+    // Окклюдер (FaceFusion xseg): штрафуем кадры с закрытым лицом (рука/микрофон/волосы) при выборе
+    // аватара. Только для реальных лиц; отсутствие модели -> None (аватар выбирается без штрафа).
+    let mut occ = if anime { None } else { load_occluder(&paths.models_root, progress) };
 
     let cast_dir = paths.work_dir.join("casting");
     let _ = std::fs::create_dir_all(&cast_dir);
@@ -297,7 +321,7 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
     };
     for (ci, (spk, dur, lines)) in ranked.iter().enumerate() {
         let (sample_frame, face_emb) =
-            avatar_for_speaker(paths, proj, spk, ci, anime, det.as_mut(), emb.as_mut(), &cast_dir, progress);
+            avatar_for_speaker(paths, proj, spk, ci, anime, det.as_mut(), emb.as_mut(), occ.as_mut(), &cast_dir, progress);
         // образец голоса персонажа (проигрывается в UI через /casting/voice).
         if let Some(src) = speaker_samples.get(spk) {
             let dst = cast_dir.join(format!("char_{ci}_voice.wav"));
@@ -394,6 +418,37 @@ impl FaceEmb {
     }
 }
 
+/// Загрузить окклюдер лица (xseg). Нет модели/не грузится -> None (аватар без штрафа за окклюзию).
+fn load_occluder(models_root: &Path, progress: &Progress) -> Option<FaceOccluder> {
+    let p = occluder_path(models_root);
+    if !p.is_file() {
+        return None;
+    }
+    match FaceOccluder::load(&p) {
+        Ok(o) => Some(o),
+        Err(e) => {
+            emit(progress, "cast_speaker", &format!("окклюдер не загрузился: {e} — без штрафа за закрытое лицо"));
+            None
+        }
+    }
+}
+
+/// Квадратный кроп лица из кадра с полями `pad` (доля от большей стороны bbox) — вход окклюдера. Клампим
+/// по границам кадра; вырожденный bbox -> 1x1 (окклюдер вернёт нейтральную видимость).
+fn square_face_crop(img: &image::RgbImage, bbox: (f32, f32, f32, f32), pad: f32) -> image::RgbImage {
+    let (x1, y1, x2, y2) = bbox;
+    let (cx, cy) = ((x1 + x2) * 0.5, (y1 + y2) * 0.5);
+    let half = ((x2 - x1).max(y2 - y1) * (1.0 + pad) * 0.5).max(1.0);
+    let (iw, ih) = (img.width() as f32, img.height() as f32);
+    let sx = (cx - half).clamp(0.0, iw - 1.0) as u32;
+    let sy = (cy - half).clamp(0.0, ih - 1.0) as u32;
+    let ex = (cx + half).clamp(0.0, iw) as u32;
+    let ey = (cy + half).clamp(0.0, ih) as u32;
+    let w = ex.saturating_sub(sx).max(1);
+    let h = ey.saturating_sub(sy).max(1);
+    image::imageops::crop_imm(img, sx, sy, w, h).to_image()
+}
+
 fn load_face_det(models_root: &Path, anime: bool, progress: &Progress) -> Option<FaceDet> {
     if anime {
         let p = models_root.join("faces").join("anime_face").join("model.onnx");
@@ -465,6 +520,7 @@ fn avatar_for_speaker(
     anime: bool,
     det: Option<&mut FaceDet>,
     emb: Option<&mut FaceEmb>,
+    mut occ: Option<&mut FaceOccluder>,
     cast_dir: &Path,
     progress: &Progress,
 ) -> (String, Vec<f32>) {
@@ -517,10 +573,25 @@ fn avatar_for_speaker(
             let sharp = crop_sharpness(&img, (x1, y1, x2, y2)); // variance of Laplacian: выше = резче
             // real: фронтальность по 5 точкам; anime: точек нет -> нейтрально 1.0.
             let front = if anime { 1.0 } else { frontality(&f) };
-            // Качество: РЕЗКОСТЬ доминирует (против расфокуса/motion-blur), размер — sublinear (sqrt),
-            // чтобы крупное мыльное лицо НЕ побеждало резкое поменьше; + фронтальность × уверенность.
-            let q = f.score * sharp * (front + 0.1) * side.sqrt();
             let meets = side >= min_px;
+            // Видимость (FaceFusion xseg): доля открытой кожи лица. Закрытое рукой/микрофоном/волосами лицо
+            // -> низкая видимость -> штраф. Считаем только для лиц ≥ min_px (реальные кандидаты) — иначе
+            // лишние прогоны xseg на мелочи. Нет окклюдера -> vis_factor=1 (без штрафа).
+            let vis_factor = if meets {
+                if let Some(o) = occ.as_deref_mut() {
+                    let crop = square_face_crop(&img, (x1, y1, x2, y2), 0.35);
+                    let vis = o.visibility(&crop).unwrap_or(1.0);
+                    0.15 + 0.85 * vis
+                } else {
+                    1.0
+                }
+            } else {
+                1.0
+            };
+            // Качество: РЕЗКОСТЬ доминирует (против расфокуса/motion-blur), размер — sublinear (sqrt),
+            // чтобы крупное мыльное лицо НЕ побеждало резкое поменьше; + фронтальность × уверенность ×
+            // видимость (не закрыто).
+            let q = f.score * sharp * (front + 0.1) * side.sqrt() * vis_factor;
             let better = match &best {
                 None => true,
                 // любое лицо >= мин.размера бьёт любое мельче; при равном классе — по качеству.

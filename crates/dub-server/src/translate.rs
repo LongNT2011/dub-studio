@@ -28,6 +28,31 @@ fn wants_translate(proj: &Project) -> bool {
     proj.mode == "dub" || proj.mode == "voiceover" || proj.subs.mode == "translate"
 }
 
+/// Автономная классификация типа контента (real/anime) для кастинга. Нужна, когда translate-стадия
+/// пропущена ранним return (same-lang / transcribe / нет LLM), а content_type="auto": иначе casting
+/// молча берёт "real"-детектор для анимации. Поднимает Gemma+mmproj ТОЛЬКО ради классификации и гасит.
+/// None -> классифицировать не удалось (нет бинаря/весов/сервер не встал) -> вызывающий оставит дефолт.
+pub fn classify_content_type_standalone(
+    paths: &AnalyzePaths,
+    total: f64,
+    progress: &Progress,
+) -> Option<String> {
+    if !paths.llama_bin.is_file() || !paths.mt_model.is_file() {
+        return None;
+    }
+    let mut opts = ServerOpts::new(&paths.llama_bin, &paths.mt_model)
+        .with_ubatch(crate::models::sel_num(&paths.models_root, "llama_ubatch").map(|f| f as u32));
+    if paths.mmproj.is_file() {
+        opts = opts.with_mmproj(&paths.mmproj);
+    }
+    let srv = LlamaServer::start(&opts).ok()?;
+    let client = ChatClient::new(srv.base_url()).ok()?;
+    let tmp = paths.work_dir.join("ctype_frame.png");
+    let ct = classify_content_type(&client, &paths.input, &tmp, total, |m| emit(progress, "vision", m));
+    let _ = std::fs::remove_file(&tmp);
+    Some(ct)
+}
+
 /// Прогнать стадию. proj уже собран транскрипт-стадией (segments + mode/tgt_lang). vh/total — из probe.
 pub fn stage(
     args: &AnalyzeArgs,
@@ -119,7 +144,14 @@ pub fn stage(
         .segments
         .iter()
         .map(|s| {
-            let spk = s.speaker.as_deref().and_then(|x| x.parse::<i64>().ok()).unwrap_or(0);
+            // speaker бывает числовой ("0","1") ИЛИ переразмеченный по голосу ("v0","v1"):
+            // снимаем префикс 'v' перед парсом, иначе nspk схлопывается в 1 и диалог-хинт теряется.
+            let spk = s
+                .speaker
+                .as_deref()
+                .map(|x| x.trim_start_matches('v'))
+                .and_then(|x| x.parse::<i64>().ok())
+                .unwrap_or(0);
             let mut seg = Seg::new(s.src_text.clone(), spk);
             seg.start = s.start;
             seg.end = s.end;
