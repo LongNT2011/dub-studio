@@ -411,25 +411,31 @@ fn faces_to_speakers(
     use dub_faces::{FrameFace, SpeakerTurn};
     let mut out: HashMap<String, (Vec<f32>, String)> = HashMap::new();
 
-    // 1) времена-кандидаты: сэмплируем кадры ВНУТРИ речевых сегментов (~каждые SAMPLE_SEC), кап MAX_SAMPLES.
-    const SAMPLE_SEC: f64 = 0.7;
-    const MAX_SAMPLES: usize = 500;
+    // 1) времена-кандидаты: сэмплируем кадры ВНУТРИ речевых сегментов (~каждые SAMPLE_SEC). Собираем ПО
+    // ВСЕМУ видео, а при превышении капа РАВНОМЕРНО прореживаем (НЕ обрезаем начало — иначе персонажи из
+    // второй половины видео не сэмплируются и теряются).
+    const SAMPLE_SEC: f64 = 0.5;
+    const MAX_SAMPLES: usize = 700;
     let mut times: Vec<f64> = Vec::new();
-    'outer: for s in &proj.segments {
+    for s in &proj.segments {
         let dur = (s.end - s.start).max(0.0);
         let n = ((dur / SAMPLE_SEC).floor() as usize).max(1);
         for j in 0..n {
             times.push(s.start + (j as f64 + 0.5) * dur / n as f64);
-            if times.len() >= MAX_SAMPLES {
-                break 'outer;
-            }
         }
+    }
+    if times.len() > MAX_SAMPLES {
+        let step = times.len() as f64 / MAX_SAMPLES as f64;
+        times = (0..MAX_SAMPLES).map(|i| times[((i as f64) * step) as usize]).collect();
     }
 
     // 2) детект + эмбед по каждому кадру -> FrameFace[] (+ путь PNG кадра для сохранения аватара).
     let tmp = cast_dir.join("cand");
     let _ = std::fs::create_dir_all(&tmp);
-    let min_px = min_face_px();
+    // Порог ВКЛЮЧЕНИЯ в кластеризацию (найти персонажа) — НИЖЕ порога аватара min_face_px: персонаж в
+    // средних планах (лицо ~50-90px) иначе отсеялся бы целиком и «не найден». Аватар всё равно выберется
+    // cluster_faces как самый КРУПНЫЙ/ЧЁТКИЙ кадр кластера (его close-up, если есть).
+    let incl_px = (min_face_px() * 0.5).max(48.0);
     let mut faces: Vec<FrameFace> = Vec::new();
     let mut face_frame: Vec<std::path::PathBuf> = Vec::new();
     for (k, t) in times.iter().enumerate() {
@@ -446,8 +452,8 @@ fn faces_to_speakers(
         for f in dets {
             let (x1, y1, x2, y2) = (f.x1, f.y1, f.x2, f.y2);
             let side = (x2 - x1).max(0.0).max((y2 - y1).max(0.0));
-            if side < min_px {
-                continue; // мелкие/фоновые лица не дают устойчивого эмбеддинга (и мылятся в аватаре)
+            if side < incl_px {
+                continue; // совсем мелкие/фоновые лица не дают устойчивого эмбеддинга
             }
             // ГАРД «в кадре»: лицо, обрезанное краем кадра, — плохой аватар (полулицо). Отсекаем касающиеся
             // border на 1px. Резкость/фронтальность/размер добьёт cluster_faces при выборе аватара кластера.
