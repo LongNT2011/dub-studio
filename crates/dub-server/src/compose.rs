@@ -828,30 +828,30 @@ fn translate_taglines(
     loc_blocks: &mut Vec<LocBlock>,
     progress: &Progress,
 ) {
-    use dub_llm::{ChatClient, LlamaServer, ServerOpts};
     use dub_translate::{flat_run, Seg};
 
     let paths = ctx.paths;
-    if !paths.llama_bin.is_file() || !paths.mt_model.is_file() {
-        emit(progress, "ocr_detect", "таглайны: MT недоступен -> только блюр (без перевода)");
-        return;
-    }
-    emit(progress, "ocr_detect", "таглайны: text-only Gemma для перевода надписей титр-карты");
-    let opts = ServerOpts::new(&paths.llama_bin, &paths.mt_model); // без mmproj (плоский MT)
-    let srv = match LlamaServer::start(&opts) {
-        Ok(s) => s,
+    // LLM-провайдер: облако OpenRouter (если включено) ИЛИ локальный llama-server (плоский MT, без mmproj).
+    let prov = match crate::llm_provider::open(
+        &crate::llm_provider::LlmOpen {
+            llama_bin: &paths.llama_bin,
+            mt_model: &paths.mt_model,
+            mmproj: &paths.mmproj,
+            models_root: &paths.models_root,
+        },
+        crate::llm_provider::LlmMode::Text,
+    ) {
+        Ok(p) => p,
         Err(e) => {
-            emit(progress, "ocr_detect", &format!("таглайны: llama не поднялся ({e}); только блюр"));
+            emit(progress, "ocr_detect", &format!("таглайны: MT недоступен ({e}) -> только блюр"));
             return;
         }
     };
-    let client = match ChatClient::new(srv.base_url()) {
-        Ok(c) => c,
-        Err(_) => return,
-    };
+    emit(progress, "ocr_detect", "таглайны: перевод надписей титр-карты");
+    let client = prov.client();
     let mut segs: Vec<Seg> = tcard_rows.iter().map(|r| Seg::new(r.text.clone(), 0)).collect();
-    let ok = flat_run(&client, &mut segs, ctx.src_lang, &proj.tgt_lang, false, &proj.audio.translate_style).is_ok();
-    drop(srv);
+    let ok = flat_run(client, &mut segs, ctx.src_lang, &proj.tgt_lang, false, &proj.audio.translate_style).is_ok();
+    drop(prov);
     if !ok {
         emit(progress, "ocr_detect", "таглайны: перевод не удался; только блюр");
         return;

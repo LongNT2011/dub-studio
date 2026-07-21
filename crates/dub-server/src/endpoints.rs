@@ -251,11 +251,11 @@ pub async fn remix_project(
     }
     let llama_bin = st.llama_bin.clone();
     let mt_model = st.opts.mt_model_path.clone();
+    let models_root = st.models_root.clone();
     let instr = instruction.trim().to_string();
     let dir_for_job = dir.clone();
 
     let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
-        use dub_llm::{ChatClient, LlamaServer, ServerOpts};
         use dub_translate::{flat_rewrite, Seg};
 
         let text = std::fs::read_to_string(&proj_path).map_err(|e| e.to_string())?;
@@ -263,16 +263,23 @@ pub async fn remix_project(
         if p.segments.is_empty() {
             return Err("no transcript to remix — analyze first".into());
         }
-        if !llama_bin.is_file() || !mt_model.is_file() {
-            return Err("Gemma (llama-server/GGUF) недоступна для ремикса".into());
-        }
         progress(json!({ "type": "progress",
-            "msg": format!("Gemma remixing {} lines → {}", p.segments.len(),
+            "msg": format!("ремикс {} строк → {}", p.segments.len(),
                            &instr[..instr.len().min(60)]) }));
 
-        let opts = ServerOpts::new(&llama_bin, &mt_model); // без mmproj (плоский rewrite)
-        let srv = LlamaServer::start(&opts).map_err(|e| format!("llama-server: {e}"))?;
-        let client = ChatClient::new(srv.base_url()).map_err(|e| format!("chat client: {e}"))?;
+        // LLM-провайдер: облако OpenRouter (если включено) ИЛИ локальный llama-server (плоский rewrite).
+        // Text-режим: mmproj не нужен (передаём пустой путь — фабрика его в Text-режиме игнорирует).
+        let prov = crate::llm_provider::open(
+            &crate::llm_provider::LlmOpen {
+                llama_bin: &llama_bin,
+                mt_model: &mt_model,
+                mmproj: std::path::Path::new(""),
+                models_root: &models_root,
+            },
+            crate::llm_provider::LlmMode::Text,
+        )
+        .map_err(|e| format!("ремикс: LLM недоступен — {e}"))?;
+        let client = prov.client();
 
         let mut segs: Vec<Seg> = p
             .segments
@@ -282,8 +289,8 @@ pub async fn remix_project(
                 Seg::new(s.src_text.clone(), spk)
             })
             .collect();
-        let r = flat_rewrite(&client, &mut segs, &instr, "auto", &p.tgt_lang, false, &p.audio.translate_style);
-        drop(srv);
+        let r = flat_rewrite(client, &mut segs, &instr, "auto", &p.tgt_lang, false, &p.audio.translate_style);
+        drop(prov);
         r.map_err(|e| format!("remix: {e}"))?;
 
         for (i, s) in p.segments.iter_mut().enumerate() {

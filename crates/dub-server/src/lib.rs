@@ -1559,6 +1559,7 @@ async fn export_lang(
 
     let llama_bin = st.llama_bin.clone();
     let mt_model = st.opts.mt_model_path.clone();
+    let models_root_xl = st.models_root.clone();
     let sel = models::load_selection(&st.models_root);
     let (higgs_model_root, higgs_quant) = models::resolve_tts(&st.models_root, &sel);
     let sep_model = models::resolve_sep(&st.models_root, &sel);
@@ -1589,21 +1590,26 @@ async fn export_lang(
     let new_pid_res = new_pid.clone();
     let out_res = output.clone();
     let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
-        use dub_llm::{ChatClient, LlamaServer, ServerOpts};
         use dub_translate::{flat_run, Seg};
         let pj = dst_for_job.join("project.json");
         let text = std::fs::read_to_string(&pj).map_err(|e| e.to_string())?;
         let mut p = Project::from_json(&text).map_err(|e| e.to_string())?;
         p.tgt_lang = lang_c.clone();
-        if !llama_bin.is_file() || !mt_model.is_file() {
-            return Err("Gemma (llama-server/GGUF) недоступна для перевода".into());
-        }
         let spoken = matches!(p.mode.as_str(), "dub" | "voiceover");
         progress(json!({ "type": "progress", "stage": "translate",
             "msg": format!("Перевод {} строк → {}", p.segments.len(), lang_c) }));
-        let opts = ServerOpts::new(&llama_bin, &mt_model);
-        let srv = LlamaServer::start(&opts).map_err(|e| format!("llama-server: {e}"))?;
-        let client = ChatClient::new(srv.base_url()).map_err(|e| format!("chat client: {e}"))?;
+        // LLM-провайдер: облако OpenRouter (если включено) ИЛИ локальный llama-server (плоский MT).
+        let prov = crate::llm_provider::open(
+            &crate::llm_provider::LlmOpen {
+                llama_bin: &llama_bin,
+                mt_model: &mt_model,
+                mmproj: std::path::Path::new(""),
+                models_root: &models_root_xl,
+            },
+            crate::llm_provider::LlmMode::Text,
+        )
+        .map_err(|e| format!("перевод: LLM недоступен — {e}"))?;
+        let client = prov.client();
         // Сегменты: src_text -> Lx (раскладка/стили/тайминг остаются от пользователя).
         let mut segs: Vec<Seg> = p
             .segments
@@ -1616,7 +1622,7 @@ async fn export_lang(
                 Seg::new(src, spk)
             })
             .collect();
-        flat_run(&client, &mut segs, "auto", &lang_c, spoken, &p.audio.translate_style).map_err(|e| format!("translate: {e}"))?;
+        flat_run(client, &mut segs, "auto", &lang_c, spoken, &p.audio.translate_style).map_err(|e| format!("translate: {e}"))?;
         for (s, sg) in p.segments.iter_mut().zip(segs) {
             if !sg.tgt.trim().is_empty() {
                 s.tgt_text = sg.tgt;
@@ -1627,12 +1633,12 @@ async fn export_lang(
         // очищаем tgt -> рендер покажет исходный text (лучше, чем титр на старом языке рядом с новыми сегментами).
         if !p.captions.titles.is_empty() {
             let mut tsegs: Vec<Seg> = p.captions.titles.iter().map(|ti| Seg::new(ti.text.clone(), 0)).collect();
-            let ok = flat_run(&client, &mut tsegs, "auto", &lang_c, false, &p.audio.translate_style).is_ok();
+            let ok = flat_run(client, &mut tsegs, "auto", &lang_c, false, &p.audio.translate_style).is_ok();
             for (ti, sg) in p.captions.titles.iter_mut().zip(tsegs) {
                 ti.tgt = if ok && !sg.tgt.trim().is_empty() { sg.tgt } else { String::new() };
             }
         }
-        drop(srv); // освободить VRAM перед TTS/рендером
+        drop(prov); // освободить VRAM перед TTS/рендером (облако — no-op)
         save_project_atomic(&dst_for_job, &p)?;
         let cb = |ev: Value| progress(ev);
         render::run(&p, &paths, true, &cb)?;
