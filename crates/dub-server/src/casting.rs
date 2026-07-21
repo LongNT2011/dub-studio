@@ -590,7 +590,10 @@ fn avatar_for_speaker(
         };
         for f in faces {
             let (x1, y1, x2, y2) = (f.x1, f.y1, f.x2, f.y2);
-            let side = (x2 - x1).max(0.0).min((y2 - y1).max(0.0)); // меньшая сторона bbox лица, px
+            // БОЛЬШАЯ сторона bbox — по ней save_face_crop квадратит аватар (max(bw,bh)·1.7), значит она и
+            // определяет чёткость. min(w,h) браковал бы нормальные ПОРТРЕТНЫЕ лица (85w×140h -> 85<96) в пользу
+            // мелкого near-square. px = сторона, определяющая размер аватара.
+            let side = (x2 - x1).max(0.0).max((y2 - y1).max(0.0));
             let sharp = crop_sharpness(&img, (x1, y1, x2, y2)); // variance of Laplacian: выше = резче
             // real: фронтальность по 5 точкам; anime: точек нет -> нейтрально 1.0.
             let front = if anime { 1.0 } else { frontality(&f) };
