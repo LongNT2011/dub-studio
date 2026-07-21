@@ -502,7 +502,35 @@ fn faces_to_speakers(
             ts
         })
         .collect();
-    let linkage = dub_faces::link_faces_discriminative(&cluster_times, &turns, &speakers);
+    // Со-встречаемость -> ДИСКРИМИНАТИВ (слушатель, мелькающий у всех, давится: M²/Σ) × PROMINENCE
+    // (передний план): говорящий в кадре КРУПНЫЙ/фронтальный, фоновый персонаж «сзади» — мелкий, поэтому
+    // его лицо, стабильно за спикером, проигрывает переднему лицу говорящего. score = (M²/Σ)·prominence.
+    let m = dub_faces::cooccurrence_matrix(&cluster_times, &turns, &speakers);
+    let prom: Vec<f64> = clusters
+        .iter()
+        .map(|c| {
+            let n = c.members.len().max(1) as f64;
+            let s: f64 = c
+                .members
+                .iter()
+                .map(|&i| {
+                    let (x1, y1, x2, y2) = faces[i].bbox;
+                    let side = ((x2 - x1).max(0.0)).max((y2 - y1).max(0.0)) as f64;
+                    side * (faces[i].frontality as f64 + 0.3) // крупнее+фронтальнее => передний план => вес выше
+                })
+                .sum();
+            (s / n).max(1.0)
+        })
+        .collect();
+    let score: Vec<Vec<f64>> = m
+        .iter()
+        .enumerate()
+        .map(|(c, row)| {
+            let total: f64 = row.iter().sum();
+            row.iter().map(|&v| if total > 1e-9 { (v * v / total) * prom[c] } else { 0.0 }).collect()
+        })
+        .collect();
+    let linkage = dub_faces::assign(&score, &speakers);
 
     // 5) speaker -> cluster; аватар = save_face_crop(медоидного кадра кластера). char-индекс = позиция
     //    спикера в ranked (совпадает с ci в stage -> имя файла char_<idx>.png консистентно).
