@@ -149,6 +149,10 @@ const WHEEL_CUBLAS: &str = "https://files.pythonhosted.org/packages/08/8f/890a96
 // PyPI: cuDNN 9 под CUDA 13 (nvidia-cudnn-cu13) — нужен для CUDA-EP onnxruntime (Parakeet/Sortformer на
 // GPU). Даёт cudnn64_9.dll + split-либы. ≈389 МБ. cudart/cublas _13 уже есть (cuda-runtime выше).
 const WHEEL_CUDNN: &str = "https://files.pythonhosted.org/packages/18/d4/c09b11336981836c3183f28a6ca309e08ad080311edb6ff6c28cecdb5f24/nvidia_cudnn_cu13-9.25.0.15-py3-none-win_amd64.whl";
+// NVIDIA CUDA-13 redist (официальный): cuFFT 12.0.0.61 → даёт cufft64_12.dll. onnxruntime_providers_cuda.dll
+// (сборка cuda13) импортит именно cufft64_12.dll — без него CUDA-EP не грузится («CUDA not enabled»). cudart/
+// cublas _13 у нас уже есть (cuda-runtime), cuFFT сохраняет soname 12 даже в CUDA 13. Извлекается как *.dll плоско.
+const REDIST_CUFFT: &str = "https://developer.download.nvidia.com/compute/cuda/redist/libcufft/windows-x86_64/libcufft-windows-x86_64-12.0.0.61-archive.zip";
 // Страница драйверов NVIDIA (кнопка «Открыть сайт» — драйвер DLL-кой не ставится).
 pub const NVIDIA_DRIVER_URL: &str = "https://www.nvidia.com/Download/index.aspx";
 
@@ -499,28 +503,38 @@ pub fn manifest() -> Vec<Component> {
             markers: &[Marker { rel: "models/bsroformer/voc_fv6-Q4_0.gguf", expect: 139_168_096 }],
             external_url: None,
         },
-        // ── КАСТИНГ ПЕРСОНАЖЕЙ: голосовой эмбеддер (#115) ────────────────────
-        // WeSpeaker ResNet34-LM (256-d speaker embedding) — cross-episode матч голосов + образец-фраза.
-        // На Xet-CAS (cas-bridge.xethub.hf.co): probe_size/download_range через ureq+Range уже Xet-aware
-        // (см. POOL_SLOTS/RANGE_RETRIES). Резолвится dub_faces::wespeaker_path (<models>/faces/wespeaker/…).
-        // SCRFD/LVFace (лица) в манифест НЕ добавлены (их источник-истины не зафиксирован в репо) — этот
-        // компонент отвечает только за ГОЛОС; при отсутствии кастинг по лицу деградирует gracefully.
+        // ── КАСТИНГ ПЕРСОНАЖЕЙ (#115): лица + голос ──────────────────────────
+        // Полный набор моделей кастинга. Резолвятся dub_faces (<models>/faces/…). ВСЕ из первоисточников
+        // (сверено по точному размеру файла). Без них кастинг мёртв: «лиц привязано 0», все спикеры SPK0.
+        //   • det_10g (SCRFD-10GF) — детектор реальных лиц (insightface buffalo_l → immich-app/buffalo_l).
+        //   • LVFace-L_Glint360K — эмбеддер реального лица (bytedance-research/LVFace).
+        //   • ccip model_feat — эмбеддер нарисованного персонажа (deepghs/ccip_onnx, caformer-24).
+        //   • anime_face model — детектор аниме/мульт-лиц (deepghs/anime_face_detection v1.4_s).
+        //   • xseg_1 — окклюдер лица для чистого аватар-кропа (facefusion/models-3.1.0).
+        //   • WeSpeaker ResNet34-LM — голосовой эмбеддинг: cross-episode матч голосов (на Xet-CAS).
         Component {
-            id: "wespeaker",
-            name: "WeSpeaker ResNet34-LM (голос кастинга)",
-            purpose: "Голосовой эмбеддинг персонажа (кастинг #115): матч спикеров между эпизодами",
-            requirement: Requirement::Optional,
+            id: "casting",
+            name: "Модели кастинга персонажей (лица + голос)",
+            purpose: "Детект/эмбеддинг лиц (реальные + аниме) + голосовой эмбеддинг для кастинга #115",
+            requirement: Requirement::Recommended,
             delivery: Delivery::Download,
-            size: 26_530_309,
+            size: 1_331_548_084,
             files: &[
-                FileSpec {
-                    url: "https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM/resolve/main/voxceleb_resnet34_LM.onnx",
-                    dest_rel: "models/faces/wespeaker/voxceleb_resnet34_LM.onnx",
-                    size: 26_530_309,
-                    extract: Extract::None,
-                },
+                FileSpec { url: "https://huggingface.co/immich-app/buffalo_l/resolve/main/detection/model.onnx", dest_rel: "models/faces/det_10g.onnx", size: 16_923_827, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/bytedance-research/LVFace/resolve/main/LVFace-L_Glint360K/LVFace-L_Glint360K.onnx", dest_rel: "models/faces/LVFace-L_Glint360K.onnx", size: 1_022_938_188, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/deepghs/ccip_onnx/resolve/main/ccip-caformer-24-randaug-pruned/model_feat.onnx", dest_rel: "models/faces/ccip/model_feat.onnx", size: 150_248_245, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/deepghs/anime_face_detection/resolve/main/face_detect_v1.4_s/model.onnx", dest_rel: "models/faces/anime_face/model.onnx", size: 44_583_229, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/facefusion/models-3.1.0/resolve/main/xseg_1.onnx", dest_rel: "models/faces/occluder/xseg_1.onnx", size: 70_324_286, extract: Extract::None },
+                FileSpec { url: "https://huggingface.co/Wespeaker/wespeaker-voxceleb-resnet34-LM/resolve/main/voxceleb_resnet34_LM.onnx", dest_rel: "models/faces/wespeaker/voxceleb_resnet34_LM.onnx", size: 26_530_309, extract: Extract::None },
             ],
-            markers: &[Marker { rel: "models/faces/wespeaker/voxceleb_resnet34_LM.onnx", expect: 26_530_309 }],
+            markers: &[
+                Marker { rel: "models/faces/det_10g.onnx", expect: 16_923_827 },
+                Marker { rel: "models/faces/LVFace-L_Glint360K.onnx", expect: 1_022_938_188 },
+                Marker { rel: "models/faces/ccip/model_feat.onnx", expect: 150_248_245 },
+                Marker { rel: "models/faces/anime_face/model.onnx", expect: 44_583_229 },
+                Marker { rel: "models/faces/occluder/xseg_1.onnx", expect: 70_324_286 },
+                Marker { rel: "models/faces/wespeaker/voxceleb_resnet34_LM.onnx", expect: 26_530_309 },
+            ],
             external_url: None,
         },
         // ── СAЙДКАРЫ / ДВИЖКИ ───────────────────────────────────────────────
@@ -582,7 +596,7 @@ pub fn manifest() -> Vec<Component> {
             id: "onnxruntime-gpu",
             name: "ONNX Runtime 1.24.2 GPU (CUDA)",
             purpose: "CUDA-провайдер для диаризации/Parakeet на GPU (режим local_backend=gpu)",
-            requirement: Requirement::Optional,
+            requirement: Requirement::Recommended,
             delivery: Delivery::Download,
             size: 288_348_147,
             files: &[
@@ -607,19 +621,22 @@ pub fn manifest() -> Vec<Component> {
         // ── СИСТЕМНОЕ ────────────────────────────────────────────────────────
         Component {
             id: "cuda-runtime",
-            name: "CUDA 13 runtime (cudart + cuBLAS)",
-            purpose: "Редистрибутивные CUDA-DLL для движков (без CUDA Toolkit)",
+            name: "CUDA 13 runtime (cudart + cuBLAS + cuFFT)",
+            purpose: "Редистрибутивные CUDA-DLL для движков и CUDA-EP onnxruntime (без CUDA Toolkit)",
             requirement: Requirement::Required,
             delivery: Delivery::Download,
-            size: 416_407_552,
+            size: 628_433_797,
             files: &[
                 FileSpec { url: WHEEL_CUDART, dest_rel: "models/higgs-engine/_cudart.whl", size: 0, extract: Extract::WheelDlls },
                 FileSpec { url: WHEEL_CUBLAS, dest_rel: "models/higgs-engine/_cublas.whl", size: 0, extract: Extract::WheelDlls },
+                // cuFFT (cufft64_12.dll) — обязателен для CUDA-EP onnxruntime (диаризация/Parakeet на GPU).
+                FileSpec { url: REDIST_CUFFT, dest_rel: "models/higgs-engine/_cufft.zip", size: 0, extract: Extract::WheelDlls },
             ],
             markers: &[
                 Marker { rel: "models/higgs-engine/cudart64_13.dll", expect: 0 },
                 Marker { rel: "models/higgs-engine/cublas64_13.dll", expect: 0 },
                 Marker { rel: "models/higgs-engine/cublasLt64_13.dll", expect: 0 },
+                Marker { rel: "models/higgs-engine/cufft64_12.dll", expect: 0 },
             ],
             external_url: None,
         },
@@ -627,7 +644,7 @@ pub fn manifest() -> Vec<Component> {
             id: "cudnn",
             name: "cuDNN 9 (CUDA 13)",
             purpose: "Нужен CUDA-провайдеру onnxruntime для диаризации/Parakeet на GPU",
-            requirement: Requirement::Optional,
+            requirement: Requirement::Recommended,
             delivery: Delivery::Download,
             size: 408_000_000,
             files: &[
@@ -949,7 +966,7 @@ pub fn setup_status(repo_root: &Path) -> SetupStatus {
         if backend == "cpu" {
             if c.id == "bsroformer-engine-cpu" {
                 c.requirement = Requirement::Recommended;
-            } else if c.id == "bsroformer-engine" || c.id == "cuda-runtime" {
+            } else if c.id == "bsroformer-engine" || c.id == "cuda-runtime" || c.id == "onnxruntime-gpu" || c.id == "cudnn" {
                 c.requirement = Requirement::Optional;
             }
         } else if c.id == "bsroformer-engine-cpu" {
