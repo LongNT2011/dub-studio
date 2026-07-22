@@ -3183,26 +3183,19 @@ function FirstRun() {
     }
   }
 
-  const toggle = (id: string) => {
-    const willAdd = !sel.has(id);
-    setSel((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-    if (willAdd) download([id]);   // выбрал галочку -> сразу качаем этот компонент (без ручного «Скачать»)
-  };
+  const toggle = (id: string) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selectedBytes = status ? status.components.filter((c) => sel.has(c.id)).reduce((a, c) => a + Math.max(0, c.size - c.bytesOnDisk), 0) : 0;
 
   const reqLabel = (r: string) => (r === "required" ? t("setup.required") : t("setup.recommended"));
   const deliveryNote = (c: SetupComponent) =>
     c.delivery === "bundled" ? t("setup.reinstallHint") : c.delivery === "external" ? t("setup.external") : "";
   const GROUP_LABEL: Record<string, string> = { higgs: t("setup.grpHiggs"), gemma: t("setup.grpGemma"), parakeet: t("setup.grpParakeet"), roformer: t("setup.grpRoformer") };
-  const pickOne = (id: string, group: string) => {   // radio внутри семейства: выбрать этот квант, снять остальные того же семейства
-    setSel((prev) => {
-      const n = new Set(prev);
-      Object.entries(QUANT_GROUP).forEach(([cid, g]) => { if (g === group) n.delete(cid); });
-      n.add(id);
-      return n;
-    });
-    download([id]);   // выбрал квант -> сразу качаем (без ручного «Скачать»)
-  };
+  const pickOne = (id: string, group: string) => setSel((prev) => {   // radio внутри семейства: выбрать этот квант, снять остальные того же семейства
+    const n = new Set(prev);
+    Object.entries(QUANT_GROUP).forEach(([cid, g]) => { if (g === group) n.delete(cid); });
+    n.add(id);
+    return n;
+  });
   const comps = status?.components ?? [];
   const gseen = new Set<string>();
   type SetupRow = { kind: "one"; c: SetupComponent } | { kind: "group"; group: string; members: SetupComponent[] };

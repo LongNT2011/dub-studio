@@ -472,6 +472,49 @@ async fn setup_cancel(State(st): State<AppState>) -> Json<Value> {
     Json(json!({ "cancelled": true }))
 }
 
+/// ON-DEMAND: перед джобой догружаем компоненты, нужные ИМЕННО ДЛЯ ЭТОЙ функции/конфига, если их нет
+/// на диске. Юзер запросил кастинг, но модели лиц не скачаны -> тянем их тут же (прогресс в тот же SSE)
+/// и продолжаем — вместо «0 лиц/все SPK0». Аналогично GPU-стадия без CUDA-стека -> догружаем cuFFT/onnx-GPU/
+/// cuDNN. Пустой список = ничего не качаем, идём дальше мгновенно.
+fn ensure_job_components(
+    repo_root: &Path,
+    models_root: &Path,
+    casting: bool,
+    progress: &setup::ProgressCb,
+) -> Result<(), String> {
+    let manifest = setup::manifest();
+    let missing = |id: &str| -> bool {
+        manifest
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| !setup::component_status(repo_root, c).installed)
+            .unwrap_or(false)
+    };
+    let mut need: Vec<String> = Vec::new();
+    // Кастинг персонажей (#115) → его модели (детект лиц + эмбеддинг лица/голоса + аниме/окклюдер).
+    if casting && missing("casting") {
+        need.push("casting".to_string());
+    }
+    // Любая локальная стадия на GPU → полный CUDA-стек: диаризация/ASR грузят onnxruntime-GPU + cuDNN,
+    // ggml-движки (сепарация/Higgs) — cuda-runtime (cudart/cublas/cuFFT). Без cuFFT CUDA-EP не поднимется.
+    let gpu = ["sep_backend", "diar_backend", "asr_backend"]
+        .iter()
+        .any(|k| models::stage_backend(models_root, k) == "gpu");
+    if gpu {
+        for id in ["cuda-runtime", "onnxruntime-gpu", "cudnn", "bsroformer-engine"] {
+            if missing(id) {
+                need.push(id.to_string());
+            }
+        }
+    }
+    if need.is_empty() {
+        return Ok(());
+    }
+    progress(json!({ "stage": "download", "msg": "Догружаю недостающие модели для этой функции…" }));
+    let cancel = || false; // догрузка внутри джобы не отменяется отдельно
+    setup::download_components(repo_root, &need, &cancel, progress).map(|_| ())
+}
+
 /// GET /hw/snapshot — снимок GPU/VRAM/темп/мощность + RAM для монитора ресурсов.
 async fn hw_snapshot() -> Json<hw::HardwareSnapshot> {
     Json(tokio::task::spawn_blocking(hw::snapshot).await.unwrap_or_default())
@@ -1386,6 +1429,9 @@ async fn analyze_project(
     let pid_for_result = pid.clone();
     let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
         let cb = |ev: Value| progress(ev);
+        // On-demand: если для этой функции (кастинг) или backend (GPU) не хватает моделей — тянем их СЕЙЧАС,
+        // до анализа. Иначе кастинг «не видел» бы лиц, а GPU-стадии падали бы с ошибкой CUDA.
+        ensure_job_components(&paths.repo_root, &paths.models_root, args.casting, &cb)?;
         // Трекинг затрат OpenRouter в ДОЛЛАРАХ (перевод/vision через облако): total_usage до/после.
         let cost_before = openrouter_cli::total_usage_usd(&paths.models_root);
         let proj = analyze::run(&args, &paths, &cb)?;
@@ -1495,8 +1541,11 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
 
     let dir_for_job = dir.clone();
     let out_for_result = output.clone();
+    let repo_root_for_job = st.repo_root.clone();
     let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
         let cb = |ev: Value| progress(ev);
+        // On-demand: GPU-стадии рендера (Higgs TTS / сепарация на CUDA) без CUDA-стека -> догрузить сейчас.
+        ensure_job_components(&repo_root_for_job, &paths.models_root, false, &cb)?;
         // Загрузить свежий Project (правки могли прийти после enqueue).
         let text = std::fs::read_to_string(&proj_path).map_err(|e| e.to_string())?;
         let proj = Project::from_json(&text).map_err(|e| e.to_string())?;
