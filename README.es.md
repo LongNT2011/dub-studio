@@ -35,7 +35,7 @@
 
 Por defecto todo se ejecuta **localmente en tu equipo** —— sin nube ni suscripción: ni tu material ni tu voz salen del ordenador. Y si tu PC es limitado (no mueve el Gemma/Higgs local) o quieres más velocidad y calidad, las partes pesadas (traducción, visión, TTS, transcripción) pueden **opcionalmente** delegarse a la nube vía **OpenRouter** —— cada motor se elige por separado (local ↔ nube), con voces asignadas automáticamente por sexo del hablante (beta). La clave se guarda localmente; todo está desactivado por defecto.
 
-Es **v2 —— una reescritura totalmente nativa**. Sin Python embebido, sin torch, sin ruedas CUDA. Toda la canalización es **Rust + motores nativos C++/CUDA (GGUF/ONNX)**: un proceso, arranque rápido, poca VRAM. Los modelos, motores, runtime de CUDA/VC++ y ffmpeg los **descarga e instala la propia app** en el primer arranque —— el único paso manual es el controlador NVIDIA.
+Es **una reescritura totalmente nativa**. Sin Python embebido, sin torch, sin ruedas CUDA. Toda la canalización es **Rust + motores nativos C++/CUDA (GGUF/ONNX)**: un proceso, arranque rápido, poca VRAM. Los modelos, motores, runtime de CUDA/VC++ y ffmpeg los **descarga e instala la propia app** en el primer arranque. **NVIDIA es recomendable, pero no obligatoria**: la separación trae una compilación para CPU, la diarización y el ASR corren en CPU, y las etapas pesadas (traducción, visión, TTS) van a la nube, así que un doblaje puede montarse en un equipo sin NVIDIA alguna.
 
 ## Cinco modos, conmutables al vuelo
 
@@ -53,6 +53,7 @@ Carga un clip una vez y envíalo a cualquier modo dentro del editor.
 
 - **Clonación de voz** —— el timbre original se clona y habla el nuevo idioma (motor nativo [Higgs Audio v3](https://huggingface.co/bosonai), GGUF). Reparto automático por hablante o tu propia voz de un pack.
 - **Diarización de hablantes** —— quién habla y cuándo (NVIDIA **Sortformer** v2, hasta 4 voces), una voz distinta por hablante.
+- **Reparto de personajes (beta)** —— un personaje es un par **«cara + voz»**. La app reúne las caras de todo el vídeo, reconoce a la misma persona y **la vincula a un hablante por coaparición** (quien sale en primer plano recibe la voz, un oyente de fondo no); elige automáticamente el fotograma-avatar más nítido y **guarda un perfil de reparto para toda la serie** —— asignas voces y descripciones una vez y el **siguiente episodio las aplica solo**. Un interruptor **«caras reales / dibujos·anime»** cambia la detección de rostros según el contenido.
 - **Elección de motor ASR** — transcribe con **Parakeet-TDT** (GPU, por defecto) o **Whisper** ([faster-whisper standalone de Purfview](https://github.com/Purfview/whisper-standalone-win), funciona en CPU) — elige el tamaño del modelo (tiny … large-v3-turbo) y el cuant (compute type) directamente en ajustes.
 - **Importar subtítulos listos** — usa tu propio `.srt`/`.ass` como transcripción exacta: el texto y los tiempos vienen del archivo en vez del reconocimiento automático (los hablantes se asignan igual por diarización). Marca **«subtítulos ya en el idioma destino»** y también se omite la traducción — un vídeo en inglés + tus subtítulos en ruso → doblaje en ruso directo desde ellos.
 - **Exportación multiidioma** — la **▾** junto a Exportar envía un vídeo a varios idiomas a la vez; cada uno hereda todas tus ediciones (diseño de subtítulos, estilos, cajas de desenfoque, voz clonada) — solo cambian la traducción y la voz.
@@ -73,6 +74,7 @@ Carga un clip una vez y envíalo a cualquier modo dentro del editor.
 - **Cualquier formato de vídeo** —— MP4, MOV, MKV, WEBM, AVI y más (decodificado con ffmpeg).
 - **Instalación de un botón + autoactualización** —— modelos, motores, runtime CUDA/VC++ y ffmpeg se descargan en el primer arranque; la app se actualiza sola.
 - **Descargas reanudables** —— los modelos grandes (10 GB+) se reanudan desde donde se cortaron tras una caída de conexión, en vez de reiniciar.
+- **Ejecuta cada etapa donde quieras** —— separación, diarización y ASR cambian de forma independiente entre **GPU, CPU y nube**; combínalas como quieras. Con los modelos pesados (traducción, visión, TTS) delegables a **OpenRouter**, toda la canalización funciona incluso en un equipo **sin NVIDIA**.
 - **Ajusta a tu hardware** —— cada motor trae varias cuantizaciones (TTS Q8/Q6/Q4, traducción Q4…Q8, ASR int8/fp32 o Whisper tiny…large-v3-turbo, separación Q8/Q5/Q4) — cámbialas en ajustes; limita el lote de prefill y la duración de la referencia para GPU de 8–12 GB y 32 GB de RAM.
 - **Totalmente portátil** —— nada se escribe en tu perfil de usuario; borra la carpeta y no queda rastro.
 
@@ -89,11 +91,11 @@ Modo transcripción —— transcripción diarizada con disposición por hablant
 ## Requisitos
 
 - **SO:** Windows 10 / 11 (x64)
-- **GPU:** NVIDIA con 8–16 GB de VRAM
+- **GPU:** NVIDIA con 8–16 GB de VRAM recomendada —— **o ninguna**: la separación, la diarización y el ASR corren en CPU, y los modelos pesados van a la nube
 - **WebView2** —— preinstalado en Windows 11 (se instala solo en Windows 10)
 - **Disco:** ~15 GB para modelos, motores y runtime (se descargan en el primer arranque), más espacio para tus proyectos
 
-Lo único que instalas a mano es un **[controlador NVIDIA](https://www.nvidia.com/Download/index.aspx)** reciente. Todo lo demás lo descarga la app con un botón en el primer arranque.
+En un equipo con NVIDIA, lo único que instalas a mano es un **[controlador NVIDIA](https://www.nvidia.com/Download/index.aspx)** reciente. Todo lo demás lo descarga la app con un botón en el primer arranque.
 
 ## Inicio rápido
 

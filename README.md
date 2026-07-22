@@ -26,7 +26,7 @@
 
 By default everything runs **locally on your machine** — no cloud, no subscription; your footage and your voiceprint never leave your computer. And if your PC is weak (can't run the local Gemma/Higgs) or you want more speed and quality, the heavy stages (translation, vision, TTS, transcription) can **optionally** be offloaded to the cloud via **OpenRouter** — each engine picked independently (local ↔ cloud), with voices auto-cast by speaker gender (beta). The key is stored locally; everything is off by default.
 
-This is **v2 — a fully native rewrite**. No embeddable Python, no torch, no CUDA wheels. The whole pipeline is **Rust + native C++/CUDA engines (GGUF/ONNX)**: one process, fast startup, low VRAM. Models, engines, CUDA/VC++ runtime and ffmpeg are **downloaded and installed by the app itself** on first run — the only manual step is the NVIDIA driver.
+It's a **fully native rewrite**. No embeddable Python, no torch, no CUDA wheels. The whole pipeline is **Rust + native C++/CUDA engines (GGUF/ONNX)**: one process, fast startup, low VRAM. Models, engines, CUDA/VC++ runtime and ffmpeg are **downloaded and installed by the app itself** on first run. **NVIDIA is recommended but not required** — separation ships a CPU build, diarization and ASR run on CPU, and the heavy stages (translation, vision, TTS) go to the cloud, so a dub can be built on a machine with no NVIDIA at all.
 
 ## See it in action
 
@@ -54,6 +54,7 @@ Load a clip once and send it into any mode — right inside the editor.
 
 - **Voice cloning** — the original timbre is cloned and speaks the new language (native [Higgs Audio v3](https://huggingface.co/bosonai) engine, GGUF). Auto-cast by speaker or bring your own voice from a pack.
 - **Speaker diarization** — who speaks and when (NVIDIA **Sortformer** v2, up to 4 voices), a distinct voice per speaker.
+- **Character casting (beta)** — a character is a **face + voice** pair. The app gathers faces across the whole video, recognizes the same person and **binds them to a speaker by co-occurrence** (the one on camera in close-up gets the voice, a background listener doesn't); it auto-picks the clearest avatar frame and **saves a casting profile for the whole series** — assign voices and character descriptions once, and the **next episode applies them automatically**. A **real-faces / cartoon·anime** toggle switches the face detection accordingly.
 - **Choice of ASR engine** — transcribe with **Parakeet-TDT** (GPU, default) or **Whisper** ([Purfview faster-whisper standalone](https://github.com/Purfview/whisper-standalone-win), runs on CPU) — pick the model size (tiny … large-v3-turbo) and quant (compute type) right in settings.
 - **Import ready-made subtitles** — bring your own `.srt`/`.ass` as the exact transcript: text and timing come straight from the file instead of auto-recognition (speakers are still auto-assigned by diarization). Tick **“subtitles already in the target language”** and translation is skipped too — an English clip + your Russian subs → a Russian dub straight from them, no ASR and no MT.
 - **Multi-language export** — the **▾** next to Export sends one video into several languages at once; each inherits all your edits (subtitle layout, styles, blur boxes, cloned voice) — only the text is re-translated and re-voiced.
@@ -73,6 +74,7 @@ Load a clip once and send it into any mode — right inside the editor.
 - **100+ languages** — dub into any major language (Spanish, Chinese, Japanese, Arabic, Hindi and more), with source-language auto-detect.
 - **Any video format** — MP4, MOV, MKV, WEBM, AVI and more (decoded via ffmpeg).
 - **One-button setup + resumable downloads + in-app auto-update** — models, engines, CUDA/VC++ runtime and ffmpeg download on first run; large models (10 GB+) **resume from where they stopped** after a dropped connection instead of restarting; the app updates itself.
+- **Run each stage where you want** — separation, diarization and ASR each switch independently between **GPU, CPU, and cloud**; combine them however you like. With the heavy models (translation, vision, TTS) offloadable to **OpenRouter**, the whole pipeline runs even on a machine with **no NVIDIA**.
 - **Tune for your hardware** — every engine ships multiple quants (TTS Q8/Q6/Q4, translation Q4…Q8, ASR int8/fp32 or Whisper tiny…large-v3-turbo, separation Q8/Q5/Q4) — switch in settings; cap the **prefill batch** and **voice-reference length** to fit 8–12 GB GPUs and 32 GB RAM.
 - **Fully portable** — nothing is written to your user profile; delete the folder and no trace remains.
 
@@ -89,11 +91,11 @@ Transcript mode — diarized transcript with per-speaker layout, karaoke play-al
 ## Requirements
 
 - **OS:** Windows 10 / 11 (x64)
-- **GPU:** NVIDIA with 8–16 GB VRAM
+- **GPU:** NVIDIA with 8–16 GB VRAM recommended — **or none**: separation, diarization and ASR run on CPU, and the heavy models go to the cloud
 - **WebView2** — preinstalled on Windows 11 (installs automatically on Windows 10)
 - **Disk:** ~15 GB for models, engines and runtime (fetched on first run), plus room for your projects
 
-The only thing you install by hand is a recent **[NVIDIA driver](https://www.nvidia.com/Download/index.aspx)**. Everything else — models (Higgs Audio v3, Gemma-4 12B + vision, Parakeet-TDT, Sortformer, Mel-Band Roformer), engines, CUDA runtime and ffmpeg — the app downloads with a button on first run.
+On an NVIDIA machine the only thing you install by hand is a recent **[NVIDIA driver](https://www.nvidia.com/Download/index.aspx)**. Everything else — models (Higgs Audio v3, Gemma-4 12B + vision, Parakeet-TDT, Sortformer, Mel-Band Roformer), engines, CUDA runtime and ffmpeg — the app downloads with a button on first run.
 
 ## Quick start
 

@@ -147,7 +147,7 @@
     <a class="btn" href="https://github.com/timoncool/dub-studio/releases" data-i18n="dl">↓ Download for Windows</a>
     <a class="btn ghost" href="https://github.com/timoncool/dub-studio" data-i18n="star">★ Star on GitHub</a>
   </div>
-  <div class="sub" data-i18n="sub">Windows 10/11 · NVIDIA GPU · one native .exe · zero Python</div>
+  <div class="sub" data-i18n="sub">Windows 10/11 · NVIDIA GPU optional (CPU + cloud) · one native .exe · zero Python</div>
   <div class="shot"><img src="shots/mode-dub-ru.png" alt="Dub Studio editor — dubbed video with translated captions and localized on-screen title" loading="lazy"/></div>
 </div>
 
@@ -247,6 +247,8 @@
     <div class="feat"><span class="fic">📥</span><p data-i18n="f16"><b>Import subtitles</b> — bring your own .srt/.ass as the exact transcript; tick “already in the target language” and it dubs straight from them, no translation.</p></div>
     <div class="feat"><span class="fic">📤</span><p data-i18n="f17"><b>Multi-language export</b> — send one video into several languages at once; each inherits your layout, styles, blur and cloned voice.</p></div>
     <div class="feat"><span class="fic">💾</span><p data-i18n="f18"><b>Projects — save &amp; resume</b> — autosave, recent projects on the start screen, back to unfinished work in a click.</p></div>
+    <div class="feat"><span class="fic">🎭</span><p data-i18n="f19"><b>Character casting</b> — bind a face to a voice; the app recognizes each character across the video and saves a casting profile reused across the whole series.</p></div>
+    <div class="feat"><span class="fic">🧩</span><p data-i18n="f20"><b>GPU, CPU or cloud — per stage</b> — run separation, diarization and ASR on any of them; with the heavy stages in the cloud it works even with no NVIDIA.</p></div>
   </div>
 </div></section>
 
@@ -305,7 +307,7 @@ const T={
    eyebrow:"Локально · Оффлайн · 100+ языков · Бесплатно и открыто",
    h1:"Дубляж любого видео — будто так и снято.",
    hp:"Переозвучь любой клип на другой язык — с клонированным голосом спикера, переведёнными субтитрами и локализованным текстом прямо в кадре. Локально по умолчанию — без подписок; опционально облако (OpenRouter) для слабых ПК или скорости.",
-   dl:"↓ Скачать для Windows",star:"★ Звезда на GitHub",sub:"Windows 10/11 · NVIDIA GPU · один нативный .exe · без Python",
+   dl:"↓ Скачать для Windows",star:"★ Звезда на GitHub",sub:"Windows 10/11 · NVIDIA опционально (CPU + облако) · один нативный .exe · без Python",
    sc_h2:"До / после — реальные ролики, дубляж оффлайн",
    sc_lead:"Каждый ролик ниже обработан от и до на локальной GPU. Разные видео, разные режимы, разные языки — ничего не покидало компьютер.",
    sc_t1:"🎙️ Полный дубляж · EN → RU",sc_t2:"🗣️ Закадровый · EN → ES",sc_t3:"✨ Шуточный ремикс · EN → RU",
@@ -330,7 +332,7 @@ const T={
    f8:"<b>Пакетный режим</b> — очередь файлов на одной настройке.",
    f9:"<b>100+ языков</b> — дубляж на любой крупный язык: испанский, китайский, японский, арабский, хинди… источник — автоопределение.",
    f10:"<b>Полностью портативно + автообновление</b> — ничего не трогает твой профиль.",
-   f11:"<b>Выбор ASR-движка</b> — Parakeet-TDT (GPU) или Whisper (CPU); размер модели и квант — в настройках.",f12:"<b>Композируемые режимы</b> — любые сочетания: дубляж без субтитров, перевод субтитров без дубляжа, шуточный дубляж своими голосами.",f13:"<b>Настройка под железо</b> — лёгкие кванты на каждый движок + лимиты prefill-батча и длины реф-клипа под 8–12 ГБ GPU и 32 ГБ RAM.",f14:"<b>Резюмируемая докачка</b> — большие модели при обрыве связи докачиваются с места, а не заново.",f15:"<b>Свои реплики</b> — добавляй свои фразы; озвучиваются склонированным голосом спикера и попадают в субтитры.",f16:"<b>Импорт субтитров</b> — загрузи свой .srt/.ass как готовый транскрипт; галочка «уже на языке перевода» → дубляж напрямую из них, без перевода.",f17:"<b>Мультиязычный экспорт</b> — одно видео сразу на несколько языков; каждый наследует твою раскладку, стили, блюр и клон голоса.",f18:"<b>Проекты — сохранение</b> — автосейв, недавние проекты на старте, возврат к незаконченному в клик.",
+   f11:"<b>Выбор ASR-движка</b> — Parakeet-TDT (GPU) или Whisper (CPU); размер модели и квант — в настройках.",f12:"<b>Композируемые режимы</b> — любые сочетания: дубляж без субтитров, перевод субтитров без дубляжа, шуточный дубляж своими голосами.",f13:"<b>Настройка под железо</b> — лёгкие кванты на каждый движок + лимиты prefill-батча и длины реф-клипа под 8–12 ГБ GPU и 32 ГБ RAM.",f14:"<b>Резюмируемая докачка</b> — большие модели при обрыве связи докачиваются с места, а не заново.",f15:"<b>Свои реплики</b> — добавляй свои фразы; озвучиваются склонированным голосом спикера и попадают в субтитры.",f16:"<b>Импорт субтитров</b> — загрузи свой .srt/.ass как готовый транскрипт; галочка «уже на языке перевода» → дубляж напрямую из них, без перевода.",f17:"<b>Мультиязычный экспорт</b> — одно видео сразу на несколько языков; каждый наследует твою раскладку, стили, блюр и клон голоса.",f18:"<b>Проекты — сохранение</b> — автосейв, недавние проекты на старте, возврат к незаконченному в клик.",f19:"<b>Кастинг персонажей</b> — свяжи лицо с голосом; приложение узнаёт каждого персонажа по всему видео и хранит профиль кастинга, переиспользуя его на весь сериал.",f20:"<b>GPU, CPU или облако — по стадиям</b> — сепарация, диаризация и ASR на любом из них; с тяжёлыми стадиями в облаке работает даже без NVIDIA.",
    gal_h2:"Каждый режим — на твоём языке",gal_lead:"Полный редактор — дубляж, закадровый, субтитры, шуточный ремикс и транскрипт — локализован на 6 языков.",
    g1:"<b>Полный дубляж</b> · интерфейс RU · клон голоса + локализованный титр",
    g2:"<b>Закадровый</b> · интерфейс ES · ползунок громкости оригинала",
@@ -348,7 +350,7 @@ const T={
    eyebrow:"本地 · 离线 · 100+ 种语言 · 免费开源",
    h1:"为任何视频配音，宛如原生拍摄。",
    hp:"将任意片段重新配音成另一种语言 —— 克隆说话人本人的音色，翻译字幕，并在画面上本地化屏幕文字。默认本地运行 —— 无订阅；可选云端（OpenRouter），适合弱机或追求速度。",
-   dl:"↓ 下载 Windows 版",star:"★ 在 GitHub 加星",sub:"Windows 10/11 · NVIDIA 显卡 · 单个原生 .exe · 无需 Python",
+   dl:"↓ 下载 Windows 版",star:"★ 在 GitHub 加星",sub:"Windows 10/11 · NVIDIA 显卡可选（CPU + 云端） · 单个原生 .exe · 无需 Python",
    sc_h2:"前后对比 —— 真实片段，离线配音",
    sc_lead:"下方每个片段都在本地 GPU 上端到端处理。不同的视频、不同的模式、不同的语言 —— 一切都不离开电脑。",
    sc_t1:"🎙️ 完整配音 · EN → RU",sc_t2:"🗣️ 旁白配音 · EN → ES",sc_t3:"✨ 恶搞混剪 · EN → RU",
@@ -373,7 +375,7 @@ const T={
    f8:"<b>批量处理</b> —— 一次设置，文件排队处理。",
    f9:"<b>100+ 种语言</b> —— 配音到任何主要语言：西班牙语、中文、日语、阿拉伯语、印地语……自动识别源语言。",
    f10:"<b>完全便携 + 自动更新</b> —— 不动你的用户目录。",
-   f11:"<b>可选 ASR 引擎</b> —— Parakeet-TDT（GPU）或 Whisper（CPU）；在设置中选择模型大小和量化。",f12:"<b>可组合模式</b> —— 任意组合：配音但不加字幕、翻译字幕但不配音、用自己的声音做搞笑配音。",f13:"<b>按硬件调优</b> —— 每个引擎切换更轻量化，限制 prefill 批大小与参考时长，适配 8–12 GB 显卡和 32 GB 内存。",f14:"<b>可续传下载</b> —— 大模型断线后从中断处续传，而非重新开始。",f15:"<b>自定义台词</b> —— 插入自己的短语；用说话人的克隆声音配音并显示在字幕中。",f16:"<b>导入字幕</b> —— 用你自己的 .srt/.ass 作为精确文稿；勾选“已是目标语言”即可直接据此配音，无需翻译。",f17:"<b>多语言导出</b> —— 一个视频一次导出为多种语言；每种都继承你的排版、样式、模糊框和克隆音色。",f18:"<b>项目保存与续作</b> —— 自动保存、启动页近期项目列表，一键回到未完成的工作。",
+   f11:"<b>可选 ASR 引擎</b> —— Parakeet-TDT（GPU）或 Whisper（CPU）；在设置中选择模型大小和量化。",f12:"<b>可组合模式</b> —— 任意组合：配音但不加字幕、翻译字幕但不配音、用自己的声音做搞笑配音。",f13:"<b>按硬件调优</b> —— 每个引擎切换更轻量化，限制 prefill 批大小与参考时长，适配 8–12 GB 显卡和 32 GB 内存。",f14:"<b>可续传下载</b> —— 大模型断线后从中断处续传，而非重新开始。",f15:"<b>自定义台词</b> —— 插入自己的短语；用说话人的克隆声音配音并显示在字幕中。",f16:"<b>导入字幕</b> —— 用你自己的 .srt/.ass 作为精确文稿；勾选“已是目标语言”即可直接据此配音，无需翻译。",f17:"<b>多语言导出</b> —— 一个视频一次导出为多种语言；每种都继承你的排版、样式、模糊框和克隆音色。",f18:"<b>项目保存与续作</b> —— 自动保存、启动页近期项目列表，一键回到未完成的工作。",f19:"<b>角色选角</b> —— 把人脸与声音绑定；应用在整段视频中识别每个角色，并保存选角档案，在整部剧集中复用。",f20:"<b>GPU、CPU 或云端 —— 按阶段</b> —— 分离、说话人分离和 ASR 可任选其一；把繁重阶段交给云端，即使没有 NVIDIA 也能运行。",
    gal_h2:"每种模式，用你的语言",gal_lead:"完整编辑器 —— 配音、旁白、字幕、恶搞混剪与转录 —— 本地化为 6 种语言。",
    g1:"<b>完整配音</b> · 俄语界面 · 声音克隆 + 本地化标题",
    g2:"<b>旁白配音</b> · 西语界面 · 原声音量平衡滑块",
@@ -391,7 +393,7 @@ const T={
    eyebrow:"Local · Sin conexión · 100+ idiomas · Gratis y de código abierto",
    h1:"Dobla cualquier vídeo como si se hubiera hecho así.",
    hp:"Cambia la voz de cualquier clip a otro idioma — con la propia voz del hablante clonada, subtítulos traducidos y texto en pantalla localizado en el propio fotograma. Local por defecto — sin suscripción; nube opcional (OpenRouter) para PCs limitados o más velocidad.",
-   dl:"↓ Descargar para Windows",star:"★ Estrella en GitHub",sub:"Windows 10/11 · GPU NVIDIA · un .exe nativo · sin Python",
+   dl:"↓ Descargar para Windows",star:"★ Estrella en GitHub",sub:"Windows 10/11 · GPU NVIDIA opcional (CPU + nube) · un .exe nativo · sin Python",
    sc_h2:"Antes / después — clips reales, doblados sin conexión",
    sc_lead:"Cada clip se procesó de principio a fin en una GPU local. Distintos vídeos, distintos modos, distintos idiomas — nada salió del equipo.",
    sc_t1:"🎙️ Doblaje completo · EN → RU",sc_t2:"🗣️ Voz superpuesta · EN → ES",sc_t3:"✨ Remix divertido · EN → RU",
@@ -416,7 +418,7 @@ const T={
    f8:"<b>Procesamiento por lotes</b> — una cola de archivos con una sola configuración.",
    f9:"<b>100+ idiomas</b> — dobla a cualquier idioma principal: español, chino, japonés, árabe, hindi… origen autodetectado.",
    f10:"<b>Totalmente portable + autoactualización</b> — no toca tu perfil de usuario.",
-   f11:"<b>Elección de motor ASR</b> —— Parakeet-TDT (GPU) o Whisper (CPU); elige tamaño de modelo y cuantización en ajustes.",f12:"<b>Modos combinables</b> —— cualquier combinación: doblaje sin subtítulos, subtítulos traducidos sin doblaje, doblaje humorístico con tus voces.",f13:"<b>Ajusta a tu hardware</b> —— cuantizaciones más ligeras por motor y límites de lote de prefill y duración de referencia para GPU de 8–12 GB y 32 GB de RAM.",f14:"<b>Descargas reanudables</b> —— los modelos grandes se reanudan desde donde se cortaron, en vez de reiniciar.",f15:"<b>Tus propias líneas</b> —— inserta frases personalizadas; se doblan con la voz clonada del hablante y aparecen en los subtítulos.",f16:"<b>Importar subtítulos</b> —— usa tu .srt/.ass como transcripción exacta; marca «ya en el idioma destino» y dobla directo desde ellos, sin traducir.",f17:"<b>Exportación multiidioma</b> —— un vídeo a varios idiomas a la vez; cada uno hereda tu diseño, estilos, desenfoque y voz clonada.",f18:"<b>Proyectos — guardar y seguir</b> —— autoguardado, proyectos recientes en el inicio, vuelve al trabajo sin terminar en un clic.",
+   f11:"<b>Elección de motor ASR</b> —— Parakeet-TDT (GPU) o Whisper (CPU); elige tamaño de modelo y cuantización en ajustes.",f12:"<b>Modos combinables</b> —— cualquier combinación: doblaje sin subtítulos, subtítulos traducidos sin doblaje, doblaje humorístico con tus voces.",f13:"<b>Ajusta a tu hardware</b> —— cuantizaciones más ligeras por motor y límites de lote de prefill y duración de referencia para GPU de 8–12 GB y 32 GB de RAM.",f14:"<b>Descargas reanudables</b> —— los modelos grandes se reanudan desde donde se cortaron, en vez de reiniciar.",f15:"<b>Tus propias líneas</b> —— inserta frases personalizadas; se doblan con la voz clonada del hablante y aparecen en los subtítulos.",f16:"<b>Importar subtítulos</b> —— usa tu .srt/.ass como transcripción exacta; marca «ya en el idioma destino» y dobla directo desde ellos, sin traducir.",f17:"<b>Exportación multiidioma</b> —— un vídeo a varios idiomas a la vez; cada uno hereda tu diseño, estilos, desenfoque y voz clonada.",f18:"<b>Proyectos — guardar y seguir</b> —— autoguardado, proyectos recientes en el inicio, vuelve al trabajo sin terminar en un clic.",f19:"<b>Reparto de personajes</b> —— vincula una cara a una voz; la app reconoce a cada personaje en todo el vídeo y guarda un perfil de reparto reutilizable en toda la serie.",f20:"<b>GPU, CPU o nube — por etapa</b> —— ejecuta separación, diarización y ASR en cualquiera; con las etapas pesadas en la nube funciona incluso sin NVIDIA.",
    gal_h2:"Cada modo, en tu idioma",gal_lead:"El editor completo — doblaje, voz superpuesta, subtítulos, remix divertido y transcripción — localizado en 6 idiomas.",
    g1:"<b>Doblaje completo</b> · interfaz RU · voz clonada + título localizado",
    g2:"<b>Voz superpuesta</b> · interfaz ES · control de volumen del original",
@@ -434,7 +436,7 @@ const T={
    eyebrow:"Local · Offline · 100+ idiomas · Grátis e código aberto",
    h1:"Duble qualquer vídeo como se fosse gravado assim.",
    hp:"Reduble qualquer clipe para outro idioma — com a própria voz do locutor clonada, legendas traduzidas e texto na tela localizado no próprio quadro. Local por padrão — sem assinatura; nuvem opcional (OpenRouter) para PCs fracos ou mais velocidade.",
-   dl:"↓ Baixar para Windows",star:"★ Estrela no GitHub",sub:"Windows 10/11 · GPU NVIDIA · um .exe nativo · sem Python",
+   dl:"↓ Baixar para Windows",star:"★ Estrela no GitHub",sub:"Windows 10/11 · GPU NVIDIA opcional (CPU + nuvem) · um .exe nativo · sem Python",
    sc_h2:"Antes / depois — clipes reais, dublados offline",
    sc_lead:"Cada clipe abaixo foi processado de ponta a ponta numa GPU local. Vídeos, modos e idiomas diferentes — nada saiu da máquina.",
    sc_t1:"🎙️ Dublagem completa · EN → RU",sc_t2:"🗣️ Locução · EN → ES",sc_t3:"✨ Remix divertido · EN → RU",
@@ -459,7 +461,7 @@ const T={
    f8:"<b>Processamento em lote</b> — uma fila de arquivos com uma configuração.",
    f9:"<b>100+ idiomas</b> — dublagem para qualquer idioma principal: espanhol, chinês, japonês, árabe, hindi… origem autodetectada.",
    f10:"<b>Totalmente portátil + autoatualização</b> — não toca no seu perfil de usuário.",
-   f11:"<b>Escolha do motor de ASR</b> —— Parakeet-TDT (GPU) ou Whisper (CPU); escolha o tamanho do modelo e a quantização nas configurações.",f12:"<b>Modos combináveis</b> —— qualquer combinação: dublagem sem legendas, legendas traduzidas sem dublagem, dublagem humorística com suas vozes.",f13:"<b>Ajuste ao seu hardware</b> —— quantizações mais leves por motor e limites de lote de prefill e duração de referência para GPU de 8–12 GB e 32 GB de RAM.",f14:"<b>Downloads retomáveis</b> —— modelos grandes retomam de onde pararam, em vez de recomeçar.",f15:"<b>Suas próprias falas</b> —— insira frases personalizadas; dubladas com a voz clonada do falante e exibidas nas legendas.",f16:"<b>Importar legendas</b> —— use seu .srt/.ass como transcrição exata; marque «já no idioma de destino» e dubla direto delas, sem traduzir.",f17:"<b>Exportação multilíngue</b> —— um vídeo para vários idiomas de uma vez; cada um herda seu layout, estilos, desfoque e voz clonada.",f18:"<b>Projetos — salvar e retomar</b> —— salvamento automático, projetos recentes no início, volte ao trabalho inacabado em um clique.",
+   f11:"<b>Escolha do motor de ASR</b> —— Parakeet-TDT (GPU) ou Whisper (CPU); escolha o tamanho do modelo e a quantização nas configurações.",f12:"<b>Modos combináveis</b> —— qualquer combinação: dublagem sem legendas, legendas traduzidas sem dublagem, dublagem humorística com suas vozes.",f13:"<b>Ajuste ao seu hardware</b> —— quantizações mais leves por motor e limites de lote de prefill e duração de referência para GPU de 8–12 GB e 32 GB de RAM.",f14:"<b>Downloads retomáveis</b> —— modelos grandes retomam de onde pararam, em vez de recomeçar.",f15:"<b>Suas próprias falas</b> —— insira frases personalizadas; dubladas com a voz clonada do falante e exibidas nas legendas.",f16:"<b>Importar legendas</b> —— use seu .srt/.ass como transcrição exata; marque «já no idioma de destino» e dubla direto delas, sem traduzir.",f17:"<b>Exportação multilíngue</b> —— um vídeo para vários idiomas de uma vez; cada um herda seu layout, estilos, desfoque e voz clonada.",f18:"<b>Projetos — salvar e retomar</b> —— salvamento automático, projetos recentes no início, volte ao trabalho inacabado em um clique.",f19:"<b>Elenco de personagens</b> —— vincule um rosto a uma voz; o app reconhece cada personagem em todo o vídeo e salva um perfil de elenco reutilizável na série inteira.",f20:"<b>GPU, CPU ou nuvem — por etapa</b> —— rode separação, diarização e ASR em qualquer uma; com as etapas pesadas na nuvem, funciona até sem NVIDIA.",
    gal_h2:"Cada modo, no seu idioma",gal_lead:"O editor completo — dublagem, locução, legendas, remix divertido e transcrição — localizado em 6 idiomas.",
    g1:"<b>Dublagem completa</b> · interface RU · voz clonada + título localizado",
    g2:"<b>Locução</b> · interface ES · controle de volume do original",
@@ -477,7 +479,7 @@ const T={
    eyebrow:"Local · Hors ligne · 100+ langues · Gratuit et open source",
    h1:"Doublez n'importe quelle vidéo comme si c'était l'original.",
    hp:"Redonnez voix à n'importe quel clip dans une autre langue — avec la voix du locuteur clonée, les sous-titres traduits et le texte à l'écran localisé à même l'image. Local par défaut — sans abonnement ; cloud en option (OpenRouter) pour PC limités ou plus de vitesse.",
-   dl:"↓ Télécharger pour Windows",star:"★ Star sur GitHub",sub:"Windows 10/11 · GPU NVIDIA · un .exe natif · sans Python",
+   dl:"↓ Télécharger pour Windows",star:"★ Star sur GitHub",sub:"Windows 10/11 · GPU NVIDIA en option (CPU + cloud) · un .exe natif · sans Python",
    sc_h2:"Avant / après — de vrais clips, doublés hors ligne",
    sc_lead:"Chaque clip ci-dessous a été traité de bout en bout sur un GPU local. Des vidéos, des modes et des langues différents — rien n'a quitté la machine.",
    sc_t1:"🎙️ Doublage complet · EN → RU",sc_t2:"🗣️ Voix off · EN → ES",sc_t3:"✨ Remix drôle · EN → RU",
@@ -502,7 +504,7 @@ const T={
    f8:"<b>Traitement par lot</b> — une file de fichiers avec une seule configuration.",
    f9:"<b>100+ langues</b> — doublage vers toute langue majeure : espagnol, chinois, japonais, arabe, hindi… source détectée automatiquement.",
    f10:"<b>Entièrement portable + mise à jour auto</b> — ne touche pas à votre profil.",
-   f11:"<b>Choix du moteur ASR</b> —— Parakeet-TDT (GPU) ou Whisper (CPU) ; choisissez la taille du modèle et la quantification dans les réglages.",f12:"<b>Modes composables</b> —— n’importe quelle combinaison : doublage sans sous-titres, sous-titres traduits sans doublage, doublage humoristique avec vos voix.",f13:"<b>Adaptez à votre matériel</b> —— quantifications plus légères par moteur et limites de lot de prefill et de durée de référence pour GPU de 8–12 Go et 32 Go de RAM.",f14:"<b>Téléchargements reprenables</b> —— les gros modèles reprennent là où ils se sont arrêtés, au lieu de tout recommencer.",f15:"<b>Vos propres répliques</b> —— insérez des phrases personnalisées ; doublées avec la voix clonée du locuteur et affichées dans les sous-titres.",f16:"<b>Importer des sous-titres</b> —— utilisez votre .srt/.ass comme transcription exacte ; cochez « déjà dans la langue cible » et il double directement à partir d'eux, sans traduction.",f17:"<b>Export multilingue</b> —— une vidéo dans plusieurs langues d'un coup ; chacune hérite de votre mise en page, styles, flou et voix clonée.",f18:"<b>Projets — sauvegarde</b> —— sauvegarde auto, projets récents à l'accueil, reprise du travail inachevé en un clic.",
+   f11:"<b>Choix du moteur ASR</b> —— Parakeet-TDT (GPU) ou Whisper (CPU) ; choisissez la taille du modèle et la quantification dans les réglages.",f12:"<b>Modes composables</b> —— n’importe quelle combinaison : doublage sans sous-titres, sous-titres traduits sans doublage, doublage humoristique avec vos voix.",f13:"<b>Adaptez à votre matériel</b> —— quantifications plus légères par moteur et limites de lot de prefill et de durée de référence pour GPU de 8–12 Go et 32 Go de RAM.",f14:"<b>Téléchargements reprenables</b> —— les gros modèles reprennent là où ils se sont arrêtés, au lieu de tout recommencer.",f15:"<b>Vos propres répliques</b> —— insérez des phrases personnalisées ; doublées avec la voix clonée du locuteur et affichées dans les sous-titres.",f16:"<b>Importer des sous-titres</b> —— utilisez votre .srt/.ass comme transcription exacte ; cochez « déjà dans la langue cible » et il double directement à partir d'eux, sans traduction.",f17:"<b>Export multilingue</b> —— une vidéo dans plusieurs langues d'un coup ; chacune hérite de votre mise en page, styles, flou et voix clonée.",f18:"<b>Projets — sauvegarde</b> —— sauvegarde auto, projets récents à l'accueil, reprise du travail inachevé en un clic.",f19:"<b>Casting des personnages</b> —— liez un visage à une voix ; l'app reconnaît chaque personnage dans toute la vidéo et enregistre un profil de casting réutilisé sur toute la série.",f20:"<b>GPU, CPU ou cloud — par étape</b> —— exécutez séparation, diarisation et ASR sur l'un ou l'autre ; avec les étapes lourdes dans le cloud, ça marche même sans NVIDIA.",
    gal_h2:"Chaque mode, dans votre langue",gal_lead:"L'éditeur complet — doublage, voix off, sous-titres, remix drôle et transcription — localisé en 6 langues.",
    g1:"<b>Doublage complet</b> · interface RU · voix clonée + titre localisé",
    g2:"<b>Voix off</b> · interface ES · curseur de volume de l'original",
