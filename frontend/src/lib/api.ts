@@ -118,6 +118,8 @@ export const api = {
   openrouterModels: (kind: "llm" | "vision" | "tts" | "asr") => getJson<{ models: { id: string; name: string; context?: number }[] }>(`/engine/openrouter/models?kind=${kind}`),
   // Голоса TTS-модели с полом/возрастом/русским (встроенный справочник) — для дропдауна + автокастинга.
   openrouterVoices: (model: string) => getJson<{ voices: { name: string; gender: string; age: string; ru: boolean }[]; supportsRussian: boolean | null }>(`/engine/openrouter/voices?model=${encodeURIComponent(model)}`),
+  // Прокси: проверить связность до HF (закачка моделей) и OpenRouter через указанный URL. Пусто -> прямой доступ.
+  proxyTest: (url: string) => postJson<{ ok: boolean; hf?: boolean; openrouter?: boolean; hf_error?: string | null; openrouter_error?: string | null; error?: string }>("/engine/proxy/test", { url }),
   // Пресеты железа: список + детект GPU/VRAM + рекомендация; применение пишет кванты/облако в active.json.
   hwPresets: () => getJson<{ presets: { id: string; title: string; subtitle: string }[]; hardware: { gpuName: string; totalVramGb: number; totalRamGb: number; hasGpu: boolean; recommended: string; reason: string } }>("/engine/presets"),
   applyPreset: (id: string) => postJson<{ ok: boolean; id: string; applied: { key: string; value: string }[] }>("/engine/preset", { id }),
@@ -167,6 +169,8 @@ export const api = {
   // Экспорт-уровень мультиязыка: клон отредактированного проекта на язык lang (наследует раскладку/стиль/
   // блюр/титры + клон голоса), ре-перевод текста + рендер одним джобом. -> новый project_id + job_id.
   exportLang: (pid: string, lang: string) => fetch(`${BASE}/projects/${pid}/export-lang?lang=${encodeURIComponent(lang)}`, { method: "POST" }).then(j<{ job_id: string; project_id: string }>),
+  // #122: смена режима из транскрипта — перевод готовых сегментов на lang + смена режима, БЕЗ повторного ASR.
+  retranslate: (pid: string, lang: string, mode: string) => fetch(`${BASE}/projects/${pid}/retranslate?lang=${encodeURIComponent(lang)}&mode=${encodeURIComponent(mode)}`, { method: "POST" }).then(j<{ job_id: string; project_id: string }>),
   dubAudio: (pid: string) => fetch(`${BASE}/projects/${pid}/dub-audio`, { method: "POST" }).then(j<{ job_id: string }>),   // сгенерить только озвучку (без сборки видео) — слушать дуб в редакторе
   remix: (pid: string, instruction: string) =>
     fetch(`${BASE}/projects/${pid}/remix?instruction=${encodeURIComponent(instruction)}`, { method: "POST" }).then(j<{ job_id: string }>),

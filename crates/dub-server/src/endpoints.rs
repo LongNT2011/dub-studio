@@ -83,6 +83,45 @@ pub async fn openrouter_verify(State(st): State<AppState>, Json(body): Json<Valu
     }
 }
 
+// ─── POST /engine/proxy/test {url} — проверить связность через прокси ────────────────────────────────
+// Пробуем достучаться до HF (закачка моделей) и OpenRouter (облако) через указанный прокси. Пустой url ->
+// проверка ПРЯМОГО доступа (без прокси): юзер сразу видит, нужен ли ему прокси вообще. http_status_as_error
+// выключаем — меряем транспорт (дошли до сервера через прокси), а не HTTP-статус ответа.
+pub async fn proxy_test(Json(body): Json<Value>) -> Response {
+    let url = body.get("url").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    let res = tokio::task::spawn_blocking(move || -> Result<Value, String> {
+        let agent: ureq::Agent = if url.is_empty() {
+            ureq::Agent::config_builder().http_status_as_error(false).build().into()
+        } else {
+            let proxy = ureq::Proxy::new(&url).map_err(|e| format!("некорректный URL прокси: {e}"))?;
+            ureq::Agent::config_builder()
+                .proxy(Some(proxy))
+                .http_status_as_error(false)
+                .build()
+                .into()
+        };
+        let probe = |target: &str| -> Option<String> {
+            agent.get(target).call().err().map(|e| e.to_string())
+        };
+        // Лёгкие публичные JSON-эндпоинты обоих сервисов (без ключа): проверяем именно то, что проксируем.
+        let hf = probe("https://huggingface.co/api/models/immich-app/buffalo_l");
+        let or = probe("https://openrouter.ai/api/v1/models");
+        Ok(json!({
+            "ok": hf.is_none() && or.is_none(),
+            "hf": hf.is_none(),
+            "openrouter": or.is_none(),
+            "hf_error": hf,
+            "openrouter_error": or,
+        }))
+    })
+    .await
+    .unwrap_or_else(|e| Err(e.to_string()));
+    match res {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => Json(json!({ "ok": false, "error": e })).into_response(),
+    }
+}
+
 // ─── Пресеты железа: GET /engine/presets (список + детект GPU + рекомендация), POST /engine/preset {id} ──
 pub async fn presets_list(State(_st): State<AppState>) -> Response {
     let rec = tokio::task::spawn_blocking(crate::presets::recommend)

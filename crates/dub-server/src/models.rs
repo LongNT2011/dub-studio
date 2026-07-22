@@ -95,6 +95,9 @@ pub fn is_selection_key(key: &str) -> bool {
             | "or_asr_on"       // "1" -> транскрипция (ASR) через OpenRouter вместо локального Parakeet/Whisper
             | "or_asr"          // id STT-модели OpenRouter (напр. "openai/whisper-large-v3")
             | "or_concurrency"  // число параллельных облачных запросов (чанки в N потоков; OpenRouter ~50 конкур.)
+            // Прокси: у части юзеров прямой доступ к HF/OpenRouter закрыт -> все обращения через свой прокси.
+            | "proxy_on"        // "1" -> проксировать весь исходящий трафик приложения через proxy_url
+            | "proxy_url"       // URL прокси: http|https|socks5://[user:pass@]host:port (хранится локально)
     )
 }
 
@@ -124,6 +127,39 @@ pub fn local_backend(mroot: &Path) -> &'static str {
 /// API-ключ OpenRouter из active.json (локальное хранение, десктоп). Пусто/нет -> None.
 pub fn openrouter_key(mroot: &Path) -> Option<String> {
     pick(&load_selection(mroot), "or_key").map(str::to_string)
+}
+
+/// URL прокси-сервера из active.json — ТОЛЬКО если прокси включён (proxy_on=="1") и URL непустой, иначе None.
+/// Через него идут ВСЕ обращения приложения: закачка моделей (ureq), OpenRouter (Go-хелпер), метаданные HF
+/// (reqwest). Формат: http|https|socks5://[user:pass@]host:port. Валидность URL проверяет /engine/proxy/test.
+pub fn proxy_url(mroot: &Path) -> Option<String> {
+    let sel = load_selection(mroot);
+    if pick(&sel, "proxy_on") != Some("1") {
+        return None;
+    }
+    pick(&sel, "proxy_url").map(str::to_string)
+}
+
+/// Прописать прокси из active.json в env процесса (HTTP(S)_PROXY/ALL_PROXY + lowercase-варианты). Стандартные
+/// клиенты подхватывают его сами: ureq default-agent (Config::default -> Proxy::try_from_env), reqwest, и
+/// дочерние процессы (Go-хелпер: http.ProxyFromEnvironment). Вызывать ОДИН раз на старте — ДО первого
+/// HTTP-клиента (default-agent кешируется). Смена прокси -> рестарт; но закачки строят агента явно из
+/// proxy_url и подхватывают смену без рестарта (см. setup::dl_agent).
+pub fn apply_proxy_env(mroot: &Path) {
+    if let Some(url) = proxy_url(mroot) {
+        for k in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
+            std::env::set_var(k, &url);
+        }
+        tracing::info!("прокси включён: весь трафик через {}", mask_proxy(&url));
+    }
+}
+
+/// Спрятать user:pass в URL прокси для логов (не светим креды): scheme://***@host:port.
+fn mask_proxy(url: &str) -> String {
+    match (url.find("://"), url.rfind('@')) {
+        (Some(s), Some(at)) if at > s + 3 => format!("{}***@{}", &url[..s + 3], &url[at + 1..]),
+        _ => url.to_string(),
+    }
 }
 
 /// Включён ли облачный путь для стадии `stage` ("llm"|"vision"|"tts"): галка ИЛИ есть ключ.

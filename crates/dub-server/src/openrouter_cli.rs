@@ -29,9 +29,14 @@ pub fn run(repo_root: &Path, key: &str, op: &str, payload: &Value) -> Result<Vec
     if !bin.is_file() {
         return Err(format!("openrouter-helper не найден: {}", bin.display()));
     }
-    let mut child = Command::new(&bin)
-        .arg(op)
-        .env("OPENROUTER_API_KEY", key)
+    let mut cmd = Command::new(&bin);
+    cmd.arg(op).env("OPENROUTER_API_KEY", key);
+    // Прокси для облака: если включён в active.json — прокидываем в env хелпера. Go net/http
+    // (http.ProxyFromEnvironment у DefaultTransport, который использует Speakeasy-SDK) идёт через HTTPS_PROXY.
+    if let Some(url) = crate::models::proxy_url(&repo_root.join("models")) {
+        cmd.env("HTTPS_PROXY", &url).env("HTTP_PROXY", &url).env("ALL_PROXY", &url);
+    }
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

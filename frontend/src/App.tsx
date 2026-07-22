@@ -424,6 +424,70 @@ function ModelsSection() {
           )}
         </div>
       </div>
+      {/* Прокси — В САМОМ КОНЦЕ: нужен только тем, у кого закрыт прямой доступ к HF/OpenRouter. Весь исходящий
+          трафик приложения (закачка моделей + облако) через свой прокси. */}
+      <div className="mt-2 pt-3 border-t border-[var(--color-border)]">
+        <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-1.5">Прокси</div>
+        <ProxySection />
+      </div>
+    </div>
+  );
+}
+
+// Прокси-сервер для всего исходящего трафика (закачка моделей + OpenRouter): у части юзеров прямой доступ к
+// HF/OpenRouter закрыт. URL может содержать логин:пароль -> прячем как ключ. «Проверить» бьёт в HF и OpenRouter
+// через указанный прокси. Действует сразу для закачки и облака; остальному (апдейтер) — рестарт.
+function ProxySection() {
+  const [url, setUrl] = useState("");
+  const [on, setOn] = useState(false);
+  const [show, setShow] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  useEffect(() => {
+    api.capabilities().then((c) => {
+      setUrl(c.selection?.proxy_url ?? "");
+      setOn((c.selection?.proxy_on ?? "") === "1");
+    }).catch(() => {});
+  }, []);
+  // Сохраняем URL (только непустой — setSelection не принимает пустое) + флаг вкл/выкл.
+  const save = async (nextOn: boolean) => {
+    if (url.trim()) await api.setSelection("proxy_url", url.trim());
+    await api.setSelection("proxy_on", nextOn ? "1" : "0");
+    setOn(nextOn);
+    setMsg(null);
+  };
+  const test = async () => {
+    setTesting(true); setMsg(null);
+    try {
+      const r = await api.proxyTest(url.trim());
+      if (r.ok) setMsg({ ok: true, text: "Работает — HF и OpenRouter доступны через прокси" });
+      else if (r.error) setMsg({ ok: false, text: r.error });
+      else {
+        const bad = [r.hf === false ? "закачка моделей (HF)" : "", r.openrouter === false ? "OpenRouter" : ""].filter(Boolean);
+        setMsg({ ok: false, text: `Недоступно через прокси: ${bad.join(", ") || "сервисы"}` });
+      }
+    } catch { setMsg({ ok: false, text: "Не удалось проверить прокси" }); }
+    setTesting(false);
+  };
+  return (
+    <div className="px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)] space-y-2">
+      <label className="flex items-center gap-2.5 cursor-pointer select-none">
+        <input type="checkbox" checked={on} onChange={(e) => save(e.target.checked)}
+          className="accent-[var(--color-accent)] w-3.5 h-3.5 shrink-0" />
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${on ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[12px] font-medium">Проксировать весь трафик</span>
+          <span className="block mono text-[10px] text-[var(--color-muted)]">включите, если прямая закачка моделей или OpenRouter не работает</span>
+        </span>
+      </label>
+      <div className="flex gap-2">
+        <input type={show ? "text" : "password"} value={url} onChange={(e) => setUrl(e.target.value)} onBlur={() => { if (on && url.trim()) save(true); }} placeholder="http://user:pass@host:8080  ·  socks5://host:1080"
+          className="flex-1 px-2 py-1 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] text-[12px] mono focus:border-[var(--color-accent)] outline-none" />
+        <button onClick={() => setShow((s) => !s)} className="px-2 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]">{show ? <EyeOff size={13} /> : <Eye size={13} />}</button>
+        <button onClick={test} disabled={testing || !url.trim()} className="px-3 py-1 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] text-[12px] hover:border-[var(--color-accent)] disabled:opacity-40">{testing ? "…" : "Проверить"}</button>
+      </div>
+      {msg && <div className={`text-[11px] ${msg.ok ? "text-[var(--color-accent)]" : "text-[var(--color-warn)]"}`}>{msg.text}</div>}
+      <div className="mono text-[10px] text-[var(--color-muted)] leading-snug">Поддержка HTTP/HTTPS/SOCKS5. Действует сразу для закачки моделей и облака.</div>
     </div>
   );
 }
@@ -3610,8 +3674,9 @@ function TranscriptView() {
   const [, setPortalTick] = useState(0);                            // 2-й рендер: слот #editor-modes-slot уже в DOM (как forcePortal в Editor)
   useEffect(() => { setPortalTick(1); }, []);
   // Переключатель режимов из транскрипта (реквест Стаса #122): симметрично с Editor. transcribe НЕ переводит
-  // (tgt=исходный текст) -> переход в переводящий режим = ПОЛНЫЙ ре-анализ в новом режиме (не op-патч: иначе
-  // дубляж заговорит непереведённым текстом). После анализа projMode сменится -> отрисуется Editor.
+  // (tgt=исходный текст) -> переход в дубляж/субтитры/закадр = только ПЕРЕВОД уже готовых сегментов
+  // (retranslate, БЕЗ повторной сепарации/диаризации/ASR — текст только что распознан, незачем гонять заново).
+  // После перевода projMode сменится -> отрисуется Editor; озвучка/сборка идут на рендере, как обычно.
   const TR_MODES = [["subtitles", Captions], ["dub", AudioLines], ["voiceover", Mic2], ["funny", Sparkles], ["transcribe", FileText]] as const;
   // #122/#4: свой гейт ре-анализа. Старый `busy` — стейт СОЗДАНИЯ ГОЛОСОВ, switchMode его не ставил ->
   // двойной клик по разным режимам запускал 2 analyze. reanalyzing блокирует и дизейблит кнопки портала.
@@ -3626,19 +3691,14 @@ function TranscriptView() {
     // ни на сегментах), сравнить не с чем -> берём дефолтный целевой = язык UI (тот же дефолт, что на стартовом
     // экране: tgt = i18n.language || "ru"). Для nodub/subtitles субтитры-перевод тоже нужен валидный tgt.
     const tgt = (i18n.language as string) || p.tgt_lang || "ru";
-    // #122/#3: шаги нового режима + сброс прогресса ДО analyze (иначе «analyzing» показывает шаги прошлого прогона).
-    // Логика шагов — по образцу run(): subs здесь всегда translate, casting/detect выкл.
-    {
-      const wantVoice = mode === "dub" || mode === "voiceover";
-      const steps = ["download", "separating", "diarizing", "recognizing", "translating"];   // subs=translate -> перевод всегда
-      if (wantVoice) { steps.push("voicing"); steps.push("assembling"); }
-      setJobSteps(steps);
-    }
+    // #122/#3: транскрипт переиспользуется -> единственный шаг «перевод» (сепарация/диаризация/ASR НЕ идут).
+    // Сброс прогресса ДО retranslate (иначе «analyzing» покажет шаги прошлого прогона).
+    setJobSteps(["translating"]);
     setAudioOnly(trAudioOnly);
     setProgress("", "", null);
     setStage("analyzing");
     try {
-      const { job_id } = await api.analyze(pid, tgt, mode, "auto", "translate", "", true, false, false, p.audio.translate_style || "", false);
+      const { job_id } = await api.retranslate(pid, tgt, mode);
       await api.watchJob(job_id, (e) => { if (e.type === "progress") setProgress(e.stage || "", e.msg || "", e.pct ?? null); });
       setProject(await api.getProject(pid));
       setStage("editor");

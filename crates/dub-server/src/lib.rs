@@ -194,6 +194,14 @@ pub fn augment_path_for_tools(repo_root: &Path) {
     }
 }
 
+/// Прописать прокси из models/active.json в env процесса (если включён), чтобы стандартные HTTP-клиенты
+/// (ureq default-agent, reqwest в record.rs, Tauri-апдейтер в десктоп-процессе) шли через него. Вызывать
+/// на старте — ДО первого HTTP-запроса. Закачки моделей и облако строят клиент явно и подхватывают смену
+/// прокси без рестарта; остальному (апдейтер/метаданные HF) смена прокси требует рестарта.
+pub fn apply_proxy_env(repo_root: &Path) {
+    models::apply_proxy_env(&repo_root.join("models"));
+}
+
 /// Поднять axum-сервер БЛОКИРУЮЩЕ на собственном tokio-рантайме. Для встраивания в десктоп-оболочку ОДНИМ
 /// процессом (вместо запуска dub-server.exe отдельным subprocess) — вызывать из фонового std::thread.
 /// Слушает 127.0.0.1:port; augment PATH под инструменты делается здесь же.
@@ -202,6 +210,7 @@ pub fn serve_blocking(repo_root: impl AsRef<Path>, port: u16) -> anyhow::Result<
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         augment_path_for_tools(&root);
+        apply_proxy_env(&root);
         let state = AppState::new(&root);
         let app = build_router(state);
         let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
@@ -318,6 +327,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/engine/openrouter/models", get(endpoints::openrouter_models))
         .route("/engine/openrouter/voices", get(endpoints::openrouter_voices))
         .route("/engine/openrouter/verify", post(endpoints::openrouter_verify))
+        .route("/engine/proxy/test", post(endpoints::proxy_test))
         .route("/engine/presets", get(endpoints::presets_list))
         .route("/engine/preset", post(endpoints::preset_apply))
         // «Первый запуск»: статус компонентов + автозакачка недостающего (SSE через ту же job-машину).
@@ -359,6 +369,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects/{pid}/remix", post(endpoints::remix_project))
         .route("/projects/{pid}/render", post(render_project))
         .route("/projects/{pid}/export-lang", post(export_lang))   // клон+ре-перевод+рендер на другом языке (экспорт-уровень мультиязыка)
+        .route("/projects/{pid}/retranslate", post(retranslate_project))   // #122: смена режима из транскрипта — перевод готовых сегментов БЕЗ ASR
         .route("/projects/{pid}/waveform", get(endpoints::waveform))
         .route("/projects/{pid}/preview", get(endpoints::preview))
         .route("/projects/{pid}/output", get(output))
@@ -1722,6 +1733,102 @@ async fn export_lang(
     });
     let job_id = st.jobs.enqueue(job).await;
     Json(json!({ "job_id": job_id, "project_id": new_pid })).into_response()
+}
+
+// ─── POST /projects/{pid}/retranslate?lang=Lx&mode=<dub|voiceover|nodub> ─────
+/// Смена режима из «Транскрипта» БЕЗ повторного распознавания (реквест Стаса #122). Транскрипт уже дал
+/// сегменты (src_text + спикеры + тайминги); переход в дубляж/субтитры/закадр требует лишь ПЕРЕВОДА этих
+/// сегментов на tgt (озвучка/сборка — на рендере, как обычно). Раньше switchMode звал полный analyze ->
+/// заново гонялись сепарация/диаризация/ASR, хотя текст только что распознан. Здесь — только flat_run-перевод
+/// готовых сегментов IN-PLACE (тот же pid, без клона и без рендера) + смена p.mode. Переиспользует ту же
+/// машинерию, что export_lang, но не пересобирает видео. Диаризация/ASR НЕ трогаются.
+async fn retranslate_project(
+    State(st): State<AppState>,
+    AxPath(pid): AxPath<String>,
+    Query(q): Query<HashMap<String, String>>,
+) -> Response {
+    let lang = q.get("lang").cloned().unwrap_or_default().trim().to_string();
+    if lang.is_empty() {
+        return (StatusCode::BAD_REQUEST, "no lang").into_response();
+    }
+    // Режим-мишень: dub|voiceover|nodub (субтитры). Прочее -> дубляж (дефолт), как маппинг во фронте.
+    let mode = match q.get("mode").map(String::as_str) {
+        Some("voiceover") => "voiceover",
+        Some("nodub") => "nodub",
+        _ => "dub",
+    }
+    .to_string();
+    let dir = match st.proj_dir(&pid) {
+        Ok(d) => d,
+        Err(r) => return r,
+    };
+    if !dir.join("project.json").is_file() {
+        return (StatusCode::CONFLICT, "project not analyzed yet").into_response();
+    }
+
+    let llama_bin = st.llama_bin.clone();
+    let mt_model = st.opts.mt_model_path.clone();
+    let models_root_xl = st.models_root.clone();
+    let dir_for_job = dir.clone();
+    let pid_res = pid.clone();
+    let lang_c = lang.clone();
+    let job: jobs::JobFn = Box::new(move |progress: jobs::ProgressFn| {
+        use dub_translate::{flat_run, Seg};
+        let pj = dir_for_job.join("project.json");
+        let text = std::fs::read_to_string(&pj).map_err(|e| e.to_string())?;
+        let mut p = Project::from_json(&text).map_err(|e| e.to_string())?;
+        p.tgt_lang = lang_c.clone();
+        p.mode = mode.clone();
+        // Закадр/субтитры не переписывают текст «смешно» — сбрасываем rewrite, чтобы derived-режим во фронте
+        // не показал «funny» после перехода в dub/nodub/voiceover из транскрипта.
+        p.audio.rewrite = None;
+        let spoken = matches!(p.mode.as_str(), "dub" | "voiceover");
+        progress(json!({ "type": "progress", "stage": "translate",
+            "msg": format!("Перевод {} строк → {}", p.segments.len(), lang_c) }));
+        let prov = crate::llm_provider::open(
+            &crate::llm_provider::LlmOpen {
+                llama_bin: &llama_bin,
+                mt_model: &mt_model,
+                mmproj: std::path::Path::new(""),
+                models_root: &models_root_xl,
+            },
+            crate::llm_provider::LlmMode::Text,
+        )
+        .map_err(|e| format!("перевод: LLM недоступен — {e}"))?;
+        let client = prov.client();
+        // src_text -> Lx (тайминги/спикеры/раскладка остаются от транскрипта). Вручную добавленные фразы
+        // (пустой src_text) переводим из текущего tgt_text (как в export_lang).
+        let mut segs: Vec<Seg> = p
+            .segments
+            .iter()
+            .map(|s| {
+                let spk = crate::analyze::speaker_to_i64(s.speaker.as_deref());
+                let src = if s.src_text.trim().is_empty() { s.tgt_text.clone() } else { s.src_text.clone() };
+                Seg::new(src, spk)
+            })
+            .collect();
+        flat_run(client, &mut segs, "auto", &lang_c, spoken, &p.audio.translate_style)
+            .map_err(|e| format!("translate: {e}"))?;
+        for (s, sg) in p.segments.iter_mut().zip(segs) {
+            if !sg.tgt.trim().is_empty() {
+                s.tgt_text = sg.tgt;
+            }
+            s.dirty = true; // новый язык -> ре-TTS при рендере/озвучке
+        }
+        // Титры: text -> Lx (позиции/стиль остаются). Сбой перевода -> чистим tgt (рендер покажет исходный).
+        if !p.captions.titles.is_empty() {
+            let mut tsegs: Vec<Seg> = p.captions.titles.iter().map(|ti| Seg::new(ti.text.clone(), 0)).collect();
+            let ok = flat_run(client, &mut tsegs, "auto", &lang_c, false, &p.audio.translate_style).is_ok();
+            for (ti, sg) in p.captions.titles.iter_mut().zip(tsegs) {
+                ti.tgt = if ok && !sg.tgt.trim().is_empty() { sg.tgt } else { String::new() };
+            }
+        }
+        drop(prov);
+        save_project_atomic(&dir_for_job, &p)?;
+        Ok(json!({ "project_id": pid_res, "ok": true }))
+    });
+    let job_id = st.jobs.enqueue(job).await;
+    Json(json!({ "job_id": job_id, "project_id": pid })).into_response()
 }
 
 /// POST /projects/{pid}/dub-audio — сгенерить ТОЛЬКО озвучку (без сборки видео) -> dub_audio.m4a.

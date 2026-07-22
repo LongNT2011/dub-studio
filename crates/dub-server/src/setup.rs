@@ -1028,6 +1028,10 @@ pub fn download_components(
         return Err("нет скачиваемых компонентов среди выбранных id".to_string());
     }
 
+    // Один агент на весь job: если включён прокси — все GET (probe + чанки) идут через него. Клонируется в
+    // каждый воркер (общий пул соединений). Живая смена прокси без рестарта: агент строится из active.json тут.
+    let agent = dl_agent(repo_root);
+
     let tmp_dir = std::env::temp_dir().join("dub-studio-setup");
     let _ = std::fs::create_dir_all(&tmp_dir);
 
@@ -1102,7 +1106,7 @@ pub fn download_components(
         if cancel() {
             return Err("отменено".to_string());
         }
-        let (total, ranges_ok) = probe_size(p.url);
+        let (total, ranges_ok) = probe_size(&agent, p.url);
         comp_total[p.ci] += total;
         let dl_target: PathBuf = if p.extract == Extract::None {
             let mut s = p.target.clone().into_os_string();
@@ -1178,12 +1182,13 @@ pub fn download_components(
 
     std::thread::scope(|sc| {
         for _ in 0..n {
-            let (queue, comp_done, finished, abort, error) = (
+            let (queue, comp_done, finished, abort, error, agent) = (
                 queue.clone(),
                 comp_done.clone(),
                 finished.clone(),
                 abort.clone(),
                 error.clone(),
+                agent.clone(),
             );
             sc.spawn(move || {
                 loop {
@@ -1197,10 +1202,10 @@ pub fn download_components(
                     };
                     let res = match &task {
                         Task::Range { file, url, start, end, ci, done } => {
-                            download_range(url, file, *start, *end, &comp_done[*ci], &abort, done)
+                            download_range(&agent, url, file, *start, *end, &comp_done[*ci], &abort, done)
                         }
                         Task::Whole { url, dest, ci } => {
-                            download_whole(url, dest, &comp_done[*ci], &abort)
+                            download_whole(&agent, url, dest, &comp_done[*ci], &abort)
                         }
                     };
                     if let Err(e) = res {
@@ -1364,10 +1369,24 @@ fn write_at(f: &File, buf: &[u8], off: u64) -> std::io::Result<usize> {
     f.write_at(buf, off)
 }
 
+/// Построить ureq-агента для закачки: включён прокси в active.json -> ВСЕ GET идут через него; иначе дефолтный
+/// агент (Config::default сам подхватит HTTP(S)_PROXY из env, если он задан на старте). Некорректный URL прокси
+/// -> лог + дефолт: закачка по прямому пути честно упадёт на заблокированном соединении, а не молча пойдёт мимо
+/// прокси. Один агент на весь job (общий пул соединений) -> клонируется в воркеры (Agent = cheap Clone).
+fn dl_agent(repo_root: &Path) -> ureq::Agent {
+    if let Some(url) = crate::models::proxy_url(&repo_root.join("models")) {
+        match ureq::Proxy::new(&url) {
+            Ok(proxy) => return ureq::Agent::config_builder().proxy(Some(proxy)).build().into(),
+            Err(e) => tracing::warn!("некорректный URL прокси ({e}) — закачка без прокси; проверьте настройки"),
+        }
+    }
+    ureq::Agent::new_with_defaults()
+}
+
 /// Размер файла + поддержка byte-range: 1-байтовый ranged-пробник. HF CDN (в т.ч. Xet-CAS) отдаёт 206 +
 /// content-range на ureq-запрос (reqwest/curl-UA CAS душит 403). Порт Higgs probe_size.
-fn probe_size(url: &str) -> (u64, bool) {
-    match ureq::get(url).header("Range", "bytes=0-0").call() {
+fn probe_size(agent: &ureq::Agent, url: &str) -> (u64, bool) {
+    match agent.get(url).header("Range", "bytes=0-0").call() {
         Ok(resp) => {
             if resp.status().as_u16() == 206 {
                 let total = resp
@@ -1402,6 +1421,7 @@ const RANGE_RETRIES: u32 = 8;
 /// счётчик прогресса; на неудачной попытке откатываем её вклад, чтобы ретрай не задвоил прогресс.
 /// Обязательна проверка полноты диапазона: 206 + РОВНО (end-start+1) байт, иначе дыра в файле = битый GGUF.
 fn download_range(
+    agent: &ureq::Agent,
     url: &str,
     file: &Arc<File>,
     start: u64,
@@ -1417,7 +1437,7 @@ fn download_range(
             return Err("отменено".into());
         }
         let mut got = 0u64;
-        let res = download_range_once(url, file, start, end, downloaded, abort, &mut got);
+        let res = download_range_once(agent, url, file, start, end, downloaded, abort, &mut got);
         match res {
             Ok(()) if got == want => {
                 // WRITE-AHEAD DURABILITY: сначала fsync ДАННЫХ чанка в .part, ТОЛЬКО потом отметка в манифесте.
@@ -1446,6 +1466,7 @@ fn download_range(
 
 /// Одна попытка скачать диапазон. Пишет got = сколько байт реально записано (для отката прогресса).
 fn download_range_once(
+    agent: &ureq::Agent,
     url: &str,
     file: &Arc<File>,
     start: u64,
@@ -1454,7 +1475,8 @@ fn download_range_once(
     abort: &Arc<AtomicBool>,
     got: &mut u64,
 ) -> Result<(), String> {
-    let resp = ureq::get(url)
+    let resp = agent
+        .get(url)
         .header("Range", &format!("bytes={start}-{end}"))
         .call()
         .map_err(|e| format!("range {start}-{end}: {e}"))?;
@@ -1489,13 +1511,14 @@ fn download_range_once(
 
 /// Скачать файл ЦЕЛИКОМ в один поток (fallback: сервер без range), обновляя ОБЩИЙ счётчик пула. abort -> стоп.
 fn download_whole(
+    agent: &ureq::Agent,
     url: &str,
     dest: &Path,
     downloaded: &Arc<AtomicU64>,
     abort: &Arc<AtomicBool>,
 ) -> Result<(), String> {
     use std::io::Write;
-    let resp = ureq::get(url).call().map_err(|e| format!("GET {url}: {e}"))?;
+    let resp = agent.get(url).call().map_err(|e| format!("GET {url}: {e}"))?;
     let mut reader = resp.into_body().into_reader();
     let mut file = File::create(dest).map_err(|e| format!("создать {}: {e}", dest.display()))?;
     let mut buf = [0u8; 262_144];
