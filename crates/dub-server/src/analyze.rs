@@ -598,6 +598,8 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         vocals16.clone()
     };
     bench.stage("diarize");
+    // Backend диаризации (onnx CUDA-EP / CPU) — exec_config читает DUB_ASR_BACKEND при создании сессии.
+    std::env::set_var("DUB_ASR_BACKEND", crate::models::stage_backend(&paths.models_root, "diar_backend"));
     emit(progress, "diarize", "диаризация (Sortformer)");
     let diar = if want_diar && paths.sortformer_onnx.is_file() {
         match dub_asr::turns(&asr_wav, &paths.sortformer_onnx, 0.8, 2.5) {
@@ -694,6 +696,8 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     } else {
         // Движок выбран настройкой (Parakeet/Whisper) — analyze не знает деталей (build_engine).
         bench.stage("asr");
+        // Backend локального ASR (Parakeet onnx CUDA-EP/CPU, Whisper cuda/cpu) — до создания движка/сессии.
+        std::env::set_var("DUB_ASR_BACKEND", crate::models::stage_backend(&paths.models_root, "asr_backend"));
         let mut asr = crate::models::build_engine(&paths.asr);
         match &diar {
         Some(d) if d.n_speakers > 1 && !d.turns.is_empty() => {

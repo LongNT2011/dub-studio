@@ -115,6 +115,9 @@ fn ensure_ort_dylib() {
             // GPU-сборка (cuda13) ПРИОРИТЕТНЕЕ: она суперсет — умеет и CPU-провайдер, и CUDA-EP. Если
             // скачана, грузим её, чтобы переключение backend gpu<->cpu работало БЕЗ рестарта (dll
             // фиксируется в процессе при первом касании ort; выбор провайдера — уже в exec_config).
+            // GPU-сборка распаковывается в папку onnxruntime-win-x64-gpu-1.24.2 (БЕЗ _cuda13, хотя zip
+            // называется gpu_cuda13); держим оба варианта имени на случай иной раскладки.
+            cands.push(r.join("runtime").join("onnxruntime-win-x64-gpu-1.24.2").join("lib").join("onnxruntime.dll"));
             cands.push(r.join("runtime").join("onnxruntime-win-x64-gpu_cuda13-1.24.2").join("lib").join("onnxruntime.dll"));
             cands.push(r.join("runtime").join("onnxruntime-win-x64-1.24.2").join("lib").join("onnxruntime.dll"));
         }

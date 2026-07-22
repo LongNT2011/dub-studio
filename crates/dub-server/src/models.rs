@@ -73,9 +73,10 @@ pub fn is_selection_key(key: &str) -> bool {
     matches!(
         key,
         "tts" | "asr" | "mt" | "sep" | "asr_engine" | "whisper_model" | "whisper_compute" | "whisper_device"
-            // Локальный backend вычислений (сепарация/диаризация/локальные ASR/TTS): auto|gpu|cpu.
-            // gpu = CUDA, cpu = без NVIDIA (сепарация CPU-сборкой, whisper cpu, onnx CPU-провайдер).
-            | "local_backend"
+            // Backend КАЖДОЙ локальной стадии независимо (auto|gpu|cpu): любой движок на любой инстанс.
+            // gpu = CUDA, cpu = без NVIDIA. sep=сепарация(BSRoformer CUDA/CPU-сборка), diar=диаризация
+            // (Sortformer onnx CUDA-EP/CPU), asr=локальный ASR (Parakeet onnx / Whisper CTranslate2).
+            | "local_backend" | "sep_backend" | "diar_backend" | "asr_backend"
             // Лимиты RAM (видимые контролы в настройках, НЕ авто-магия): против OOM на слабой памяти.
             | "llama_ubatch"    // размер prefill-батча Gemma (меньше = меньше пиковый буфер графа prefill)
             | "higgs_ref_secs"  // длина реф-клипа клона голоса (меньше = меньше prefill Higgs; <12с спасает 32ГБ)
@@ -97,20 +98,27 @@ pub fn is_selection_key(key: &str) -> bool {
     )
 }
 
-/// Локальный backend вычислений (сепарация, диаризация, локальные ASR/TTS): "gpu"|"cpu".
-/// Ключ `local_backend`: "cpu"/"gpu" перекрывают; "auto"/пусто -> по факту наличия NVIDIA-драйвера.
-pub fn local_backend(mroot: &Path) -> &'static str {
-    match pick(&load_selection(mroot), "local_backend") {
-        Some("cpu") => "cpu",
-        Some("gpu") | Some("cuda") => "gpu",
-        _ => {
-            if crate::setup::detect_driver() {
-                "gpu"
-            } else {
-                "cpu"
-            }
+/// Backend конкретной локальной стадии по ключу (sep_backend/diar_backend/asr_backend): "cpu"/"gpu"
+/// перекрывают; "auto"/пусто -> сначала общий local_backend, затем по факту NVIDIA-драйвера.
+/// Любой движок на любой инстанс — стадии независимы.
+pub fn stage_backend(mroot: &Path, key: &str) -> &'static str {
+    let sel = load_selection(mroot);
+    let pick_bk = |k: &str| -> Option<&'static str> {
+        match pick(&sel, k) {
+            Some("cpu") => Some("cpu"),
+            Some("gpu") | Some("cuda") => Some("gpu"),
+            _ => None,
         }
-    }
+    };
+    pick_bk(key)
+        .or_else(|| if key == "local_backend" { None } else { pick_bk("local_backend") })
+        .unwrap_or(if crate::setup::detect_driver() { "gpu" } else { "cpu" })
+}
+
+/// Глобальный backend локальных стадий (обратная совместимость: пресеты/старые вызовы).
+/// Per-stage: `stage_backend(mroot, "<sep|diar|asr>_backend")`.
+pub fn local_backend(mroot: &Path) -> &'static str {
+    stage_backend(mroot, "local_backend")
 }
 
 /// API-ключ OpenRouter из active.json (локальное хранение, десктоп). Пусто/нет -> None.
@@ -271,8 +279,8 @@ pub fn resolve_asr_choice(repo_root: &Path, mroot: &Path, sel: &Value) -> AsrCho
             // имена версионные (cublas64_13 ≠ cublas64_11), cuDNN в дистрибутиве нет вообще. Поэтому:
             // либы лежат -> cuda (GPU в разы быстрее на длинных), нет -> честный cpu БЕЗ попыток и
             // фолбэков. Явная настройка whisper_device перекрывает авто-детект.
-            // Backend локальных стадий перекрывает авто: cpu -> строго cpu; иначе cuda если либы рядом.
-            let auto_dev = if local_backend(mroot) == "cpu" {
+            // Backend стадии ASR перекрывает авто: cpu -> строго cpu; иначе cuda если либы рядом.
+            let auto_dev = if stage_backend(mroot, "asr_backend") == "cpu" {
                 "cpu"
             } else if whisper_cuda_libs_present(&bin) {
                 "cuda"

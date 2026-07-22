@@ -229,6 +229,19 @@ function ModelsSection() {
         className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${cloud ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"} disabled:opacity-40`}>OpenRouter</button>
     </div>
   );
+  // На чём считать стадию (устройство): Авто / GPU (CUDA) / CPU — свои табы в каждом разделе, по
+  // аналогии с провайдерами. Независимый ключ на стадию (sep_backend / diar_backend / asr_backend).
+  const BackendTabs = ({ k }: { k: string }) => {
+    const cur = selv(k) || "auto";
+    return (
+      <div className="flex gap-1 mb-1.5">
+        {([["auto", "Авто"], ["gpu", "GPU (CUDA)"], ["cpu", "CPU"]] as const).map(([id, label]) => (
+          <button key={id} onClick={() => setSel(k, id)}
+            className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${cur === id ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>{label}</button>
+        ))}
+      </div>
+    );
+  };
   const orSelectCls = "w-full bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none";
   const OrModelSelect = ({ kind, k, empty }: { kind: "llm" | "vision" | "tts" | "asr"; k: string; empty: string }) => (
     <select value={selv(k)} onChange={(e) => setSel(k, e.target.value)} className={orSelectCls}>
@@ -300,6 +313,8 @@ function ModelsSection() {
             );
           })}
         </div>
+        {/* Локальный ASR (Parakeet/Whisper) — на чём считать: свои табы устройства. */}
+        {selv("or_asr_on") !== "1" && <BackendTabs k="asr_backend" />}
         {selv("or_asr_on") === "1" ? (
           <div className={`${orRowCls} space-y-2`}>
             <OrModelSelect kind="asr" k="or_asr" empty="— выбрать STT-модель —" />
@@ -350,28 +365,17 @@ function ModelsSection() {
         )}
       </Group>
       <Group label={t("settings.roleSep")}>
-        {/* Локальный backend вычислений (сепарация/диаризация/локальный ASR): GPU (CUDA) или CPU. Один
-            глобальный ключ local_backend; ниже показываем движок сепарации под выбранный backend. */}
-        <div className="px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
-          <div className="flex items-center gap-2.5">
-            <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--color-muted)]" />
-            <div className="min-w-0 flex-1">
-              <div className="text-[12px] font-medium truncate">Вычисления: GPU / CPU</div>
-              <div className="mono text-[10px] text-[var(--color-muted)] truncate">сепарация · диаризация · локальный ASR</div>
-            </div>
-            <select value={selv("local_backend") || "auto"} onChange={(e) => setSel("local_backend", e.target.value)}
-              className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none">
-              <option value="auto">Авто</option>
-              <option value="gpu">GPU (CUDA)</option>
-              <option value="cpu">CPU (без NVIDIA)</option>
-            </select>
-          </div>
-        </div>
+        {/* На чём считать сепарацию — свои табы (GPU CUDA-сборка / CPU-сборка BSRoformer). */}
+        <BackendTabs k="sep_backend" />
         <VariantPicker base="Mel-Band Roformer voc_fv6" ids={["roformer", "roformer-q5", "roformer-q4"]} />
-        {selv("local_backend") === "cpu" ? rowOf("bsroformer-engine-cpu") : rowOf("bsroformer-engine")}
+        {selv("sep_backend") === "cpu" ? rowOf("bsroformer-engine-cpu") : rowOf("bsroformer-engine")}
       </Group>
-      <Group label={t("settings.roleDiar")}>{rowOf("sortformer")}</Group>
-      <Group label={t("settings.roleRuntime")}>{rowOf("onnxruntime")}{selv("local_backend") === "gpu" && rowOf("onnxruntime-gpu")}{selv("local_backend") === "gpu" && rowOf("cudnn")}{rowOf("ffmpeg")}{rowOf("cuda-runtime")}{rowOf("vcruntime")}{rowOf("ocr")}</Group>
+      <Group label={t("settings.roleDiar")}>
+        {/* На чём считать диаризацию — свои табы (Sortformer onnx: CUDA-EP / CPU-провайдер). */}
+        <BackendTabs k="diar_backend" />
+        {rowOf("sortformer")}
+      </Group>
+      <Group label={t("settings.roleRuntime")}>{rowOf("onnxruntime")}{(selv("diar_backend") === "gpu" || selv("asr_backend") === "gpu") && rowOf("onnxruntime-gpu")}{(selv("diar_backend") === "gpu" || selv("asr_backend") === "gpu") && rowOf("cudnn")}{rowOf("ffmpeg")}{rowOf("cuda-runtime")}{rowOf("vcruntime")}{rowOf("ocr")}</Group>
       {/* Производительность / экономия RAM — ВИДИМЫЕ контролы (не авто-магия): против OOM на слабой памяти. */}
       <Group label={t("settings.perfTitle")}>
         {[

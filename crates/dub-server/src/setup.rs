@@ -588,7 +588,7 @@ pub fn manifest() -> Vec<Component> {
             files: &[
                 FileSpec { url: GH_ORT_GPU, dest_rel: "models/runtime/_ort_gpu.zip", size: 288_348_147, extract: Extract::ZipTree },
             ],
-            markers: &[Marker { rel: "models/runtime/onnxruntime-win-x64-gpu_cuda13-1.24.2/lib/onnxruntime.dll", expect: 0 }],
+            markers: &[Marker { rel: "models/runtime/onnxruntime-win-x64-gpu-1.24.2/lib/onnxruntime.dll", expect: 0 }],
             external_url: None,
         },
         Component {
