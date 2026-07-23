@@ -35,7 +35,7 @@ mime_guess = "2"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls"] }
 # Многопоточная (aria2-style) загрузка byte-range'ами через ureq (метод Higgs-Ultimate). HF Xet-CAS отдаёт
 # 206 на Range-запросы с ureq-UA (reqwest/curl-UA душит 403). Параллельные диапазоны сатурируют канал HF CDN.
-ureq = "3"
+ureq = { version = "3", features = ["socks-proxy"] }   # socks-proxy: без него socks5:// паникует «Enable feature socks-proxy»
 zip = { version = "3", default-features = false, features = ["deflate"] }
 # монитор ресурсов: GPU через NVML, RAM/CPU через sysinfo.
 nvml-wrapper = "0.10"
