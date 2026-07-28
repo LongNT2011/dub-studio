@@ -153,6 +153,12 @@ const WHEEL_CUDNN: &str = "https://files.pythonhosted.org/packages/18/d4/c09b113
 // (сборка cuda13) импортит именно cufft64_12.dll — без него CUDA-EP не грузится («CUDA not enabled»). cudart/
 // cublas _13 у нас уже есть (cuda-runtime), cuFFT сохраняет soname 12 даже в CUDA 13. Извлекается как *.dll плоско.
 const REDIST_CUFFT: &str = "https://developer.download.nvidia.com/compute/cuda/redist/libcufft/windows-x86_64/libcufft-windows-x86_64-12.0.0.61-archive.zip";
+// CUDA-либы для whisper-faster r192.3 (CTranslate2, собран под CUDA 11!): нужны РЯДОМ с exe
+// (cublas64_11 + cudnn64_8), иначе GPU-режим Whisper падает «cublas64_11.dll not found» -> откат на CPU.
+// ВАЖНО: не-XXL сборка = CUDA 11 (cublas64_11), XXL = CUDA 12 (cublas64_12) — РАЗНЫЕ. Версии те, что
+// валидировал Purfview (cuBLAS 11.11.3.6 + cuDNN 8.9.7.29), но zip'ы у NVIDIA (WheelDlls тянет *.dll плоско).
+const REDIST_WHISPER_CUBLAS: &str = "https://developer.download.nvidia.com/compute/cuda/redist/libcublas/windows-x86_64/libcublas-windows-x86_64-11.11.3.6-archive.zip";
+const REDIST_WHISPER_CUDNN: &str = "https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/windows-x86_64/cudnn-windows-x86_64-8.9.7.29_cuda11-archive.zip";
 // Страница драйверов NVIDIA (кнопка «Открыть сайт» — драйвер DLL-кой не ставится).
 pub const NVIDIA_DRIVER_URL: &str = "https://www.nvidia.com/Download/index.aspx";
 
@@ -350,6 +356,26 @@ pub fn manifest() -> Vec<Component> {
                 FileSpec { url: "https://github.com/Purfview/whisper-standalone-win/releases/download/faster-whisper/Whisper-Faster_r192.3_windows.zip", dest_rel: "tools/whisper/_whisper.zip", size: 0, extract: Extract::ZipFlat },
             ],
             markers: &[Marker { rel: "tools/whisper/whisper-faster.exe", expect: 0 }],
+            external_url: None,
+        },
+        // CUDA-либы для GPU-режима Whisper (cuBLAS 12 + cuDNN 8) РЯДОМ с whisper-faster.exe. Без них
+        // whisper-faster (CTranslate2) не видит CUDA и падает на CPU — «GPU выбран, а работает на CPU».
+        // Качается по запросу, когда стартует Whisper-джоба на GPU (см. ensure_job_components).
+        Component {
+            id: "whisper-cuda",
+            name: "CUDA-ускорение Whisper (cuBLAS + cuDNN)",
+            purpose: "GPU-инференс Whisper (иначе распознавание идёт на CPU, в разы медленнее)",
+            requirement: Requirement::Optional,
+            delivery: Delivery::Download,
+            size: 1_125_090_089,
+            files: &[
+                FileSpec { url: REDIST_WHISPER_CUBLAS, dest_rel: "tools/whisper/_wcublas.zip", size: 0, extract: Extract::WheelDlls },
+                FileSpec { url: REDIST_WHISPER_CUDNN, dest_rel: "tools/whisper/_wcudnn.zip", size: 0, extract: Extract::WheelDlls },
+            ],
+            markers: &[
+                Marker { rel: "tools/whisper/cublas64_11.dll", expect: 0 },
+                Marker { rel: "tools/whisper/cudnn64_8.dll", expect: 0 },
+            ],
             external_url: None,
         },
         Component {

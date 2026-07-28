@@ -518,6 +518,16 @@ fn ensure_job_components(
             }
         }
     }
+    // Whisper на GPU: CTranslate2 требует cuBLAS12 + cuDNN8 РЯДОМ с whisper-faster.exe (наш ONNX-стек
+    // выше — CUDA 13, whisper'у не подходит). Без них whisper молча идёт на CPU. Тянем их только когда
+    // движок ASR = Whisper И стадия ASR на GPU.
+    let asr_whisper = models::load_selection(models_root)
+        .get("asr_engine")
+        .and_then(|v| v.as_str())
+        == Some("whisper");
+    if asr_whisper && models::stage_backend(models_root, "asr_backend") == "gpu" && missing("whisper-cuda") {
+        need.push("whisper-cuda".to_string());
+    }
     if need.is_empty() {
         return Ok(());
     }
