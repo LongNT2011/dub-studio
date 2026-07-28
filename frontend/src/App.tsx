@@ -1800,6 +1800,18 @@ function CastingPanel({ pid, characters, voices, onChange }: {
   );
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  // Облачный TTS (OpenRouter): в кастинге выбираем ОБЛАЧНЫЕ голоса модели, а не локальную библиотеку клонов.
+  // Пусто у персонажа -> автокастинг по полу на рендере. Флаг + список тянем из настроек/каталога модели.
+  const [cloudOn, setCloudOn] = useState(false);
+  const [cloudVoices, setCloudVoices] = useState<{ name: string; gender: string }[]>([]);
+  useEffect(() => {
+    api.capabilities().then((cap) => {
+      const on = (cap.selection?.or_tts_on ?? "") === "1";
+      setCloudOn(on);
+      const model = cap.selection?.or_tts_model ?? "";
+      if (on && model) api.openrouterVoices(model).then((r) => setCloudVoices(r.voices.map((v) => ({ name: v.name, gender: v.gender })))).catch(() => {});
+    }).catch(() => {});
+  }, []);
   // Аватарки без кадра (sample_frame_url=null, напр. закадровый) или с битой ссылкой -> заглушка-инициал.
   const [imgFail, setImgFail] = useState<Record<string, boolean>>({});
   // #115/#6: characters могут обновиться извне (после apply() cross-episode-матчинг возвращает ДРУГИЕ id;
@@ -1820,7 +1832,9 @@ function CastingPanel({ pid, characters, voices, onChange }: {
   const setField = (id: string, patch: Partial<{ name: string; speech_note: string; voice: string | null }>) => {
     setDraft((d) => ({ ...d, [id]: { ...d[id], ...patch } })); setSaved(false);
   };
-  const voiceOpts = voices.map((v) => ({ value: v, label: prettyVoice(v), search: v }));
+  const voiceOpts = cloudOn
+    ? cloudVoices.map((v) => ({ value: v.name, label: v.gender ? `${prettyVoice(v.name)} · ${v.gender}` : prettyVoice(v.name), search: v.name }))
+    : voices.map((v) => ({ value: v, label: prettyVoice(v), search: v }));
   // Инициал имени (или «?») для заглушки-аватара; цвет из палитры спикеров (как кружки в TranscriptView).
   const initialOf = (name: string) => (name.trim()[0] ?? "?").toUpperCase();
   const avatarColor = (i: number) => SPK_PALETTE[i % SPK_PALETTE.length];
@@ -1963,7 +1977,7 @@ function CastingPanel({ pid, characters, voices, onChange }: {
                         текст «clone» (иначе значение не из списка и автокомплит выглядит сломанным). */}
                     <Combobox value={d.voice && d.voice.toLowerCase() !== "clone" ? d.voice : ""}
                       onChange={(v) => setField(c.id, { voice: v || null })} options={voiceOpts}
-                      placeholder={t("casting.voiceClone")} noResults={t("voice.noMatch")} allowClear size="sm" className="w-full" />
+                      placeholder={cloudOn ? "— автокастинг по полу —" : t("casting.voiceClone")} noResults={t("voice.noMatch")} allowClear size="sm" className="w-full" />
                   </div>
                 </div>
               </div>

@@ -1070,13 +1070,17 @@ async fn casting_save(
             }
         }
     }
-    // Валидация голосов: непустой не-"clone" должен существовать в voices/.
-    let available: std::collections::BTreeSet<String> =
-        list_voice_names(&st.voices_dir).into_iter().collect();
-    for c in &casting.characters {
-        let v = c.dub_voice.trim();
-        if !v.is_empty() && !v.eq_ignore_ascii_case("clone") && !available.contains(v) {
-            return (StatusCode::BAD_REQUEST, format!("голос {v:?} не найден в voices/")).into_response();
+    // Валидация голосов. В ОБЛАЧНОМ TTS-режиме (OpenRouter) имена — облачные голоса, локального файла в
+    // voices/ у них нет: проверку против voices/ пропускаем (cloud TTS сам примет имя голоса при синтезе).
+    // Локальный режим — как раньше: непустой не-"clone" должен существовать в voices/.
+    if !crate::models::openrouter_stage_on(&st.models_root, "tts") {
+        let available: std::collections::BTreeSet<String> =
+            list_voice_names(&st.voices_dir).into_iter().collect();
+        for c in &casting.characters {
+            let v = c.dub_voice.trim();
+            if !v.is_empty() && !v.eq_ignore_ascii_case("clone") && !available.contains(v) {
+                return (StatusCode::BAD_REQUEST, format!("голос {v:?} не найден в voices/")).into_response();
+            }
         }
     }
 

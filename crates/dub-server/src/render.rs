@@ -728,28 +728,47 @@ fn build_dub(
     // разным спикерам — разные. Пол — F0-замер (как в кастинге), голоса модели — динамически из API, пол
     // голоса — из спеки провайдера. Только в облачном режиме (локальный Higgs клонирует реальные рефы).
     // Пусто -> облачный TTS уйдёт на дефолтный голос настроек (or_tts_voice).
-    let cloud_voice_map: std::collections::HashMap<String, String> = if cloud_tts_on
-        && crate::models::openrouter_autocast(&paths.models_root)
-    {
-        let mut spk_ids: Vec<String> = proj
-            .segments
-            .iter()
-            .map(|s| s.speaker.clone().unwrap_or_else(|| "0".into()))
-            .collect();
-        spk_ids.sort();
-        spk_ids.dedup();
-        let genders = crate::casting::speaker_genders_wd(&paths.work_dir, proj, &spk_ids);
-        let m = crate::cloud_voices::assign(&paths.models_root, &genders, &proj.tgt_lang);
-        if !m.is_empty() {
-            let mut desc: Vec<String> = m
+    let cloud_voice_map: std::collections::HashMap<String, String> = if cloud_tts_on {
+        let mut m: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        // (1) РУЧНОЙ выбор голосов из кастинга: proj.audio.voice — CSV, позиционный по отсортированным
+        // спикерам (как локальный пак-путь выше). В облачном режиме имена = ОБЛАЧНЫЕ голоса (casting_apply
+        // их не валидирует против локальных voices/). "-"/пусто -> не задан, добьёт автокаст.
+        if proj.audio.voice.mode == "voice" {
+            let names: Vec<&str> =
+                proj.audio.voice.name.as_deref().unwrap_or("").split(',').map(|s| s.trim()).collect();
+            let sorted: Vec<String> = proj
+                .segments
                 .iter()
-                .map(|(k, v)| {
-                    let g = genders.get(k).map(String::as_str).unwrap_or("?");
-                    format!("{k}({g})→{v}")
-                })
+                .map(|s| s.speaker.clone().unwrap_or_else(|| "0".to_string()))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
                 .collect();
+            for (i, spk) in sorted.iter().enumerate() {
+                if let Some(nm) = names.get(i).copied() {
+                    if !nm.is_empty() && nm != crate::voice_slots::CLONE_SLOT {
+                        m.insert(spk.clone(), nm.to_string());
+                    }
+                }
+            }
+        }
+        // (2) АВТОКАСТ по полу спикера добивает тех, кому голос вручную не назначен.
+        if crate::models::openrouter_autocast(&paths.models_root) {
+            let mut spk_ids: Vec<String> = proj
+                .segments
+                .iter()
+                .map(|s| s.speaker.clone().unwrap_or_else(|| "0".into()))
+                .collect();
+            spk_ids.sort();
+            spk_ids.dedup();
+            let genders = crate::casting::speaker_genders_wd(&paths.work_dir, proj, &spk_ids);
+            for (spk, v) in crate::cloud_voices::assign(&paths.models_root, &genders, &proj.tgt_lang) {
+                m.entry(spk).or_insert(v);
+            }
+        }
+        if !m.is_empty() {
+            let mut desc: Vec<String> = m.iter().map(|(k, v)| format!("{k}→{v}")).collect();
             desc.sort();
-            emit(progress, "tts", &format!("автокастинг облачных голосов: {}", desc.join(", ")));
+            emit(progress, "tts", &format!("облачные голоса по спикерам: {}", desc.join(", ")));
         }
         m
     } else {
