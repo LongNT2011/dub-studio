@@ -224,8 +224,9 @@ pub fn run(
         if is_dub || new_audio != paths.input {
             media::mux(&captioned, &new_audio, &out_path)?;
         } else {
-            // nodub: тянем аудио из исходного видео (captioned без звука) -> mux исходной дорожки.
-            media::mux(&captioned, &paths.input, &out_path)?;
+            // nodub/транскрипт: дубляжа нет — оригинальную дорожку КОПИРУЕМ без перекода (каналы 5.1/
+            // частота/битрейт как есть). Раньше mux() форсил stereo+AAC и портил звук на ровном месте.
+            media::mux_keep_audio(&captioned, &paths.input, &out_path)?;
         }
     }
     // MKV-компаньон (#116, находка [3]): WebView2 не играет Matroska -> плеер редактора мёртв. Всегда

@@ -427,7 +427,22 @@ pub fn mux(video: &Path, audio: &Path, out: &Path) -> Result<(), String> {
         OsStr::new("-y"), OsStr::new("-i"), video.as_os_str(), OsStr::new("-i"), audio.as_os_str(),
         OsStr::new("-map"), OsStr::new("0:v:0"), OsStr::new("-map"), OsStr::new("1:a:0?"),
         OsStr::new("-af"), OsStr::new("aformat=channel_layouts=stereo"),
+        // Дубляж-микс перекодируется в AAC — держим высокий битрейт (256k), чтобы не терять качество (дефолт
+        // ffmpeg ~128k занижал звук). Это ТОЛЬКО для сгенерированного дубляжа; оригинал идёт через mux_keep_audio.
         OsStr::new("-c:v"), OsStr::new("copy"), OsStr::new("-c:a"), OsStr::new("aac"),
+        OsStr::new("-b:a"), OsStr::new("256k"),
+        OsStr::new("-movflags"), OsStr::new("+faststart"), out.as_os_str(),
+    ])
+}
+
+/// Смуксить видео (copy) + ОРИГИНАЛЬНУЮ аудиодорожку БЕЗ перекодирования (`-c:a copy`). Для режимов, где
+/// звук не трогаем (субтитры/транскрипт): сохраняем оригинал байт-в-байт — каналы (5.1/стерео), частоту,
+/// битрейт, кодек. НИКАКОГО aformat/downmix (он рушил 6ch→stereo) и никакого переэнкода (терял качество).
+pub fn mux_keep_audio(video: &Path, source_with_audio: &Path, out: &Path) -> Result<(), String> {
+    run_ff(&[
+        OsStr::new("-y"), OsStr::new("-i"), video.as_os_str(), OsStr::new("-i"), source_with_audio.as_os_str(),
+        OsStr::new("-map"), OsStr::new("0:v:0"), OsStr::new("-map"), OsStr::new("1:a:0?"),
+        OsStr::new("-c:v"), OsStr::new("copy"), OsStr::new("-c:a"), OsStr::new("copy"),
         OsStr::new("-movflags"), OsStr::new("+faststart"), out.as_os_str(),
     ])
 }
@@ -461,9 +476,9 @@ pub fn iso639_1_to_2(code: &str) -> &'static str {
 }
 
 /// Смуксить видео (copy) + ДВЕ звуковые дорожки: дубляж (default, 1-я) + оригинал (2-я). MP4/MKV по
-/// расширению `out`. Дубляж перекодируется в AAC (mono-дубляж от hound требует нормализации layout),
-/// оригинал ВСЕГДА перекодируется в AAC (без ffprobe-джсона кодек не определить — перекод только аудио
-/// дёшев). БЕЗ -shortest. Метки языка (ISO 639-2) и человекочитаемые title'ы кладутся в metadata дорожек;
+/// расширению `out`. Дубляж перекодируется в AAC 256k (сгенерированный микс), а оригинал КОПИРУЕТСЯ без
+/// перекода (`-c:a copy`) — сохраняем каналы (5.1)/частоту/битрейт/кодек как есть, никакой деградации.
+/// БЕЗ -shortest. Метки языка (ISO 639-2) и человекочитаемые title'ы кладутся в metadata дорожек;
 /// disposition:a:0 default помечает дубляж дорожкой по умолчанию, оригинал — недефолтной. +faststart на mp4.
 #[allow(clippy::too_many_arguments)]
 pub fn mux_multitrack(
@@ -495,12 +510,12 @@ pub fn mux_multitrack(
         // без `?`: вызов гарантирует аудио в источнике (has_audio) — иначе -disposition:a:1 валит команду.
         OsStr::new("-map"), OsStr::new("2:a:0"),
         OsStr::new("-c:v"), OsStr::new("copy"),
-        // дубляж (a:0)
-        OsStr::new("-c:a:0"), OsStr::new("aac"), OsStr::new("-b:a:0"), OsStr::new("192k"),
+        // дубляж (a:0) — сгенерированный микс, перекод в AAC на высоком битрейте (256k)
+        OsStr::new("-c:a:0"), OsStr::new("aac"), OsStr::new("-b:a:0"), OsStr::new("256k"),
         OsStr::new("-metadata:s:a:0"), OsStr::new(&dl),
         OsStr::new("-metadata:s:a:0"), OsStr::new(&dt),
-        // оригинал (a:1) — всегда перекод в AAC (кодек источника без ffprobe не знаем)
-        OsStr::new("-c:a:1"), OsStr::new("aac"), OsStr::new("-b:a:1"), OsStr::new("192k"),
+        // оригинал (a:1) — КОПИЯ без перекода: сохраняем каналы (5.1)/частоту/битрейт/кодек как в источнике
+        OsStr::new("-c:a:1"), OsStr::new("copy"),
         OsStr::new("-metadata:s:a:1"), OsStr::new(&ol),
         OsStr::new("-metadata:s:a:1"), OsStr::new(&ot),
         OsStr::new("-disposition:a:0"), OsStr::new("default"),
