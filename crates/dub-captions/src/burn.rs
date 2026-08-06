@@ -12,6 +12,32 @@ const FFMPEG: &str = "ffmpeg.exe";
 #[cfg(not(windows))]
 const FFMPEG: &str = "ffmpeg";
 
+/// Ключ передачи filtergraph ФАЙЛОМ. ffmpeg 8.0 УДАЛИЛ `-filter_complex_script` (был deprecated с 7.0):
+/// на свежих сборках burn падал с «Unrecognized option 'filter_complex_script'» — issue #1. Универсальная
+/// замена `-/filter_complex` (общий префикс `/` = «значение опции лежит в файле») есть с 7.0, поэтому:
+/// major >= 7 -> новый ключ, старее -> прежний. Версию спрашиваем у самого ffmpeg ОДИН раз за процесс.
+pub fn filter_script_flag() -> &'static str {
+    static FLAG: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    FLAG.get_or_init(|| {
+        let major = Command::new(FFMPEG)
+            .arg("-version")
+            .output()
+            .ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .and_then(|s| {
+                // "ffmpeg version 7.1-essentials_build-..." / "ffmpeg version n8.0" / "... version 2026-07-21-git-..."
+                let v = s.split("version").nth(1)?.trim_start().trim_start_matches('n');
+                v.split(['.', '-', ' ']).next()?.parse::<u32>().ok()
+            });
+        // Неизвестная версия (git-сборки с датой вместо номера) -> новый ключ: он и есть актуальный,
+        // а старый в свежих сборках уже удалён.
+        match major {
+            Some(m) if m < 7 => "-filter_complex_script",
+            _ => "-/filter_complex",
+        }
+    })
+}
+
 /// Последние ~1000 символов stderr ffmpeg (в исходном порядке) — для лаконичных сообщений об ошибке.
 fn stderr_tail(stderr: &[u8]) -> String {
     let err = String::from_utf8_lossy(stderr);
@@ -196,7 +222,7 @@ pub fn burn(
         let graph_file = out.with_extension("filter");
         std::fs::write(&graph_file, &graph).map_err(|e| format!("filter-скрипт: {e}"))?;
         vec![
-            "-filter_complex_script".into(),
+            filter_script_flag().into(),
             graph_file.to_string_lossy().into_owned(),
             "-map".into(),
             "[outv]".into(),
@@ -366,7 +392,7 @@ pub fn burn_frame(
         let graph_file = out_png.with_extension("filter");
         std::fs::write(&graph_file, &graph).map_err(|e| format!("filter-скрипт: {e}"))?;
         vec![
-            "-filter_complex_script".into(),
+            filter_script_flag().into(),
             graph_file.to_string_lossy().into_owned(),
             "-map".into(),
             "[outv]".into(),
@@ -396,4 +422,34 @@ pub fn burn_frame(
         return Err(format!("ffmpeg preview frame failed:\n{tail}"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod filter_flag_tests {
+    use super::*;
+
+    /// Гард issue #1: ключ filtergraph-файла должен приниматься УСТАНОВЛЕННЫМ ffmpeg (на 8.x старый
+    /// `-filter_complex_script` удалён). Нет ffmpeg в PATH -> тест пропускается.
+    #[test]
+    fn filter_script_flag_accepted_by_local_ffmpeg() {
+        let flag = filter_script_flag();
+        assert!(flag == "-/filter_complex" || flag == "-filter_complex_script", "{flag}");
+        let dir = std::env::temp_dir().join("dubcap_flag_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let script = dir.join("g.txt");
+        if std::fs::write(&script, "color=c=red:s=32x32:d=0.1[outv]").is_err() {
+            return;
+        }
+        let out = dir.join("o.png");
+        let res = Command::new(FFMPEG)
+            .args(["-y", "-hide_banner", "-loglevel", "error"])
+            .arg(flag)
+            .arg(&script)
+            .args(["-map", "[outv]", "-frames:v", "1"])
+            .arg(&out)
+            .output();
+        let Ok(o) = res else { return }; // нет ffmpeg — пропускаем
+        let err = String::from_utf8_lossy(&o.stderr);
+        assert!(!err.contains("Unrecognized option"), "ffmpeg не принял {flag}: {err}");
+    }
 }

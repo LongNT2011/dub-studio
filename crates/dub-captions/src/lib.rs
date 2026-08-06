@@ -6,7 +6,7 @@
 //! метрики глифов (замена PIL) — font. Строки ASS формируются один-в-один с питоном.
 
 mod ass;
-mod burn;
+pub mod burn;
 mod font;
 mod look;
 mod timing_qc;

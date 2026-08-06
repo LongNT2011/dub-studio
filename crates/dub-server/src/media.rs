@@ -388,7 +388,7 @@ fn mix_env_g(voice: &Path, music: &Path, blocks: &[SpeechBlock], g: f64, out: &P
     let secs = (duration(music).unwrap_or(0.0) * 2.0).max(600.0) as u64;
     let r = run_ff_timeout(&[
         OsStr::new("-y"), OsStr::new("-i"), voice.as_os_str(), OsStr::new("-i"), music.as_os_str(),
-        OsStr::new("-filter_complex_script"), script.as_os_str(),
+        OsStr::new(dub_captions::burn::filter_script_flag()), script.as_os_str(),
         OsStr::new("-map"), OsStr::new("[a]"),
         OsStr::new("-c:a"), OsStr::new("aac"), OsStr::new("-b:a"), OsStr::new("192k"), out.as_os_str(),
     ], secs);
