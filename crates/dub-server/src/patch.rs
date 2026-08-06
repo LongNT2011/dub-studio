@@ -278,9 +278,21 @@ fn op_recast(p: &mut Project, edit: &Value) -> PatchResult {
     Ok(())
 }
 
-/// regen — пометить ОДИН сегмент dirty (ре-TTS только его на /render). Порт app.py op=="regen".
+/// regen — пометить ОДИН сегмент dirty, а ВСЕ ДРУГИЕ сегменты — NOT dirty (ре-TTS только его на /render).
 fn op_regen(p: &mut Project, edit: &Value) -> PatchResult {
-    seg_by_id(p, edit)?.dirty = true;
+    let target_id = s(edit, "id").ok_or((400, "missing segment id".into()))?;
+    let mut found = false;
+    for s in &mut p.segments {
+        if s.id == target_id {
+            s.dirty = true;
+            found = true;
+        } else {
+            s.dirty = false;
+        }
+    }
+    if !found {
+        return Err((404, format!("segment {target_id:?} not found")));
+    }
     Ok(())
 }
 
@@ -700,8 +712,28 @@ pub fn apply(p: &mut Project, edit: &Value) -> PatchResult {
         "voiceover_gain" => op_voiceover_gain(p, edit),
         "sub_blur" => op_sub_blur(p, edit),
         "keep_original" => op_keep_original(p, edit),
+        "reorder_segments" => op_reorder_segments(p, edit),
         other => Err((400, format!("unknown op {other:?}"))),
     }
+}
+
+/// reorder_segments — изменить порядок сегментов согласно списку id в edit["ids"].
+fn op_reorder_segments(p: &mut Project, edit: &Value) -> PatchResult {
+    let new_ids = ids(edit);
+    if new_ids.is_empty() {
+        return Err((400, "reorder_segments requires non-empty ids array".into()));
+    }
+    let mut map: std::collections::HashMap<String, dub_core::Segment> =
+        p.segments.drain(..).map(|s| (s.id.clone(), s)).collect();
+    for id in &new_ids {
+        if let Some(s) = map.remove(id) {
+            p.segments.push(s);
+        }
+    }
+    for (_, s) in map {
+        p.segments.push(s);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

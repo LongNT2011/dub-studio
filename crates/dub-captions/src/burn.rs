@@ -244,7 +244,7 @@ fn run_ffmpeg(
         cmd.arg(a);
     }
     cmd.arg(out);
-    let o = output_with_timeout(cmd, BURN_TIMEOUT_SECS, true)?;
+    let o = output_with_timeout(cmd, timeout_secs, true)?;
     if !o.status.success() {
         let tail = stderr_tail(&o.stderr);
         return Err(format!("ffmpeg caption burn failed:\n{tail}"));

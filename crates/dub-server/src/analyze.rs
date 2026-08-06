@@ -324,19 +324,39 @@ pub fn speaker_to_i64(speaker: Option<&str>) -> i64 {
 /// транскрипт (<4 слов) -> нет речи.
 fn has_speech(segs: &[Segment], total: f64) -> bool {
     let mut words: Vec<String> = Vec::new();
+    let mut cjk_chars: usize = 0;
     for s in segs {
         for w in s.src_text.split(|c: char| !c.is_alphabetic()) {
             if !w.is_empty() {
                 words.push(w.to_lowercase());
             }
         }
+        cjk_chars += s.src_text.chars().filter(|c| is_cjk(*c)).count();
     }
-    if words.len() < 4 {
+    // CJK: иероглифы не разделяются пробелами — считаем символы вместо слов
+    let effective_words = words.len().max(cjk_chars);
+    if effective_words < 4 {
         return false;
     }
     let cov: f64 = segs.iter().map(|s| (s.end - s.start).max(0.0)).sum::<f64>() / total.max(0.1);
-    let uniq = words.iter().collect::<std::collections::HashSet<_>>().len() as f64 / words.len() as f64;
+    let uniq = if words.is_empty() {
+        1.0 // CJK-only: каждый иероглиф уникален по определению в этом контексте
+    } else {
+        words.iter().collect::<std::collections::HashSet<_>>().len() as f64 / words.len() as f64
+    };
     cov >= 0.10 && uniq >= 0.35
+}
+
+/// Является ли символ CJK-иероглифом (китайский, японский кандзи, корейский хангыль).
+fn is_cjk(c: char) -> bool {
+    matches!(c as u32,
+        0x4E00..=0x9FFF      // CJK Unified Ideographs
+        | 0x3400..=0x4DBF    // CJK Extension A
+        | 0x20000..=0x2A6DF  // CJK Extension B
+        | 0xAC00..=0xD7AF    // Hangul Syllables
+        | 0x3040..=0x309F    // Hiragana
+        | 0x30A0..=0x30FF    // Katakana
+    )
 }
 
 /// Разбить mode/subs как в pipeline: dub vs subs-only vs transcribe. В транскрипт-стадии нам нужно лишь
@@ -372,6 +392,18 @@ fn speaker_for(start: f64, end: f64, turns: &[dub_asr::Turn]) -> String {
         if ov > best_ov {
             best_ov = ov;
             best_spk = t.speaker;
+        }
+    }
+    // Нет перекрытия — назначаем ближайшего по времени спикера вместо дефолтного "0"
+    if best_ov <= 0.0 {
+        let mid = (start + end) / 2.0;
+        let mut best_dist = f64::MAX;
+        for t in turns {
+            let dist = ((t.start + t.end) / 2.0 - mid).abs();
+            if dist < best_dist {
+                best_dist = dist;
+                best_spk = t.speaker;
+            }
         }
     }
     best_spk.to_string()
@@ -699,74 +731,47 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         // Backend локального ASR (Parakeet onnx CUDA-EP/CPU, Whisper cuda/cpu) — до создания движка/сессии.
         std::env::set_var("DUB_ASR_BACKEND", crate::models::stage_backend(&paths.models_root, "asr_backend"));
         let mut asr = crate::models::build_engine(&paths.asr);
-        match &diar {
-        Some(d) if d.n_speakers > 1 && !d.turns.is_empty() => {
-            emit(
-                progress,
-                "asr",
-                &format!("транскрипция по репликам ({} спикеров)", d.n_speakers),
-            );
-            let mut sp = asr
-                .transcribe_turns(&asr_wav, &d.turns, &args.src_lang)
-                .map_err(|e| format!("transcribe_turns: {e}"))?;
-            // diarize-first складывает реплики ПО СПИКЕРАМ, не по времени -> сортируем по start
-            // (как segs.sort в питоне), чтобы порядок сегментов был временной.
-            sp.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
-            let segs = sp
-                .into_iter()
-                .enumerate()
-                .map(|(i, s)| Segment {
+        let turns: &[dub_asr::Turn] = diar.as_ref().map(|d| d.turns.as_slice()).unwrap_or(&[]);
+        let nsp = diar.as_ref().map(|d| d.n_speakers).unwrap_or(1).max(1);
+        emit(
+            progress,
+            "asr",
+            &format!("транскрипция единым прогоном на GPU ({} спикер(ов))", nsp),
+        );
+        let ts = asr
+            .transcribe(&asr_wav, &args.src_lang)
+            .map_err(|e| format!("transcribe: {e}"))?;
+        let segs: Vec<Segment> = ts
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let words: Vec<Value> = s
+                    .words
+                    .iter()
+                    .map(|w| json!({ "word": w.word, "start": w.start, "end": w.end }))
+                    .collect();
+                let mut extra = serde_json::Map::new();
+                extra.insert("words".into(), Value::Array(words));
+                let spk = if turns.is_empty() {
+                    "0".to_string()
+                } else {
+                    speaker_for(s.start, s.end, turns)
+                };
+                Segment {
                     id: format!("s{i}"),
                     start: s.start,
                     end: s.end,
-                    speaker: Some(s.speaker.to_string()),
+                    speaker: Some(spk),
                     src_text: s.text,
                     tgt_text: String::new(),
                     voice: None,
                     dirty: false,
                     ckpt: None,
-                    extra: Default::default(),
-                })
-                .collect();
-            (segs, d.n_speakers)
-        }
-        _ => {
-            emit(progress, "asr", "транскрипция всего клипа (single-speaker)");
-            let ts = asr
-                .transcribe(&asr_wav, &args.src_lang)
-                .map_err(|e| format!("transcribe: {e}"))?;
-            let segs = ts
-                .into_iter()
-                .enumerate()
-                .map(|(i, s)| {
-                    // words сохраняем в extra (контракт python transcript кладёт words в сегмент;
-                    // dub-core Segment не типизирует words, но extra="allow" их проносит).
-                    let words: Vec<Value> = s
-                        .words
-                        .iter()
-                        .map(|w| json!({ "word": w.word, "start": w.start, "end": w.end }))
-                        .collect();
-                    let mut extra = serde_json::Map::new();
-                    extra.insert("words".into(), Value::Array(words));
-                    Segment {
-                        id: format!("s{i}"),
-                        start: s.start,
-                        end: s.end,
-                        // питон pipeline.run пишет speaker=s.get("speaker",0)=0 для single-speaker,
-                        // и from_artifacts кладёт str(0)="0" -> держим тот же контракт.
-                        speaker: Some("0".to_string()),
-                        src_text: s.text,
-                        tgt_text: String::new(),
-                        voice: None,
-                        dirty: false,
-                        ckpt: None,
-                        extra,
-                    }
-                })
-                .collect();
-            (segs, 1)
-        }
-        }
+                    extra,
+                }
+            })
+            .collect();
+        (segs, nsp)
     };
 
     // Слияние коротких огрызков (#115): whisper режет «If they find you» на «If» + «they find you.» —

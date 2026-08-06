@@ -117,6 +117,7 @@ fn ctc_decode(flat: &[f32], t: usize, c: usize, dict: &RecDict) -> (String, f32)
 }
 
 /// Распознать текст в одном кропе (PP-OCR rec + CTC greedy). Билинейный ресайз к высоте 48, [-1,1].
+#[allow(dead_code)] // сохранено для single-crop fallback
 pub fn recognize(model: &mut OnnxModel, dict: &RecDict, img: &RgbImage) -> Result<(String, f32), String> {
     let Some((rw, plane)) = preprocess(img) else { return Ok((String::new(), 0.0)) };
     // plane уже уложен в C-order (c, oy, ox) — строим тензор напрямую, без поэлементного копирования.

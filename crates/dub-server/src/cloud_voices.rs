@@ -33,6 +33,7 @@ fn db() -> &'static HashMap<String, ModelVoices> {
 }
 
 /// Метаданные конкретного голоса модели (пол/возраст/русский). None -> нет в справочнике.
+#[allow(dead_code)] // используется в тестах
 pub fn voice_meta(model: &str, voice: &str) -> Option<&'static VoiceMeta> {
     db().get(model)?.voices.iter().find(|v| v.name.eq_ignore_ascii_case(voice))
 }

@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "dub-server",
+      "runtimeExecutable": "target/release/dub-server.exe",
+      "runtimeArgs": [],
+      "port": 8765
+    },
+    {
       "name": "frontend-dev",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--", "--port", "5178", "--strictPort"],

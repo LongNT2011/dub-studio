@@ -366,6 +366,7 @@ pub fn build_router(state: AppState) -> Router {
             get(get_project).patch(patch_project).put(endpoints::put_project).delete(delete_project),
         )
         .route("/projects/{pid}/analyze", post(analyze_project))
+        .route("/projects/{pid}/align", post(align_project))
         .route("/projects/{pid}/remix", post(endpoints::remix_project))
         .route("/projects/{pid}/render", post(render_project))
         .route("/projects/{pid}/export-lang", post(export_lang))   // клон+ре-перевод+рендер на другом языке (экспорт-уровень мультиязыка)
@@ -419,9 +420,8 @@ async fn capabilities(State(st): State<AppState>) -> Json<Value> {
         "selection": sel,
         "asr_engines": ["parakeet","whisper"],
         "whisper_models": ["tiny","base","small","medium","large-v3","large-v3-turbo"],
-        // Только CPU-безопасные кванты: float16/bfloat16 GPU-only и роняют CTranslate2 на CPU (onefile
-        // бинарь идёт без CUDA-либ). int8 — дефолт (быстро), float32 — максимум точности.
-        "whisper_computes": ["int8","int8_float32","float32"],
+        // Кванты Whisper (compute_type): float16 / int8_float16 задействуют Tensor Cores на CUDA GPU.
+        "whisper_computes": ["int8","int8_float16","float16","int8_float32","float32"],
         // Видимые лимиты RAM (настройки, не авто-магия): против OOM на слабой памяти. "0" = авто (дефолт).
         "llama_ubatches": ["0","512","256","128"],      // prefill-батч Gemma (меньше = меньше RAM)
         "higgs_ref_secs_opts": ["12","8","6","4"],       // длина реф-клипа клона (сек; <12 спасает 32ГБ)
@@ -1268,6 +1268,70 @@ async fn create_project(
         filename = fname;
     }
 
+    // Создаём начальный project.json, чтобы проект сразу мог быть открыт в редакторе без вызова analyze
+    if let Ok(src_path_str) = tokio::fs::read_to_string(d.join("source.txt")).await {
+        let src_path = Path::new(src_path_str.trim());
+        let meta = match media::probe(src_path) {
+            Ok(m) => dub_core::Meta {
+                video: src_path.to_string_lossy().to_string(),
+                duration: m.duration,
+                width: m.width,
+                height: m.height,
+                fps: m.fps,
+                src_codec: m.src_codec,
+                extra: serde_json::Map::new(),
+            },
+            Err(_) => dub_core::Meta {
+                video: src_path.to_string_lossy().to_string(),
+                duration: 0.0,
+                width: 1920,
+                height: 1080,
+                fps: 30.0,
+                src_codec: String::new(),
+                extra: serde_json::Map::new(),
+            },
+        };
+
+        // Загрузить реплики из import_subs если они были переданы при создании
+        let mut segments = Vec::new();
+        for ext in ["srt", "ass", "ssa"] {
+            let sub_file = d.join(format!("import_subs.{ext}"));
+            if sub_file.is_file() {
+                if let Ok(txt) = std::fs::read_to_string(&sub_file) {
+                    let cues = subimport::parse(&txt, ext);
+                    for (i, c) in cues.into_iter().enumerate() {
+                        segments.push(dub_core::Segment {
+                            id: format!("seg_{}", i + 1),
+                            start: c.start,
+                            end: c.end,
+                            speaker: Some("0".to_string()),
+                            src_text: c.text.clone(),
+                            tgt_text: c.text,
+                            voice: None,
+                            dirty: true,
+                            ckpt: None,
+                            extra: serde_json::Map::new(),
+                        });
+                    }
+                }
+                break;
+            }
+        }
+
+        let initial_proj = dub_core::Project {
+            meta,
+            mode: "nodub".to_string(),
+            tgt_lang: "ru".to_string(),
+            segments,
+            audio: dub_core::Audio::default(),
+            subs: dub_core::Subs::default(),
+            captions: dub_core::Captions::default(),
+            render: dub_core::Render::default(),
+            ..Default::default()
+        };
+        let _ = save_project_atomic(&d, &initial_proj);
+    }
+
     Json(json!({ "project_id": pid, "filename": filename, "imported_subs": imported_subs })).into_response()
 }
 
@@ -1799,7 +1863,7 @@ async fn retranslate_project(
         let spoken = matches!(p.mode.as_str(), "dub" | "voiceover");
         progress(json!({ "type": "progress", "stage": "translate",
             "msg": format!("Перевод {} строк → {}", p.segments.len(), lang_c) }));
-        let prov = crate::llm_provider::open(
+        let prov = match crate::llm_provider::open(
             &crate::llm_provider::LlmOpen {
                 llama_bin: &llama_bin,
                 mt_model: &mt_model,
@@ -1807,8 +1871,23 @@ async fn retranslate_project(
                 models_root: &models_root_xl,
             },
             crate::llm_provider::LlmMode::Text,
-        )
-        .map_err(|e| format!("перевод: LLM недоступен — {e}"))?;
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                // Если LLM недоступен для перевода, мы ВСЁ РАВНО обновляем p.mode и сохраняем проект,
+                // чтобы переход из «Транскрипта» в Дубляж/Закадр/Субтитры происходил успешно.
+                p.mode = mode.clone();
+                for s in &mut p.segments {
+                    if s.tgt_text.trim().is_empty() {
+                        s.tgt_text = s.src_text.clone();
+                    }
+                }
+                progress(json!({ "type": "progress", "stage": "translate",
+                    "msg": format!("⚠ LLM недоступен ({e}) — режим изменен на {}, текстом оставлен исходный", mode) }));
+                save_project_atomic(&dir_for_job, &p)?;
+                return Ok(json!({ "project_id": pid_res, "ok": true }));
+            }
+        };
         let client = prov.client();
         // src_text -> Lx (тайминги/спикеры/раскладка остаются от транскрипта). Вручную добавленные фразы
         // (пустой src_text) переводим из текущего tgt_text (как в export_lang).
@@ -2217,6 +2296,95 @@ fn sse_stream(
 
 fn sse_event(ev: &Value) -> Result<Event, Infallible> {
     Ok(Event::default().data(serde_json::to_string(ev).unwrap_or_default()))
+}
+
+// ─── POST /projects/{pid}/align — автоподгонка таймингов под оригинальные голоса ─────
+pub async fn align_project(State(st): State<AppState>, AxPath(pid): AxPath<String>) -> Response {
+    let Ok(d) = st.proj_dir(&pid) else {
+        return (StatusCode::NOT_FOUND, "project not found").into_response();
+    };
+    let mut proj = match st.load_project(&pid) {
+        Ok(p) => p,
+        Err(r) => return r,
+    };
+    if proj.segments.is_empty() {
+        return Json(proj).into_response();
+    }
+
+    let audio_file = ["ref_vocals16.wav", "audio_hq.wav"]
+        .iter()
+        .map(|f| d.join(f))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| d.join("audio_hq.wav"));
+
+    if !audio_file.is_file() {
+        if let Ok(src_str) = tokio::fs::read_to_string(d.join("source.txt")).await {
+            let src_p = Path::new(src_str.trim());
+            if src_p.is_file() {
+                let _ = media::to_16k_mono(src_p, &audio_file);
+            }
+        }
+    }
+
+    let res = tokio::task::spawn_blocking(move || {
+        let mut count = 0usize;
+        let mut wav_path = audio_file;
+        let voc16 = d.join("vocals16_align.wav");
+        if wav_path.is_file() && media::to_16k_mono(&wav_path, &voc16).is_ok() {
+            wav_path = voc16;
+        }
+
+        if let Ok((samples, sr)) = wavio::read_mono_f32(&wav_path) {
+            let cfg = dub_asr::WindowConfig::default();
+            let (env, _) = dub_asr::speech_envelope(&samples, sr, cfg.frame_sec);
+            let spans = dub_asr::detect_active_spans(&env, cfg.frame_sec, &cfg);
+            if !spans.is_empty() {
+                const MAX_DRIFT: f64 = 1.5;
+                let mut last_end = 0.0f64;
+                for seg in &mut proj.segments {
+                    let s_center = (seg.start + seg.end) / 2.0;
+                    // Фильтруем спаны строго в локальной окрестности ±1.5с от текущего субтитра
+                    let local_spans: Vec<&(f64, f64)> = spans
+                        .iter()
+                        .filter(|span| (span.0 - seg.start).abs() <= MAX_DRIFT || (span.1 - seg.end).abs() <= MAX_DRIFT || (span.0 <= seg.end && span.1 >= seg.start))
+                        .collect();
+
+                    let best = local_spans.iter().max_by(|a, b| {
+                        let overlap_a = (a.1.min(seg.end) - a.0.max(seg.start)).max(0.0);
+                        let overlap_b = (b.1.min(seg.end) - b.0.max(seg.start)).max(0.0);
+                        if (overlap_a - overlap_b).abs() > 0.01 {
+                            overlap_a.partial_cmp(&overlap_b).unwrap()
+                        } else {
+                            let dist_a = ((a.0 + a.1) / 2.0 - s_center).abs();
+                            let dist_b = ((b.0 + b.1) / 2.0 - s_center).abs();
+                            dist_b.partial_cmp(&dist_a).unwrap()
+                        }
+                    });
+
+                    if let Some(span) = best {
+                        let new_start = (span.0 - 0.05).max(last_end).max(0.0);
+                        let new_end = (span.1 + 0.05).max(new_start + 0.1);
+                        if (new_start - seg.start).abs() <= MAX_DRIFT && (new_end - seg.end).abs() <= MAX_DRIFT {
+                            if (seg.start - new_start).abs() > 0.03 || (seg.end - new_end).abs() > 0.03 {
+                                seg.start = (new_start * 100.0).round() / 100.0;
+                                seg.end = (new_end * 100.0).round() / 100.0;
+                                seg.dirty = true;
+                                count += 1;
+                            }
+                        }
+                    }
+                    last_end = seg.end;
+                }
+            }
+        }
+        let _ = save_project_atomic(&d, &proj);
+        (count, proj)
+    }).await;
+
+    match res {
+        Ok((_count, fresh_proj)) => Json(fresh_proj).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
 }
 
 // ─── SPA fallback ───────────────────────────────────────────────────────────

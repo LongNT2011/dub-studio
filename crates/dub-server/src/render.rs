@@ -677,12 +677,18 @@ fn build_dub(
     // спикера (ref_of). Файл — свой на сегмент (по id), не конфликтует с seg_*.wav дубляжа. ref_text для
     // эмоц-рефа = src_text ЭТОГО же сегмента (совпадает с аудио по построению, перетранскрипция не нужна).
     // Порт коротких/1-спикер путей неизменен: при паке и на грязных/коротких репликах ведём себя как раньше.
-    // Многосегментный клон-ролик = есть per-фразовая вариация эмоции, которую стоит переносить. Тривиальный
-    // 1-сегментный/очень короткий ролик -> ПАРИТЕТ: identity-реф как раньше (эмоц-реф не включаем).
-    let emo_enabled = EMO_VOICE_REF && !use_pack && segs.len() > 1;
+    let emo_ref_on = crate::models::load_selection(&paths.models_root)
+        .get("emo_ref_on")
+        .and_then(|v| v.as_str())
+        .map(|v| v != "0")
+        .unwrap_or(true);
+    let emo_enabled = emo_ref_on;
     let emo_ref_of = |s: &dub_core::Segment, sid: &str| -> Option<PathBuf> {
         if !emo_enabled {
-            return None; // пак-голос или 1-сегментный ролик -> паритет (identity-реф)
+            return None;
+        }
+        if use_pack {
+            return None; // пак — фикс-голос юзера, эмоцию источника не переносим
         }
         let key = s.speaker.as_deref().unwrap_or("0");
         if (s.end - s.start) < REF_MIN_AFTER_TRIM {
@@ -702,7 +708,19 @@ fn build_dub(
     };
 
     // 4) TTS каждый сегмент через Higgs (audiocpp). Кэш: seg_XXX.wav; не-dirty переиспользуются.
-    emit(progress, "tts", &format!("синтез {} сегментов (Higgs clone)", segs.len()));
+    let dirty_count = segs
+        .iter()
+        .filter(|&(_, s)| {
+            if seg_keep(s) || s.tgt_text.trim().is_empty() {
+                return false;
+            }
+            let sid: String = s.id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+            let sid = if sid.is_empty() { format!("i{}", s.id) } else { sid };
+            let raw = wd.join(format!("seg_{sid}.wav"));
+            (regen_dub && s.dirty) || !raw.is_file()
+        })
+        .count();
+    emit(progress, "tts", &format!("синтез {dirty_count} из {} сегментов", segs.len()));
     // Облачный TTS (OpenRouter) вместо локального Higgs: тяжёлую DLL + модель НЕ грузим вовсе — в этом и
     // смысл (снять самую тяжёлую часть). engine=None; синтез идёт по облачной ветке ниже.
     let cloud_tts_on = crate::models::openrouter_stage_on(&paths.models_root, "tts");
@@ -796,6 +814,18 @@ fn build_dub(
     let mut fit_total = 0usize;
     let mut fit_over_cap = 0usize;
     let mut drift_escalations = 0usize; // сегменты, где кап atempo эскалирован для догона синка (#116)
+    // Multi-take: генерировать 3 дубля и выбирать лучший по близости к target-длительности.
+    let multitake_on = crate::models::load_selection(&paths.models_root)
+        .get("multitake")
+        .and_then(|v| v.as_str())
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    // Speech Rate: динамическая адаптация темпа генерации нейросети под длину текста/слота.
+    let speech_rate_on = crate::models::load_selection(&paths.models_root)
+        .get("speech_rate_on")
+        .and_then(|v| v.as_str())
+        .map(|v| v != "0")
+        .unwrap_or(true);
     // ПАРАЛЛЕЛЬНЫЙ ПРЕ-СИНТЕЗ облачного TTS: OpenRouter держит десятки конкурентных запросов, поэтому все
     // сегменты к синтезу гоним в N потоков (настройка or_concurrency) ДО последовательной укладки — она
     // потом просто подхватит уже готовые seg-файлы (network-latency больше не по одному). Провал сегмента ->
@@ -911,6 +941,18 @@ fn build_dub(
             // Таргет-длительность = длительность оригинальной реплики (у дубля тот же слот).
             let expected_dur = (s.end - s.start).max(0.6);
             let tok_cap: u32 = (((expected_dur * 75.0 * 1.5).ceil() as u32) + 32).clamp(64, 2048);
+            
+            // Динамическая адаптация темпа (Speech Rate): если текст плотный (>14 знаков/сек), понижаем
+            // температуру и зажимаем повторы, выговаривая текст собранно; если редкий — повышаем.
+            let rate_ratio = if speech_rate_on && expected_dur > 0.1 && tgt_chars > 0 {
+                let ideal_dur = (tgt_chars as f64) / 14.0;
+                (ideal_dur / expected_dur).clamp(0.70, 1.40)
+            } else {
+                1.0
+            };
+            let base_temp = if rate_ratio > 1.12 { 0.18 } else if rate_ratio < 0.88 { 0.32 } else { 0.30 };
+            let base_ras_rep = if rate_ratio > 1.12 { ",\"ras_win_max_num_repeat\":1" } else { "" };
+
             let mut attempt = 0usize;
             let mut retried = false;
             // Лучшая из ДЕФЕКТНЫХ попыток (по размаху) — на случай полного провала лестницы.
@@ -929,7 +971,7 @@ fn build_dub(
                 let seed = (fi as u64) * 1000 + attempt as u64;
                 let opts = match attempt {
                     0 | 3 => format!(
-                        "{{\"temperature\":0.30,\"top_p\":0.95,\"top_k\":50,\"max_new_tokens\":{tok_cap},\"ras_win_len\":7,\"return_audio_in_tokens\":true}}"
+                        "{{\"temperature\":{base_temp:.2},\"top_p\":0.95,\"top_k\":50,\"max_new_tokens\":{tok_cap},\"ras_win_len\":7{base_ras_rep},\"return_audio_in_tokens\":true}}"
                     ),
                     1 => format!(
                         "{{\"temperature\":0.20,\"top_p\":0.95,\"top_k\":50,\"max_new_tokens\":{tok_cap},\"ras_win_len\":7,\"ras_win_max_num_repeat\":1,\"return_audio_in_tokens\":true,\"seed\":{seed}}}"
@@ -954,12 +996,19 @@ fn build_dub(
                         retried = true;
                         total_retries += 1;
                         if attempt >= MAX_TTS_ATTEMPTS {
-                            media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
-                            kept_original = true;
-                            emit(progress, "tts", &format!(
-                                "⚠ сегмент {fi}: {MAX_TTS_ATTEMPTS} сбоев/таймаутов синтеза ({e}) — оставлена оригинальная реплика"
-                            ));
-                            break (Vec::new(), 24_000);
+                            if let Some((sm, r, rng)) = best_bad.take() {
+                                emit(progress, "tts", &format!(
+                                    "⚠ сегмент {fi}: {MAX_TTS_ATTEMPTS} сбоев синтеза ({e}) — взята сгенерированная озвучка (размах {rng:.0} дБ)"
+                                ));
+                                break (sm, r);
+                            } else {
+                                media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
+                                kept_original = true;
+                                emit(progress, "tts", &format!(
+                                    "⚠ сегмент {fi}: {MAX_TTS_ATTEMPTS} сбоев/таймаутов синтеза ({e}) — оставлена оригинальная реплика"
+                                ));
+                                break (Vec::new(), 24_000);
+                            }
                         }
                         emit(progress, "tts", &format!("сегмент {fi}: {e} — регенерация ({}/{})", attempt + 1, MAX_TTS_ATTEMPTS));
                         continue;
@@ -973,23 +1022,21 @@ fn build_dub(
                             best_bad = Some((samples, sr, rng));
                         }
                         if attempt >= MAX_TTS_ATTEMPTS {
-                            // Короткий выкрик/хор (типовой неспасаемый случай: у спикера только
-                            // хоровые реплики -> любой реф даёт вой) — как в проф. дубляже: песни и
-                            // выкрики НЕ дублируются, оставляем оригинальную реплику. QC-факт R5:
-                            // весь остаточный брак = сегменты <=1.4с интро-хора.
-                            if s.end - s.start <= 2.5 {
+                            // Всегда используем сгенерированный TTS-звук (даже для коротких фраз / выкриков / хоров),
+                            // избегая сброса на оригинальный вокал.
+                            if let Some((sm, r, rng)) = best_bad.take() {
+                                emit(progress, "tts", &format!(
+                                    "⚠ сегмент {fi}: все {MAX_TTS_ATTEMPTS} попыток с дефектом ({kind}) — взята сгенерированная озвучка (размах {rng:.0} дБ)"
+                                ));
+                                break (sm, r);
+                            } else {
                                 media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
                                 kept_original = true;
                                 emit(progress, "tts", &format!(
-                                    "сегмент {fi}: все {MAX_TTS_ATTEMPTS} попыток с дефектом ({kind}) — оставлена оригинальная реплика (выкрик/хор не дублируем)"
+                                    "⚠ сегмент {fi}: {MAX_TTS_ATTEMPTS} попыток без звука — подставлен оригинал"
                                 ));
                                 break (Vec::new(), sr);
                             }
-                            let (sm, r, rng) = best_bad.take().unwrap();
-                            emit(progress, "tts", &format!(
-                                "⚠ сегмент {fi}: все {MAX_TTS_ATTEMPTS} попыток с дефектом ({kind}) — взята наименее плохая (размах {rng:.0} дБ)"
-                            ));
-                            break (sm, r);
                         }
                         retried = true;
                         total_retries += 1;
@@ -1021,15 +1068,92 @@ fn build_dub(
         let nxt = if fi + 1 < n_all { proj.segments[fi + 1].start } else { total };
         let room = (nxt - at).max(0.3);
         let fitp = wd.join(format!("seg_{:03}_fit.wav", fi));
-        // Кап этого сегмента: общий max_stretch, на коротком слоте (<1.5с) чуть больше (порт fit_to_slot).
-        let seg_cap = if room < 1.5 { paths.max_stretch.max(1.30) } else { paths.max_stretch };
+
+        // ── MULTI-TAKE: генерируем 2 доп. дубля и выбираем лучший по близости к target-длительности ──
+        if multitake_on && need_synth && !kept_original && !cloud_tts_on && engine.is_some() {
+            let raw_dur = media::duration(&raw).unwrap_or(0.0);
+            let target = if speech_rate_on { (s.end - s.start).max(0.3) } else { room };
+            let mut best_path = raw.clone();
+            let mut best_score = (raw_dur - target).abs();
+            let tgt = s.tgt_text.trim();
+            let _spk_key = s.speaker.clone().unwrap_or_else(|| "0".into());
+            let ref_wav_mt = {
+                let emo = emo_ref_of(s, &sid);
+                emo.unwrap_or_else(|| ref_of(s))
+            };
+            let ref_text_mt = reftext_of(s);
+            let tok_cap: u32 = ((((s.end - s.start).max(0.6) * 75.0 * 1.5).ceil() as u32) + 32).clamp(64, 2048);
+            for take_i in 1..=2u64 {
+                let take_path = wd.join(format!("seg_{sid}_take{take_i}.wav"));
+                let seed = (fi as u64) * 10000 + take_i * 100 + 77;
+                let temp = if take_i == 1 { 0.25 } else { 0.35 };
+                let opts = format!(
+                    "{{\"temperature\":{temp:.2},\"top_p\":0.95,\"top_k\":50,\"max_new_tokens\":{tok_cap},\"ras_win_len\":7,\"return_audio_in_tokens\":true,\"seed\":{seed}}}"
+                );
+                let rt_mt = ref_text_mt.as_deref();
+                let vc_to = Duration::from_secs((((s.end - s.start) * 8.0).ceil() as u64).max(45));
+                let eng = engine.as_ref().unwrap();
+                match voice_clone_guarded(eng, tgt, &ref_wav_mt.to_string_lossy(), rt_mt, &opts, vc_to) {
+                    Ok((samples, sr)) => {
+                        if synth_defect(&samples, sr, tgt.chars().filter(|c| c.is_alphanumeric()).count()).is_none() {
+                            let wav = AudiocppEngine::encode_wav(&samples, sr, 1);
+                            let _ = std::fs::write(&take_path, &wav);
+                            if let Ok(td) = media::duration(&take_path) {
+                                let score = (td - target).abs();
+                                if score < best_score {
+                                    best_score = score;
+                                    best_path = take_path.clone();
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => {} // провал дубля — пропускаем, используем имеющийся лучший
+                }
+            }
+            // Если лучший дубль — не первый, подменяем raw-файл
+            if best_path != raw {
+                let _ = std::fs::copy(&best_path, &raw);
+                emit(progress, "tts", &format!("сегмент {fi}: multi-take — выбран дубль ближе к слоту ({best_score:.2}с отклонение)"));
+            }
+        }
+
+        // Целевая длительность слота: при ВКЛЮЧЕННОМ «Динамическом темпе речи» берем ТОЧНЫЕ границы
+        // данного субтитра (s.end - s.start), чтобы фраза укладывалась ровно в свой прямоугольник.
+        // При ВЫКЛЮЧЕННОМ — используем дефолтное поведение (room от старта до старта следующего + защитные кап-лимиты).
+        let target_slot = if speech_rate_on {
+            (s.end - s.start).max(0.3)
+        } else {
+            room
+        };
+
+        // Кап этого сегмента: если контроль длительности выключен (qc_duration=0), даем свободу (10.0)
+        let run_qc_duration = crate::models::load_selection(&paths.models_root)
+            .get("qc_duration")
+            .and_then(|v| v.as_str())
+            .map(|v| v != "0")
+            .unwrap_or(true);
+        let seg_cap = if !run_qc_duration {
+            10.0
+        } else if target_slot < 1.5 {
+            paths.max_stretch.max(1.30)
+        } else {
+            paths.max_stretch
+        };
         // Дрейф-кап (#116, находка [4]): рассинхрон дороже темпа. Кап 1.25 при cursor-ripple копит сдвиг
         // на плотном диалоге — фразы всё позже. Если дубль уже отстал (cursor > s.start), эскалируем кап
         // до нужного, чтобы догнать слот (потолок 2.0), ценой временной спешки.
         let drift = (cursor - s.start).max(0.0);
         let raw_dur = media::duration(&raw).unwrap_or(0.0);
-        let needed = if room > 0.05 { raw_dur / room } else { 1.0 };
-        let eff_cap = if drift > 0.6 { seg_cap.max(needed).min(2.0) } else { seg_cap };
+        let needed = if target_slot > 0.05 { raw_dur / target_slot } else { 1.0 };
+        // При включенном тумблере — прямое ускорение атемпо под точный размер субтитра (до 4.0x).
+        // При выключенном — дефолтные защитные ограничения (не быстрее 1.25x-1.30x, либо до 2.0x при дрейфе).
+        let eff_cap = if speech_rate_on {
+            seg_cap.max(needed).min(4.0)
+        } else if drift > 0.6 {
+            seg_cap.max(needed).min(2.0)
+        } else {
+            seg_cap
+        };
         if drift > 0.6 && eff_cap > seg_cap {
             drift_escalations += 1;
         }
@@ -1040,11 +1164,11 @@ fn build_dub(
             if needed > eff_cap {
                 fit_over_cap += 1;
                 emit(progress, "mix", &format!(
-                    "сегмент {fi}: нужно растянуть x{needed:.2} (слот {room:.2}с), кап x{eff_cap:.2} — текст быстрее нормы"
+                    "сегмент {fi}: нужно растянуть x{needed:.2} (слот {target_slot:.2}с), кап x{eff_cap:.2} — текст быстрее нормы"
                 ));
             }
         }
-        let (fit, d) = fit_to_slot(&raw, room, &fitp, eff_cap)?;
+        let (fit, d) = fit_to_slot(&raw, target_slot, &fitp, eff_cap)?;
         cursor = at + d;
         placed.push((at, fit, d));
         // В QC — только реально синтезированное в этом прогоне (кэш уже проверялся в своём прогоне).
@@ -1059,7 +1183,7 @@ fn build_dub(
                 raw.clone(),
                 s.tgt_text.trim().to_string(),
                 s.speaker.clone().unwrap_or_else(|| "0".into()),
-                room,
+                target_slot,
                 fitp,
             ));
         }
@@ -1073,11 +1197,13 @@ fn build_dub(
         ));
     }
 
-    // ── QC: ASR-верификация синтеза (идея юзера: «фраза не транскрибируется в ожидаемый текст —
-    // значит артефакт»). Пакетная транскрипция всех свежесинтезированных фраз (Whisper: ОДИН сабпроцесс
-    // на весь список; Parakeet: in-process цикл) → несовпавшие пересинтез (temp/альт-реф) → повторная
-    // проверка. Ловит ВСЁ, что акустический префильтр не видит: не-тот-текст, шипение, скрип.
-    if !qc_list.is_empty() {
+    // ── QC: ASR-верификация синтеза (выполняется только если qc_asr="1" в настройках) ──
+    let run_qc_asr = crate::models::load_selection(&paths.models_root)
+        .get("qc_asr")
+        .and_then(|v| v.as_str())
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    if run_qc_asr && !qc_list.is_empty() {
         emit(progress, "tts", &format!("QC: сверка {} фраз транскрипцией", qc_list.len()));
         let mut qc_asr = crate::models::build_engine(&paths.asr);
         let files: Vec<PathBuf> = qc_list.iter().map(|q| q.2.clone()).collect();
@@ -1149,33 +1275,14 @@ fn build_dub(
             let files2: Vec<PathBuf> = bad_idx.iter().map(|&i| qc_list[i].2.clone()).collect();
             let heard2 = qc_asr.transcribe_many(&files2, &proj.tgt_lang);
             let mut still = 0usize;
-            let mut kept = 0usize;
             for (j, &i) in bad_idx.iter().enumerate() {
                 let h = heard2.get(j).and_then(|x| x.as_deref()).unwrap_or("");
                 if qc_similarity(&qc_list[i].3, h) < 0.35 {
-                    let (fi, pidx, raw, _, _, room, fitp) = &qc_list[i];
-                    let s = &proj.segments[*fi];
-                    // Короткий выкрик/хор, который не спасли ни лестница, ни пересинтез (типовой
-                    // случай: у спикера только хоровые реплики) — как в проф. дубляже, НЕ дублируем:
-                    // оригинальная реплика вместо подтверждённого артефакта.
-                    if s.end - s.start <= 2.5
-                        && media::trim(&vocals, raw, s.start, s.end, 24_000).is_ok()
-                    {
-                        // кап 2.0 (потолок дрейфа): keep-оригинал укладываем в слот так же плотно (#116 [6]).
-                        if let Ok((nf, nd)) = fit_to_slot(raw, *room, fitp, 2.0) {
-                            placed[*pidx].1 = nf;
-                            placed[*pidx].2 = nd;
-                            kept += 1;
-                            emit(progress, "tts", &format!("QC: сегмент {fi} — оставлена оригинальная реплика (выкрик/хор не дублируем)"));
-                            continue;
-                        }
-                    }
+                    // Отключён сброс на оригинальное аудио. Сгенерированный TTS-звук ВСЕГДА остаётся
+                    // на таймлайне, даже если QC (сверка через ASR) не подтвердил совпадение текста.
                     still += 1;
-                    emit(progress, "tts", &format!("⚠ QC: сегмент {} всё ещё не совпадает — отмечен", qc_list[i].0));
+                    emit(progress, "tts", &format!("⚠ QC: сегмент {} не совпадает с текстом перевода — оставлена сгенерированная озвучка", qc_list[i].0));
                 }
-            }
-            if kept > 0 {
-                emit(progress, "tts", &format!("QC: {kept} коротких выкриков оставлены оригиналом"));
             }
             emit(progress, "tts", &format!("QC итог: исправлено {}/{}, осталось помеченных {}", bad_idx.len() - still, bad_idx.len(), still));
         } else {
@@ -1186,7 +1293,12 @@ fn build_dub(
     // 5) timeline -> dub_vocals.wav. Возвращает фактические спаны укладки.
     emit(progress, "mix", "укладка дубляжа на таймлайн");
     let dub = wd.join("dub_vocals.wav");
-    let laid_spans = timeline(&placed, total, &dub)?;
+    let breath_on = crate::models::load_selection(&paths.models_root)
+        .get("breath_on")
+        .and_then(|v| v.as_str())
+        .map(|v| v == "1")
+        .unwrap_or(false);
+    let laid_spans = timeline(&placed, total, &dub, breath_on)?;
     // Речевые блоки для дакинга (#106) — из ФАКТИЧЕСКИХ спанов timeline (единый источник: с учётом
     // cursor-ripple и QC-пересинтеза), а не из onset'ов placed.
     let mut speech_blocks = build_speech_blocks(&laid_spans);
@@ -1603,17 +1715,19 @@ fn build_speech_blocks(spans: &[(f64, f64)]) -> Vec<media::SpeechBlock> {
     blocks
 }
 
-/// Ускорить дубль под target_dur, если он длиннее (никогда не замедлять). Порт assemble.fit_to_slot.
-/// `cap` — готовый потолок растяжения (считается у вызова: seg_cap + дрейф-эскалация). Возвращает путь
-/// уложенного файла И его фактическую длительность (для дакинг-блоков без повторного ffprobe).
+/// Ускорить или замедлить дубль под target_dur. factor>1 ускоряет (укорачивает); <1 замедляет
+/// (растягивает). Замедление ограничено MIN_SLOW=0.85 (~15% растяжения), чтобы голос не тянулся
+/// неестественно. `cap` — потолок ускорения (считается у вызова: seg_cap + дрейф-эскалация).
+/// Возвращает путь уложенного файла И его фактическую длительность.
 fn fit_to_slot(seg_wav: &Path, target_dur: f64, work_path: &Path, cap: f64) -> Result<(PathBuf, f64), String> {
     let actual = media::duration(seg_wav)?;
     if target_dur <= 0.05 || actual <= 0.05 {
         return Ok((seg_wav.to_path_buf(), actual.max(0.0)));
     }
+    const MIN_SLOW: f64 = 0.85;
     let mut factor = actual / target_dur;
-    factor = factor.min(cap).max(1.0);
-    if factor <= 1.02 {
+    factor = factor.min(cap).max(MIN_SLOW);
+    if (0.98..=1.02).contains(&factor) {
         return Ok((seg_wav.to_path_buf(), actual));
     }
     media::time_stretch(seg_wav, work_path, factor)?;
@@ -1621,11 +1735,34 @@ fn fit_to_slot(seg_wav: &Path, target_dur: f64, work_path: &Path, cap: f64) -> R
     Ok((work_path.to_path_buf(), d))
 }
 
+/// Генерирует сэмпл мягкого человеческого вдоха (процедурный легкий вдох ~0.20с).
+fn generate_breath_sample(sr: u32, seed: usize) -> Vec<f32> {
+    let dur_secs = 0.18 + (seed % 5) as f64 * 0.02; // 0.18 .. 0.26 сек
+    let n = (dur_secs * sr as f64) as usize;
+    let mut buf = Vec::with_capacity(n);
+    let mut state: u32 = (seed as u32).wrapping_add(12345);
+    let mut lp = 0.0f32;
+    let mut hp = 0.0f32;
+    for i in 0..n {
+        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+        let raw_noise = ((state >> 9) as f32 / 8388608.0) - 1.0;
+        lp += 0.35 * (raw_noise - lp);
+        hp += 0.12 * (lp - hp);
+        let band_noise = lp - hp;
+        let progress = i as f32 / n as f32;
+        let env = if progress < 0.35 {
+            (progress / 0.35).powf(1.5)
+        } else {
+            ((1.0 - progress) / 0.65).powf(1.2)
+        };
+        buf.push(band_noise * env * 0.075);
+    }
+    buf
+}
+
 /// Уложить сегменты на полную дорожку по таймкодам, без перекрытия/обрезки. Порт assemble.timeline.
-/// Возвращает ФАКТИЧЕСКИЕ спаны укладки [(start,end)] — единый источник правды для дакинг-огибающей
-/// (#116, находка [5]): у timeline свой cursor-ripple по РЕАЛЬНОЙ длине сэмплов, и после QC-пересинтеза
-/// он может отличаться от onset'ов в placed; строим блоки из этих спанов, а не из placed.
-fn timeline(placed: &[(f64, PathBuf, f64)], total_dur: f64, out_wav: &Path) -> Result<Vec<(f64, f64)>, String> {
+/// Применяет 10 мс crossfade к краям фраз для устранения кликов. При breath_on=true подставляет вдохи.
+fn timeline(placed: &[(f64, PathBuf, f64)], total_dur: f64, out_wav: &Path, breath_on: bool) -> Result<Vec<(f64, f64)>, String> {
     if placed.is_empty() {
         // тишина total_dur @ 24000.
         let n = (total_dur * 24000.0) as usize;
@@ -1647,8 +1784,33 @@ fn timeline(placed: &[(f64, PathBuf, f64)], total_dur: f64, out_wav: &Path) -> R
             wavio::read_mono_f32(wav)?
         };
         normalize_voice(&mut s, ssr); // все фразы/спикеры к одной громкости
+
+        // 10ms Crossfade (fade-in & fade-out) для бесшовного стыка без кликов
+        let fade_len = ((sr as f64 * 0.010) as usize).min(s.len() / 2);
+        if fade_len > 0 {
+            for k in 0..fade_len {
+                let f = k as f32 / fade_len as f32;
+                s[k] *= f;
+                let end_k = s.len() - 1 - k;
+                s[end_k] *= f;
+            }
+        }
+
         let at = start.max(cursor);
         let end = at + s.len() as f64 / sr as f64;
+
+        // Вставка дыхания в естественную паузу между фразами (0.40..1.80с)
+        if breath_on && !spans.is_empty() {
+            let prev_end = spans.last().unwrap().1;
+            let gap = at - prev_end;
+            if (0.40..=1.80).contains(&gap) {
+                let b_sample = generate_breath_sample(sr, spans.len());
+                let b_dur = b_sample.len() as f64 / sr as f64;
+                let b_at = (at - b_dur - 0.04).max(prev_end + 0.04);
+                laid.push((b_at, b_sample));
+            }
+        }
+
         cursor = end;
         spans.push((at, end));
         laid.push((at, s));

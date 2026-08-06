@@ -165,6 +165,7 @@ export const api = {
     _chain(() => fetch(`${BASE}/projects/${pid}`, { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(project) }).then(j<Project>)),
   patch: (pid: string, edit: Record<string, unknown>) =>   // run after the previous patch settles (ok or failed)
     _chain(() => fetch(`${BASE}/projects/${pid}`, { method: "PATCH", headers: JSON_HEADERS, body: JSON.stringify(edit) }).then(j<Project>)),
+  alignProject: (pid: string) => fetch(`${BASE}/projects/${pid}/align`, { method: "POST" }).then(j<Project>),
   render: (pid: string) => fetch(`${BASE}/projects/${pid}/render`, { method: "POST" }).then(j<{ job_id: string }>),
   // Экспорт-уровень мультиязыка: клон отредактированного проекта на язык lang (наследует раскладку/стиль/
   // блюр/титры + клон голоса), ре-перевод текста + рендер одним джобом. -> новый project_id + job_id.

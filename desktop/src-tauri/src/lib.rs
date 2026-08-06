@@ -233,8 +233,8 @@ pub fn run() {
                 WebviewUrl::External(url.parse().expect("валидный URL")),
             )
             .title(format!("Dub Studio {}", app.package_info().version))
-            .inner_size(1280.0, 860.0)
-            .min_inner_size(1180.0, 720.0)
+            .inner_size(1600.0, 1040.0)
+            .min_inner_size(1280.0, 800.0)
             .resizable(true)
             // Tauri v2 по умолчанию перехватывает OS-drop файлов -> HTML5 onDrop в дропзоне НЕ срабатывает
             // (юзеры жаловались «перетаскивание не работает»). Отключаем перехват -> webview сам ловит drop.

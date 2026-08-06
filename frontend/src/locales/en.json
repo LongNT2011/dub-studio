@@ -137,7 +137,7 @@
     "addSpeakerHint": "AI found fewer speakers than there are? Tick the second person's lines (or park the playhead on one) and click — they become a new SPK you can give its own voice.",
     "addSpeakerPick": "First tick some lines, or move the playhead onto a line",
     "addSpeakerDone": "{{n}} line(s) → new SPK {{spk}}",
-    "gain": "Track gain",
+    "gain": "Track boost",
     "gainHint": "Boost the whole track (applied on regen/export).",
     "origGain": "Original volume",
     "origGainHint": "Voice-over: how loud the original track sits under the translation.",
