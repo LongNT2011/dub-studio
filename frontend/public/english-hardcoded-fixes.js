@@ -115,6 +115,10 @@
 
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
+      if (mutation.type === "attributes" && mutation.target === document.documentElement && mutation.attributeName === "lang") {
+        walk(document.body);
+        continue;
+      }
       if (mutation.type === "characterData") translateTextNode(mutation.target, isEnglish());
       if (mutation.type === "attributes") translateElement(mutation.target, isEnglish());
       for (const node of mutation.addedNodes) walk(node);
