@@ -5,8 +5,8 @@
   "description": "Tauri-оболочка Dub Studio (поднимает нативный dub-server и открывает окно)",
   "scripts": {
     "tauri": "tauri",
-    "dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
-    "build": "tauri build --no-bundle"
+    "dev": "tauri dev",
+    "build": "tauri build --no-bundle --config src-tauri/tauri.bundle.conf.json"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
