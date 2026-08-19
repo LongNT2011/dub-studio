@@ -27,7 +27,7 @@ pub fn repo_from_models(models_root: &Path) -> PathBuf {
 pub fn run(repo_root: &Path, key: &str, op: &str, payload: &Value) -> Result<Vec<u8>, String> {
     let bin = helper_bin(repo_root);
     if !bin.is_file() {
-        return Err(format!("openrouter-helper не найден: {}", bin.display()));
+        return Err(format!("openrouter-helper not found: {}", bin.display()));
     }
     let mut cmd = Command::new(&bin);
     cmd.arg(op).env("OPENROUTER_API_KEY", key);
@@ -41,14 +41,14 @@ pub fn run(repo_root: &Path, key: &str, op: &str, payload: &Value) -> Result<Vec
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("запуск openrouter-helper: {e}"))?;
+        .map_err(|e| format!("launching openrouter-helper: {e}"))?;
     child
         .stdin
         .take()
-        .ok_or("нет stdin у helper")?
+        .ok_or("helper has no stdin")?
         .write_all(payload.to_string().as_bytes())
         .map_err(|e| format!("stdin helper: {e}"))?;
-    let out = child.wait_with_output().map_err(|e| format!("ожидание helper: {e}"))?;
+    let out = child.wait_with_output().map_err(|e| format!("waiting for helper: {e}"))?;
     if !out.status.success() {
         return Err(format!(
             "openrouter-helper {op}: {}",
@@ -61,7 +61,7 @@ pub fn run(repo_root: &Path, key: &str, op: &str, payload: &Value) -> Result<Vec
 /// Как `run`, но парсит stdout в JSON.
 pub fn run_json(repo_root: &Path, key: &str, op: &str, payload: &Value) -> Result<Value, String> {
     let bytes = run(repo_root, key, op, payload)?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("ответ helper не JSON: {e}"))
+    serde_json::from_slice(&bytes).map_err(|e| format!("helper response is not JSON: {e}"))
 }
 
 /// Суммарно потрачено по ключу в ДОЛЛАРАХ (credits.data.total_usage; кредиты OpenRouter = USD 1:1).

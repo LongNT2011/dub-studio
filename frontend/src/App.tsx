@@ -225,7 +225,7 @@ function ModelsSection() {
   const EngineTabs = ({ cloud, onLocal, onCloud, localLabel }: { cloud: boolean; onLocal: () => void; onCloud: () => void; localLabel: string }) => (
     <div className="flex gap-1 mb-1.5">
       <button onClick={onLocal} className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${!cloud ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>{localLabel}</button>
-      <button onClick={onCloud} disabled={!hasOrKey} title={hasOrKey ? "" : "Введите ключ OpenRouter ниже (Облачные настройки)"}
+      <button onClick={onCloud} disabled={!hasOrKey} title={hasOrKey ? "" : t("cloud.enterKey")}
         className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${cloud ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"} disabled:opacity-40`}>OpenRouter</button>
     </div>
   );
@@ -235,7 +235,7 @@ function ModelsSection() {
     const cur = selv(k) || "auto";
     return (
       <div className="flex gap-1 mb-1.5">
-        {([["auto", "Авто"], ["gpu", "GPU (CUDA)"], ["cpu", "CPU"]] as const).map(([id, label]) => (
+        {([["auto", t("settings.auto")], ["gpu", "GPU (CUDA)"], ["cpu", "CPU"]] as const).map(([id, label]) => (
           <button key={id} onClick={() => setSel(k, id)}
             className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${cur === id ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"}`}>{label}</button>
         ))}
@@ -271,21 +271,21 @@ function ModelsSection() {
         <EngineTabs cloud={selv("or_tts_on") === "1"} localLabel="Higgs Audio v3" onLocal={() => setSel("or_tts_on", "0")} onCloud={() => setSel("or_tts_on", "1")} />
         {selv("or_tts_on") === "1" ? (
           <div className={`${orRowCls} space-y-2`}>
-            <OrModelSelect kind="tts" k="or_tts_model" empty="— выбрать TTS-модель —" />
-            {ttsRu === false && <div className="text-[11px] text-[var(--color-warn)]">⚠ Модель не поддерживает русский — выберите другую для русского дубляжа.</div>}
+            <OrModelSelect kind="tts" k="or_tts_model" empty={t("cloud.selectTtsModel")} />
+            {ttsRu === false && <div className="text-[11px] text-[var(--color-warn)]">{t("cloud.ttsNoRussian")}</div>}
             <div className="flex items-center gap-2">
               <button onClick={() => setSel("or_tts_autocast", (selv("or_tts_autocast") || "1") !== "0" ? "0" : "1")}
                 className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${(selv("or_tts_autocast") || "1") !== "0" ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface)] border border-[var(--color-border)]"}`}>
                 <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${(selv("or_tts_autocast") || "1") !== "0" ? "left-[18px]" : "left-0.5"}`} />
               </button>
-              <span className="text-[12px]">Автокастинг голосов</span>
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-accent)]/20 text-[var(--color-accent)] uppercase tracking-wider">бета</span>
+              <span className="text-[12px]">{t("cloud.autocastVoices")}</span>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-[var(--color-accent)]/20 text-[var(--color-accent)] uppercase tracking-wider">{t("cloud.beta")}</span>
             </div>
             {(selv("or_tts_autocast") || "1") !== "0" ? (
-              <div className="text-[11px] text-[var(--color-muted)]">Голос по полу спикера автоматически, разным спикерам — разные.</div>
+              <div className="text-[11px] text-[var(--color-muted)]">{t("cloud.autocastHint")}</div>
             ) : (
               <select value={selv("or_tts_voice")} onChange={(e) => setSel("or_tts_voice", e.target.value)} className={orSelectCls}>
-                <option value="">— один голос на всех —</option>
+                <option value="">{t("cloud.oneVoiceForAll")}</option>
                 {orVoices.map((v) => <option key={v.name} value={v.name}>{v.gender === "male" ? "♂" : v.gender === "female" ? "♀" : "•"} {v.name}{v.age === "teen" || v.age === "child" ? ` · ${v.age}` : ""}</option>)}
               </select>
             )}
@@ -305,7 +305,7 @@ function ModelsSection() {
             const active = e.cloud ? asrCloud : (!asrCloud && asrEngine === e.id);
             const dis = e.cloud && !hasOrKey;
             return (
-              <button key={e.id} disabled={dis} title={dis ? "Введите ключ OpenRouter ниже (Облачные настройки)" : ""}
+              <button key={e.id} disabled={dis} title={dis ? t("cloud.enterKey") : ""}
                 onClick={() => { if (e.cloud) { setSel("or_asr_on", "1"); } else { setSel("or_asr_on", "0"); setAsrEngine(e.id); api.setSelection("asr_engine", e.id).catch(() => {}); } }}
                 className={`flex-1 px-2 py-1.5 rounded-md text-[12px] font-medium border transition-colors ${active ? "border-[var(--color-accent)] bg-[color-mix(in_oklab,var(--color-accent)_14%,transparent)] text-[var(--color-text)]" : "border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]"} disabled:opacity-40`}>
                 {e.label}
@@ -317,8 +317,8 @@ function ModelsSection() {
         {selv("or_asr_on") !== "1" && <BackendTabs k="asr_backend" />}
         {selv("or_asr_on") === "1" ? (
           <div className={`${orRowCls} space-y-2`}>
-            <OrModelSelect kind="asr" k="or_asr" empty="— выбрать STT-модель —" />
-            <div className="text-[11px] text-[var(--color-muted)]">Транскрипция через облако — тяжёлые локальные ASR-модели качать не нужно.</div>
+            <OrModelSelect kind="asr" k="or_asr" empty={t("cloud.selectSttModel")} />
+            <div className="text-[11px] text-[var(--color-muted)]">{t("cloud.transcribeHint")}</div>
           </div>
         ) : asrEngine === "parakeet" ? (
           <VariantPicker base="Parakeet-TDT 0.6B v3" ids={["parakeet", "parakeet-fp32"]} />
@@ -347,15 +347,15 @@ function ModelsSection() {
         <EngineTabs cloud={selv("or_llm_on") === "1"} localLabel="Gemma-4 12B" onLocal={() => setSel("or_llm_on", "0")} onCloud={() => setSel("or_llm_on", "1")} />
         {selv("or_llm_on") === "1" ? (
           <div className={`${orRowCls} space-y-2`}>
-            <OrModelSelect kind="llm" k="or_llm" empty="— выбрать модель перевода —" />
+            <OrModelSelect kind="llm" k="or_llm" empty={t("cloud.selectTranslateModel")} />
             <div className="flex items-center gap-2 pt-0.5">
               <button onClick={() => setSel("or_vision_on", selv("or_vision_on") === "1" ? "0" : "1")}
                 className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${selv("or_vision_on") === "1" ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface)] border border-[var(--color-border)]"}`}>
                 <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${selv("or_vision_on") === "1" ? "left-[18px]" : "left-0.5"}`} />
               </button>
-              <span className="text-[12px]">Vision-анализ кадров через облако</span>
+              <span className="text-[12px]">{t("cloud.visionToggle")}</span>
             </div>
-            {selv("or_vision_on") === "1" && <OrModelSelect kind="vision" k="or_vision" empty="как модель перевода" />}
+            {selv("or_vision_on") === "1" && <OrModelSelect kind="vision" k="or_vision" empty={t("cloud.visionEmpty")} />}
           </div>
         ) : (
           <>
@@ -404,7 +404,7 @@ function ModelsSection() {
           (опция для слабых ПК/скорости). Ключ + число параллельных потоков; сам выбор облачного движка —
           в группах выше рядом с локальным (Higgs|OpenRouter и т.д.). */}
       <div className="mt-2 pt-3 border-t border-[var(--color-border)]">
-        <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-1.5">Облачные настройки · OpenRouter</div>
+        <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-1.5">{t("cloud.title")}</div>
         <div className="space-y-2">
           <OpenRouterKey onSaved={loadCap} />
           {hasOrKey && (
@@ -412,8 +412,8 @@ function ModelsSection() {
               <div className="flex items-center gap-2.5">
                 <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--color-muted)]" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-[12px] font-medium truncate">Параллельные потоки</div>
-                  <div className="mono text-[10px] text-[var(--color-muted)] truncate">чанки в N коннектов — быстрее облачные ASR/TTS/перевод (1 = без многопоточности)</div>
+                  <div className="text-[12px] font-medium truncate">{t("cloud.concurrency")}</div>
+                  <div className="mono text-[10px] text-[var(--color-muted)] truncate">{t("cloud.concurrencyHint")}</div>
                 </div>
                 <select value={selv("or_concurrency") || "6"} onChange={(e) => setSel("or_concurrency", e.target.value)}
                   className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none">
@@ -427,7 +427,7 @@ function ModelsSection() {
       {/* Прокси — В САМОМ КОНЦЕ: нужен только тем, у кого закрыт прямой доступ к HF/OpenRouter. Весь исходящий
           трафик приложения (закачка моделей + облако) через свой прокси. */}
       <div className="mt-2 pt-3 border-t border-[var(--color-border)]">
-        <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-1.5">Прокси</div>
+        <div className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)] mb-1.5">{t("cloud.proxyTitle")}</div>
         <ProxySection />
       </div>
     </div>
@@ -438,6 +438,7 @@ function ModelsSection() {
 // HF/OpenRouter закрыт. URL может содержать логин:пароль -> прячем как ключ. «Проверить» бьёт в HF и OpenRouter
 // через указанный прокси. Действует сразу для закачки и облака; остальному (апдейтер) — рестарт.
 function ProxySection() {
+  const { t } = useTranslation();
   const [url, setUrl] = useState("");
   const [on, setOn] = useState(false);
   const [show, setShow] = useState(false);
@@ -460,13 +461,13 @@ function ProxySection() {
     setTesting(true); setMsg(null);
     try {
       const r = await api.proxyTest(url.trim());
-      if (r.ok) setMsg({ ok: true, text: "Работает — HF и OpenRouter доступны через прокси" });
+      if (r.ok) setMsg({ ok: true, text: t("cloud.proxyWorks") });
       else if (r.error) setMsg({ ok: false, text: r.error });
       else {
-        const bad = [r.hf === false ? "закачка моделей (HF)" : "", r.openrouter === false ? "OpenRouter" : ""].filter(Boolean);
-        setMsg({ ok: false, text: `Недоступно через прокси: ${bad.join(", ") || "сервисы"}` });
+        const bad = [r.hf === false ? t("cloud.proxyHfDown") : "", r.openrouter === false ? "OpenRouter" : ""].filter(Boolean);
+        setMsg({ ok: false, text: `${t("cloud.proxyUnreachable")}: ${bad.join(", ") || t("cloud.proxyServices")}` });
       }
-    } catch { setMsg({ ok: false, text: "Не удалось проверить прокси" }); }
+    } catch { setMsg({ ok: false, text: t("cloud.proxyTestFailed") }); }
     setTesting(false);
   };
   return (
@@ -476,18 +477,18 @@ function ProxySection() {
           className="accent-[var(--color-accent)] w-3.5 h-3.5 shrink-0" />
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${on ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
         <span className="min-w-0 flex-1">
-          <span className="block text-[12px] font-medium">Проксировать весь трафик</span>
-          <span className="block mono text-[10px] text-[var(--color-muted)]">включите, если прямая закачка моделей или OpenRouter не работает</span>
+          <span className="block text-[12px] font-medium">{t("cloud.proxyAll")}</span>
+          <span className="block mono text-[10px] text-[var(--color-muted)]">{t("cloud.proxyAllHint")}</span>
         </span>
       </label>
       <div className="flex gap-2">
         <input type={show ? "text" : "password"} value={url} onChange={(e) => setUrl(e.target.value)} onBlur={() => { if (on && url.trim()) save(true); }} placeholder="http://user:pass@host:8080  ·  socks5://host:1080"
           className="flex-1 px-2 py-1 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] text-[12px] mono focus:border-[var(--color-accent)] outline-none" />
         <button onClick={() => setShow((s) => !s)} className="px-2 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]">{show ? <EyeOff size={13} /> : <Eye size={13} />}</button>
-        <button onClick={test} disabled={testing || !url.trim()} className="px-3 py-1 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] text-[12px] hover:border-[var(--color-accent)] disabled:opacity-40">{testing ? "…" : "Проверить"}</button>
+        <button onClick={test} disabled={testing || !url.trim()} className="px-3 py-1 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] text-[12px] hover:border-[var(--color-accent)] disabled:opacity-40">{testing ? "…" : t("cloud.test")}</button>
       </div>
       {msg && <div className={`text-[11px] ${msg.ok ? "text-[var(--color-accent)]" : "text-[var(--color-warn)]"}`}>{msg.text}</div>}
-      <div className="mono text-[10px] text-[var(--color-muted)] leading-snug">Поддержка HTTP/HTTPS/SOCKS5. Действует сразу для закачки моделей и облака.</div>
+      <div className="mono text-[10px] text-[var(--color-muted)] leading-snug">{t("cloud.proxyProtoHint")}</div>
     </div>
   );
 }
@@ -496,6 +497,7 @@ function ProxySection() {
 // Облачный пресет включает OpenRouter на все стадии — работает даже на слабом ПК без своей GPU.
 // Переиспользуемая строка ключа OpenRouter (настройки И первый запуск). onSaved — после успешной проверки.
 function OpenRouterKey({ onSaved }: { onSaved?: () => void }) {
+  const { t } = useTranslation();
   const [key, setKey] = useState("");
   const [show, setShow] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -506,23 +508,23 @@ function OpenRouterKey({ onSaved }: { onSaved?: () => void }) {
     setVerifying(true); setMsg(null);
     try {
       const r = await api.openrouterVerify(key.trim());
-      if (r.ok) { await api.setSelection("or_key", key.trim()); setHas(true); setMsg({ ok: true, text: "Ключ рабочий — сохранён" }); onSaved?.(); }
-      else setMsg({ ok: false, text: "Ключ не принят OpenRouter" });
-    } catch { setMsg({ ok: false, text: "OpenRouter недоступен" }); }
+      if (r.ok) { await api.setSelection("or_key", key.trim()); setHas(true); setMsg({ ok: true, text: t("cloud.keySaved") }); onSaved?.(); }
+      else setMsg({ ok: false, text: t("cloud.keyRejected") });
+    } catch { setMsg({ ok: false, text: t("cloud.keyUnavailable") }); }
     setVerifying(false);
   };
   return (
     <div className="px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
       <div className="flex items-center gap-2 mb-1">
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${has ? "bg-[var(--color-accent)]" : "bg-[var(--color-muted)]"}`} />
-        <span className="text-[12px] font-medium">Ключ OpenRouter</span>
-        <span className="mono text-[10px] text-[var(--color-muted)]">для облачных движков (перевод / TTS)</span>
+        <span className="text-[12px] font-medium">{t("cloud.keyLabel")}</span>
+        <span className="mono text-[10px] text-[var(--color-muted)]">{t("cloud.keyHint")}</span>
       </div>
       <div className="flex gap-2">
         <input type={show ? "text" : "password"} value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-or-v1-…"
           className="flex-1 px-2 py-1 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] text-[12px] mono focus:border-[var(--color-accent)] outline-none" />
         <button onClick={() => setShow((s) => !s)} className="px-2 rounded-md border border-[var(--color-border)] text-[var(--color-muted)] hover:text-[var(--color-text)]">{show ? <EyeOff size={13} /> : <Eye size={13} />}</button>
-        <button onClick={verify} disabled={verifying || !key.trim()} className="px-3 py-1 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] text-[12px] hover:border-[var(--color-accent)] disabled:opacity-40">{verifying ? "…" : "Проверить"}</button>
+        <button onClick={verify} disabled={verifying || !key.trim()} className="px-3 py-1 rounded-md bg-[var(--color-surface)] border border-[var(--color-border)] text-[12px] hover:border-[var(--color-accent)] disabled:opacity-40">{verifying ? "…" : t("cloud.test")}</button>
       </div>
       {msg && <div className={`text-[11px] mt-1 ${msg.ok ? "text-[var(--color-accent)]" : "text-[var(--color-warn)]"}`}>{msg.text}</div>}
     </div>
@@ -530,6 +532,7 @@ function OpenRouterKey({ onSaved }: { onSaved?: () => void }) {
 }
 
 function PresetsSection({ onApplied }: { onApplied?: () => void }) {
+  const { t } = useTranslation();
   const [data, setData] = useState<Awaited<ReturnType<typeof api.hwPresets>> | null>(null);
   const [applied, setApplied] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -544,13 +547,13 @@ function PresetsSection({ onApplied }: { onApplied?: () => void }) {
   const curP = data?.presets.find((p) => p.id === cur);
   return (
     <div className="mb-4 pb-3 border-b border-[var(--color-border)]">
-      <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)] mb-1.5">Пресет под железо</div>
+      <div className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted)] mb-1.5">{t("hwPreset.title")}</div>
       <div className="px-2.5 py-2 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)]">
         <div className="flex items-center gap-2.5">
           <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-[var(--color-accent)]" />
           <div className="min-w-0 flex-1">
-            <div className="text-[12px] font-medium truncate">{hw ? (hw.hasGpu ? `${hw.gpuName} · ${hw.totalVramGb.toFixed(0)} ГБ VRAM` : "NVIDIA GPU не найдена") : "…"}</div>
-            <div className="mono text-[10px] text-[var(--color-muted)] truncate">{curP?.subtitle ?? `ОЗУ ${hw?.totalRamGb.toFixed(0) ?? "?"} ГБ`}</div>
+            <div className="text-[12px] font-medium truncate">{hw ? (hw.hasGpu ? `${hw.gpuName} · ${hw.totalVramGb.toFixed(0)} ${t("common.gb")} VRAM` : t("hwPreset.noGpu")) : "…"}</div>
+            <div className="mono text-[10px] text-[var(--color-muted)] truncate">{curP?.subtitle ?? `${t("hwPreset.ram")} ${hw?.totalRamGb.toFixed(0) ?? "?"} ${t("common.gb")}`}</div>
           </div>
           <select value={cur} onChange={(e) => apply(e.target.value)} disabled={busy}
             className="shrink-0 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-md px-2 py-1 text-[11px] mono focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-50">
@@ -600,85 +603,85 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
             </button>
           </label>
           {/* Проверка текста ASR */}
-          <label className="flex items-center justify-between gap-3 mb-2.5" title="Авто-проверка услышанного текста через Whisper ASR для отсечения тишины и дефектов">
+          <label className="flex items-center justify-between gap-3 mb-2.5" title={t("settings.qcAsrTooltip")}>
             <div className="min-w-0 flex-1">
               <span className="text-[13px] text-[var(--color-text)] inline-flex items-center gap-2 font-medium">
                 <Captions size={14} className="text-[var(--color-accent-2)]" />
-                Проверка текста через ASR (QC)
+                {t("settings.qcAsrTitle")}
               </span>
-              <span className="block text-[10px] text-[var(--color-muted)]">авто-сверка озвучки через ASR (отключение ускоряет синтез)</span>
+              <span className="block text-[10px] text-[var(--color-muted)]">{t("settings.qcAsrHint")}</span>
             </div>
-            <button onClick={() => { const v = !qcAsr; setQcAsr(v); api.setSelection("qc_asr", v ? "1" : "0").catch(() => {}); }} title="Проверка текста через ASR"
+            <button onClick={() => { const v = !qcAsr; setQcAsr(v); api.setSelection("qc_asr", v ? "1" : "0").catch(() => {}); }} title={t("settings.qcAsrTitle")}
               className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${qcAsr ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface-2)] border border-[var(--color-border)]"}`}>
               <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${qcAsr ? "left-[18px]" : "left-0.5"}`} />
             </button>
           </label>
           {/* Контроль длительности фраз */}
-          <label className="flex items-center justify-between gap-3 mb-2.5" title="Подгонка скорости и контроль хронометража аудио под рамки субтитра">
+          <label className="flex items-center justify-between gap-3 mb-2.5" title={t("settings.qcDurTooltip")}>
             <div className="min-w-0 flex-1">
               <span className="text-[13px] text-[var(--color-text)] inline-flex items-center gap-2 font-medium">
                 <Clock size={14} className="text-[var(--color-accent-2)]" />
-                Контроль длительности фраз (Stretch QC)
+                {t("settings.qcDurTitle")}
               </span>
-              <span className="block text-[10px] text-[var(--color-muted)]">подгонка хронометража и максимального растяжения</span>
+              <span className="block text-[10px] text-[var(--color-muted)]">{t("settings.qcDurHint")}</span>
             </div>
-            <button onClick={() => { const v = !qcDur; setQcDur(v); api.setSelection("qc_duration", v ? "1" : "0").catch(() => {}); }} title="Контроль длительности фраз"
+            <button onClick={() => { const v = !qcDur; setQcDur(v); api.setSelection("qc_duration", v ? "1" : "0").catch(() => {}); }} title={t("settings.qcDurTitle")}
               className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${qcDur ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface-2)] border border-[var(--color-border)]"}`}>
               <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${qcDur ? "left-[18px]" : "left-0.5"}`} />
             </button>
           </label>
           {/* Multi-take отбор (3 дубля) */}
-          <label className="flex items-center justify-between gap-3 mb-2.5" title="Генерировать 3 варианта озвучки каждой фразы и автоматически выбирать лучший по таймингу">
+          <label className="flex items-center justify-between gap-3 mb-2.5" title={t("settings.multitakeTooltip")}>
             <div className="min-w-0 flex-1">
               <span className="text-[13px] text-[var(--color-text)] inline-flex items-center gap-2 font-medium">
                 <Star size={14} className="text-[var(--color-accent-2)]" />
-                Multi-take отбор (3 дубля)
+                {t("settings.multitakeTitle")}
               </span>
-              <span className="block text-[10px] text-[var(--color-muted)]">3 варианта озвучки — выбирается лучший по таймингу (медленнее, но качественнее)</span>
+              <span className="block text-[10px] text-[var(--color-muted)]">{t("settings.multitakeHint")}</span>
             </div>
-            <button onClick={() => { const v = !multitake; setMultitake(v); api.setSelection("multitake", v ? "1" : "0").catch(() => {}); }} title="Multi-take отбор"
+            <button onClick={() => { const v = !multitake; setMultitake(v); api.setSelection("multitake", v ? "1" : "0").catch(() => {}); }} title={t("settings.multitakeTitle")}
               className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${multitake ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface-2)] border border-[var(--color-border)]"}`}>
               <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${multitake ? "left-[18px]" : "left-0.5"}`} />
             </button>
           </label>
           {/* Динамический темп речи TTS */}
-          <label className="flex items-center justify-between gap-3 mb-2.5" title="Динамическая адаптация темпа генерации нейросети под длину текста и доступный временной слот">
+          <label className="flex items-center justify-between gap-3 mb-2.5" title={t("settings.speechRateTooltip")}>
             <div className="min-w-0 flex-1">
               <span className="text-[13px] text-[var(--color-text)] inline-flex items-center gap-2 font-medium">
                 <Sparkles size={14} className="text-[var(--color-accent-2)]" />
-                Динамический темп речи (Speech Rate TTS)
+                {t("settings.speechRateTitle")}
               </span>
-              <span className="block text-[10px] text-[var(--color-muted)]">адаптация скорости выговора нейросети под длину текста в окне</span>
+              <span className="block text-[10px] text-[var(--color-muted)]">{t("settings.speechRateHint")}</span>
             </div>
-            <button onClick={() => { const v = !speechRateOn; setSpeechRateOn(v); api.setSelection("speech_rate_on", v ? "1" : "0").catch(() => {}); }} title="Динамический темп речи"
+            <button onClick={() => { const v = !speechRateOn; setSpeechRateOn(v); api.setSelection("speech_rate_on", v ? "1" : "0").catch(() => {}); }} title={t("settings.speechRateTitle")}
               className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${speechRateOn ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface-2)] border border-[var(--color-border)]"}`}>
               <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${speechRateOn ? "left-[18px]" : "left-0.5"}`} />
             </button>
           </label>
           {/* Эмоциональный референс сцены (Emo-Ref) */}
-          <label className="flex items-center justify-between gap-3 mb-2.5" title="Перенос эмоций, интонации и подачи прямо из оригинального звука сцены">
+          <label className="flex items-center justify-between gap-3 mb-2.5" title={t("settings.emoRefTooltip")}>
             <div className="min-w-0 flex-1">
               <span className="text-[13px] text-[var(--color-text)] inline-flex items-center gap-2 font-medium">
                 <Mic2 size={14} className="text-[var(--color-accent-2)]" />
-                Эмоциональный референс сцены (Emo-Ref)
+                {t("settings.emoRefTitle")}
               </span>
-              <span className="block text-[10px] text-[var(--color-muted)]">копирование интонации, эмоции и подачи оригинала сцены</span>
+              <span className="block text-[10px] text-[var(--color-muted)]">{t("settings.emoRefHint")}</span>
             </div>
-            <button onClick={() => { const v = !emoRefOn; setEmoRefOn(v); api.setSelection("emo_ref_on", v ? "1" : "0").catch(() => {}); }} title="Эмоциональный референс сцены"
+            <button onClick={() => { const v = !emoRefOn; setEmoRefOn(v); api.setSelection("emo_ref_on", v ? "1" : "0").catch(() => {}); }} title={t("settings.emoRefTitle")}
               className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${emoRefOn ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface-2)] border border-[var(--color-border)]"}`}>
               <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${emoRefOn ? "left-[18px]" : "left-0.5"}`} />
             </button>
           </label>
           {/* Вставка легких дыханий */}
-          <label className="flex items-center justify-between gap-3 mb-2.5" title="Автоматическая подстановка тихих естественных вдохов в паузах между репликами">
+          <label className="flex items-center justify-between gap-3 mb-2.5" title={t("settings.breathTooltip")}>
             <div className="min-w-0 flex-1">
               <span className="text-[13px] text-[var(--color-text)] inline-flex items-center gap-2 font-medium">
                 <AudioLines size={14} className="text-[var(--color-accent-2)]" />
-                Вставка дыханий между фразами
+                {t("settings.breathTitle")}
               </span>
-              <span className="block text-[10px] text-[var(--color-muted)]">подстановка естественных мягких вдохов в паузах для оживления речи</span>
+              <span className="block text-[10px] text-[var(--color-muted)]">{t("settings.breathHint")}</span>
             </div>
-            <button onClick={() => { const v = !breathOn; setBreathOn(v); api.setSelection("breath_on", v ? "1" : "0").catch(() => {}); }} title="Вставка дыханий"
+            <button onClick={() => { const v = !breathOn; setBreathOn(v); api.setSelection("breath_on", v ? "1" : "0").catch(() => {}); }} title={t("settings.breathTitle")}
               className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${breathOn ? "bg-[var(--color-accent)]" : "bg-[var(--color-surface-2)] border border-[var(--color-border)]"}`}>
               <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${breathOn ? "left-[18px]" : "left-0.5"}`} />
             </button>
@@ -869,10 +872,10 @@ function TopBar() {
         <div id="dock-slot" className="flex items-center gap-2 shrink-0" />
         {/* Экспорт-сплит редактора (портал) — статично рядом с «Новый». */}
         <div id="editor-actions-slot" className="flex items-center gap-2" />
-        <button onClick={newProject} title="Создать проект (ручная настройка)"
+        <button onClick={newProject} title={t("nav.newManual")}
           className="inline-flex flex-col items-center justify-center px-3 py-1 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)] text-[var(--color-text)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors shadow-sm">
           <span className="text-[12px] font-bold flex items-center gap-1"><Plus size={13} /> {t("nav.new")}</span>
-          <span className="text-[9px] text-[var(--color-muted)] font-normal leading-none mt-0.5">ручная настройка</span>
+          <span className="text-[9px] text-[var(--color-muted)] font-normal leading-none mt-0.5">{t("nav.manual")}</span>
         </button>
         <button onClick={() => setHelp(true)} title={t("help.title")}
           className="p-1.5 rounded-md text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"><HelpCircle size={18} /></button>
@@ -1128,7 +1131,7 @@ function DropZone() {
   async function runManual() {
     if (!file) return;
     try {
-      useStore.getState().pushActivity("Создание проекта в ручном режиме...", "work");
+      useStore.getState().pushActivity(t("nav.manualCreating"), "work");
       const { project_id } = await api.createProject(file, isAudioFile(file) ? null : subsFile);
       s.setPid(project_id);
       const proj = await api.getProject(project_id);
@@ -1136,7 +1139,7 @@ function DropZone() {
       s.setRendered(false);
       s.setStage("editor");
       window.history.pushState(null, "", `?pid=${project_id}`);
-      useStore.getState().pushActivity("Создан проект в ручном режиме — готово к работе с субтитрами", "done");
+      useStore.getState().pushActivity(t("nav.manualCreated"), "done");
       playSfx("success");
     } catch (err) {
       useStore.getState().pushActivity(String(err), "error");
@@ -1476,10 +1479,10 @@ function DropZone() {
                     {/* ДАКИНГ ФОНА ПОД ДУБЛЯЖОМ — опция дубляжа (не всем нужен), ВЫКЛ по умолч.: вкл = фон
                         тише под голосом, выкл = фон на полной громкости. */}
                     {showDuck && (
-                      <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit" title="Приглушать фон под голосом в дубляже. Выкл — фон на полной громкости.">
+                      <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit" title={t("comp.duckHint")}>
                         <input type="checkbox" checked={duckOn} onChange={(e) => setDuckSaved(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
-                        Приглушать фон под голосом
-                        <span title="Дакинг: фон тише под речью дубляжа. Выкл — фон полный." onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
+                        {t("comp.duck")}
+                        <span title={t("comp.duckTooltip")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
                       </label>
                     )}
                     {/* ДЕТЕКЦИЯ ВШИТОГО ТЕКСТА (OCR). */}
@@ -1492,10 +1495,10 @@ function DropZone() {
                     )}
                     {/* БЛЮР-ПОДЛОЖКА ПОД СУБТИТРАМИ — опция (не всем нужна): выкл = текст без размытой подложки. */}
                     {showBlur && (
-                      <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit" title="Размытая подложка под субтитрами для читаемости. Выкл — текст без подложки.">
+                      <label className="mt-1.5 flex items-center gap-2 text-[12px] cursor-pointer select-none w-fit" title={t("comp.subBlurHint")}>
                         <input type="checkbox" checked={subBlur} onChange={(e) => setSubBlurSaved(e.target.checked)} className="accent-[var(--color-accent)] w-3.5 h-3.5" />
-                        Блюр-подложка под субтитрами
-                        <span title="Размытая подложка под субтитрами. Выкл — без подложки." onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
+                        {t("comp.subBlur")}
+                        <span title={t("comp.subBlurTooltip")} onClick={(e) => e.preventDefault()} className="cursor-help inline-flex text-[var(--color-muted)] opacity-40 hover:opacity-100 hover:text-[var(--color-accent-2)] transition"><HelpCircle size={12} /></span>
                       </label>
                     )}
                     {/* КАСТИНГ ПЕРСОНАЖЕЙ (#115): доп. проход по кадрам -> база персонажей (аватар/голос). Опц., дефолт ВЫКЛ. */}
@@ -1582,10 +1585,10 @@ function DropZone() {
               className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)] text-sm font-semibold disabled:opacity-40 hover:brightness-105 transition">
               {t("drop.start")} <ArrowRight size={16} />
             </button>
-            <button onClick={runManual} disabled={!file} title="Создать проект без автогенераций и сразу перейти к субтитрам"
+            <button onClick={runManual} disabled={!file} title={t("nav.manualHint")}
               className="inline-flex flex-col items-center justify-center px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] disabled:opacity-40 transition-colors">
-              <span className="text-[12px] font-semibold flex items-center gap-1"><Sliders size={13} /> Ручной режим</span>
-              <span className="text-[9px] text-[var(--color-muted)] font-normal leading-none mt-0.5">к субтитрам</span>
+              <span className="text-[12px] font-semibold flex items-center gap-1"><Sliders size={13} /> {t("nav.manualMode")}</span>
+              <span className="text-[9px] text-[var(--color-muted)] font-normal leading-none mt-0.5">{t("nav.toSubs")}</span>
             </button>
           </div>
           <button onClick={() => batchRef.current?.click()}
@@ -1734,6 +1737,7 @@ function WaveformTimeline({ pid, duration, scrub, segments, onSeek, gainDb = 0 }
 }
 
 function CommandPalette({ commands }: { commands: { label: string; run: () => void }[] }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   useEffect(() => {
@@ -1748,7 +1752,7 @@ function CommandPalette({ commands }: { commands: { label: string; run: () => vo
   return (
     <div className="fixed inset-0 z-50 grid place-items-start justify-center pt-[14vh] glass-scrim anim-fade" onClick={() => setOpen(false)}>
       <div className="w-[min(92vw,520px)] rounded-xl glass-panel anim-pop overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="⌘K  —  команды…"
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("cmdPalette.placeholder")}
           className="w-full bg-transparent px-4 py-3 text-[15px] border-b border-[var(--color-border)] focus:outline-none" />
         <div className="max-h-[50vh] overflow-y-auto p-1.5">
           {filtered.map((c, i) => (
@@ -2105,7 +2109,7 @@ function CastingPanel({ pid, characters, voices, onChange }: {
                         текст «clone» (иначе значение не из списка и автокомплит выглядит сломанным). */}
                     <Combobox value={d.voice && d.voice.toLowerCase() !== "clone" ? d.voice : ""}
                       onChange={(v) => setField(c.id, { voice: v || null })} options={voiceOpts}
-                      placeholder={cloudOn ? "— автокастинг по полу —" : t("casting.voiceClone")} noResults={t("voice.noMatch")} allowClear size="sm" className="w-full" />
+                      placeholder={cloudOn ? t("casting.autocastByGender") : t("casting.voiceClone")} noResults={t("voice.noMatch")} allowClear size="sm" className="w-full" />
                   </div>
                 </div>
               </div>
@@ -2137,6 +2141,7 @@ function InteractiveTimeline({
   onPlaySeg: (seg: Project["segments"][number]) => void;
   setProject: (p: Project) => void;
 }) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(60); // pixels per second
@@ -2295,12 +2300,12 @@ function InteractiveTimeline({
       <div className="flex items-center justify-between px-1 text-[11px] text-[var(--color-muted)]">
         <span className="font-semibold flex items-center gap-1.5">
           <AudioLines size={13} className="text-[var(--color-accent)]" />
-          Таймлайн аудио и субтитров
+          {t("timeline.title")}
         </span>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setZoom((z) => Math.max(20, z - 15))}
-            title="Отдалить (Zoom Out)"
+            title={t("timeline.zoomOut")}
             className="p-1 rounded bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]"
           >
             <ZoomOut size={13} />
@@ -2308,7 +2313,7 @@ function InteractiveTimeline({
           <span className="mono text-[10px] w-12 text-center">{zoom} px/s</span>
           <button
             onClick={() => setZoom((z) => Math.min(300, z + 15))}
-            title="Приблизить (Zoom In)"
+            title={t("timeline.zoomIn")}
             className="p-1 rounded bg-[var(--color-surface-2)] border border-[var(--color-border)] hover:border-[var(--color-accent)]"
           >
             <ZoomIn size={13} />
@@ -2349,7 +2354,7 @@ function InteractiveTimeline({
                 <div
                   onPointerDown={(e) => handlePointerDown(e, seg, "resize-left")}
                   className="w-2 h-full bg-white/20 hover:bg-[var(--color-accent)] cursor-col-resize shrink-0 rounded-l-md flex items-center justify-center text-[8px] opacity-60 hover:opacity-100"
-                  title="Изменить начало"
+                  title={t("timeline.editStart")}
                 >
                   │
                 </div>
@@ -2362,7 +2367,7 @@ function InteractiveTimeline({
                       e.stopPropagation();
                       onPlaySeg(seg);
                     }}
-                    title="Прослушать фразу"
+                    title={t("timeline.playLine")}
                     className="p-1 rounded-md bg-[var(--color-accent)] text-[var(--color-on-accent)] shrink-0 hover:scale-105 transition-transform"
                   >
                     <Play size={11} />
@@ -2381,7 +2386,7 @@ function InteractiveTimeline({
                 <div
                   onPointerDown={(e) => handlePointerDown(e, seg, "resize-right")}
                   className="w-2 h-full bg-white/20 hover:bg-[var(--color-accent)] cursor-col-resize shrink-0 rounded-r-md flex items-center justify-center text-[8px] opacity-60 hover:opacity-100"
-                  title="Изменить конец"
+                  title={t("timeline.editEnd")}
                 >
                   │
                 </div>
@@ -2620,7 +2625,7 @@ function Editor() {
           const writable = await handle.createWritable();
           await writable.write(content);
           await writable.close();
-          pushActivity("Файл субтитров успешно сохранён!", "done");
+          pushActivity(t("seg.subsSaved"), "done");
           playSfx("success");
           return;
         } catch (e: unknown) {
@@ -2629,7 +2634,7 @@ function Editor() {
       }
 
       await api.saveText(pid, "subtitles.srt", content);
-      pushActivity("Все изменения субтитров успешно сохранены!", "done");
+      pushActivity(t("seg.subsAllSaved"), "done");
       playSfx("success");
     } catch (err) {
       await surfaceErr(err);
@@ -2641,7 +2646,7 @@ function Editor() {
       const text = await file.text();
       const parsed = parseSrtAssText(text);
       if (parsed.length === 0) {
-        pushActivity("Файл субтитров пуст или не удалось распознать формат (.srt/.ass)", "error");
+        pushActivity(t("seg.subsParseError"), "error");
         playSfx("error");
         return;
       }
@@ -2664,7 +2669,7 @@ function Editor() {
       const saved = await api.putProject(pid, updatedProj);
       setProject(saved);
       bump();
-      pushActivity(`Загружены субтитры: ${parsed.length} фраз из ${file.name}`, "done");
+      pushActivity(t("seg.subsImported", { n: parsed.length, name: file.name }), "done");
       playSfx("success");
     } catch (err) {
       await surfaceErr(err);
@@ -2937,13 +2942,13 @@ function Editor() {
                   {spks.length > 1 && spks.map((spk) => <button key={spk} onClick={() => toggleMany(idsOf(spk))} className={chip}>SPK {spk}</button>)}
 
                   <div className="ml-auto inline-flex items-center gap-1.5 shrink-0">
-                    <button onClick={handleSaveSubtitles} title="Сохранить субтитры в файл (.srt)"
+                    <button onClick={handleSaveSubtitles} title={t("seg.saveSubsFile")}
                       className="inline-flex items-center justify-center p-1 rounded-md bg-[var(--color-surface-2)] border border-[var(--color-border)] text-[var(--color-text)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)] transition-colors shrink-0">
                       <Save size={14} />
                     </button>
-                    <label title="Импортировать файл субтитров (.srt, .ass, .vtt)" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-[var(--color-accent)] text-[var(--color-on-accent)] font-semibold cursor-pointer hover:brightness-110 transition shrink-0">
+                    <label title={t("seg.importSubsFile")} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-[var(--color-accent)] text-[var(--color-on-accent)] font-semibold cursor-pointer hover:brightness-110 transition shrink-0">
                       <Upload size={12} />
-                      <span>Импорт .srt/.ass</span>
+                      <span>{t("seg.importSubsShort")}</span>
                       <input type="file" accept=".srt,.ass,.vtt,.sub,.txt" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportSubtitles(f); e.target.value = ""; }} className="hidden" />
                     </label>
                   </div>
@@ -2976,13 +2981,13 @@ function Editor() {
                     <button type="button" draggable
                       onDragStart={(e) => { e.dataTransfer.setData("text/plain", seg.id); setDragSegId(seg.id); }}
                       onClick={(e) => e.stopPropagation()}
-                      title="Перетащить фразу (Drag & Drop)"
+                      title={t("seg.dragLine")}
                       className="cursor-grab active:cursor-grabbing text-[var(--color-muted)] hover:text-[var(--color-accent)] p-0.5 rounded shrink-0">
                       <GripVertical size={13} />
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); moveSeg(seg.id, "up"); }} disabled={idx === 0} title="Переместить вверх"
+                    <button onClick={(e) => { e.stopPropagation(); moveSeg(seg.id, "up"); }} disabled={idx === 0} title={t("seg.moveUp")}
                       className="p-0.5 text-[var(--color-muted)] hover:text-[var(--color-accent)] disabled:opacity-20 transition-colors shrink-0"><ChevronUp size={13} /></button>
-                    <button onClick={(e) => { e.stopPropagation(); moveSeg(seg.id, "down"); }} disabled={idx === p.segments.length - 1} title="Переместить вниз"
+                    <button onClick={(e) => { e.stopPropagation(); moveSeg(seg.id, "down"); }} disabled={idx === p.segments.length - 1} title={t("seg.moveDown")}
                       className="p-0.5 text-[var(--color-muted)] hover:text-[var(--color-accent)] disabled:opacity-20 transition-colors shrink-0"><ChevronDown size={13} /></button>
                     <button onClick={(e) => { e.stopPropagation(); setSelSegs((prev) => { const n = new Set(prev); n.has(seg.id) ? n.delete(seg.id) : n.add(seg.id); return n; }); }}
                       className={`grid place-items-center w-3.5 h-3.5 rounded shrink-0 border transition-colors ${selSegs.has(seg.id) ? "bg-[var(--color-accent)] border-[var(--color-accent)] text-[var(--color-on-accent)]" : "border-[var(--color-border)] hover:border-[var(--color-accent)]"}`}>
@@ -3052,9 +3057,9 @@ function Editor() {
             className="w-full mt-1 inline-flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-[var(--color-border)] text-[12px] text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] disabled:opacity-40 transition-colors">
             <Plus size={14} />{t("seg.add")}
           </button>
-          <label title="Загрузить готовые субтитры из файла (.srt, .ass)"
+          <label title={t("seg.loadSubsFile")}
             className="w-full mt-1.5 inline-flex items-center justify-center gap-1.5 py-2 rounded-xl border border-dashed border-[var(--color-border)] text-[12px] text-[var(--color-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] cursor-pointer transition-colors">
-            <Upload size={14} /> Импортировать субтитры (.srt, .ass)
+            <Upload size={14} /> {t("seg.importSubs")}
             <input type="file" accept=".srt,.ass,.vtt,.sub,.txt" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportSubtitles(f); e.target.value = ""; }} className="hidden" />
           </label>
         </div>
@@ -3424,12 +3429,12 @@ function Editor() {
           </Row>
 
           {/* Подложка (плашка) */}
-          <Row label="Подложка">
+          <Row label={t("style.plate")}>
             <div className="flex items-center gap-2">
               <Toggle label="" on={!!ss.plate} onClick={() => branch("caption", { plate: !ss.plate })} />
               {ss.plate && (
                 <input type="color" value={ss.plate_color || "#000000"} onChange={(e) => branch("caption", { plate_color: e.target.value })}
-                  title="Цвет подложки" className="bg-transparent w-7 h-5 rounded cursor-pointer border border-[var(--color-border)]" />
+                  title={t("style.plateColor")} className="bg-transparent w-7 h-5 rounded cursor-pointer border border-[var(--color-border)]" />
               )}
             </div>
           </Row>
@@ -3463,7 +3468,7 @@ function Editor() {
           <div className="pt-3 border-t border-[var(--color-border)]/50 mt-4">
             <label className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-[var(--color-accent)] text-[var(--color-on-accent)] text-[12px] font-semibold cursor-pointer hover:brightness-105 transition shadow-sm">
               <Upload size={14} />
-              <span>Импорт субтитров (.srt / .ass)</span>
+              <span>{t("seg.importSubs2")}</span>
               <input type="file" accept=".srt,.ass,.vtt,.sub,.txt" onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportSubtitles(f); e.target.value = ""; }} className="hidden" />
             </label>
           </div>
@@ -3503,7 +3508,7 @@ function Editor() {
                       <button key={spk} disabled={spkVoiceBusy !== null}
                         onClick={async () => {
                           setSpkVoiceBusy(spk);
-                          try { const r = await api.speakerVoice(pid!, spk, `Спикер ${spk}`); if (r.ok) { setVoiceList(r.voices); branch("recast", { voice_mode: "voice", voice_name: r.name }); } } catch { /* ignore */ } finally { setSpkVoiceBusy(null); }
+                          try { const r = await api.speakerVoice(pid!, spk, `${t("transcribe.speaker")} ${spk}`); if (r.ok) { setVoiceList(r.voices); branch("recast", { voice_mode: "voice", voice_name: r.name }); } } catch { /* ignore */ } finally { setSpkVoiceBusy(null); }
                         }}
                         className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[var(--color-border)] text-[12px] hover:border-[var(--color-accent)] disabled:opacity-40">
                         {spkVoiceBusy === spk ? <Loader2 size={12} className="animate-spin" /> : <AudioLines size={12} className="text-[var(--color-accent)]" />}SPK {spk}
@@ -3544,7 +3549,7 @@ function Editor() {
                 <div className="flex items-center gap-1.5 min-w-0 flex-1">
                   <Combobox value={cur} onChange={on}
                     options={voiceList.map((v) => ({ value: v, label: v }))}
-                    placeholder={voiceList.length ? t("voice.search") : "(пак не найден)"}
+                    placeholder={voiceList.length ? t("voice.search") : t("voice.packNotFound")}
                     noResults={t("voice.noMatch")} allowClear className="flex-1 min-w-0" />
                   <button type="button" disabled={!cur} onClick={() => toggleVoicePreview(cur)} title={t("voice.preview")}
                     className="shrink-0 w-8 h-8 inline-flex items-center justify-center rounded-lg border border-[var(--color-border)] hover:border-[var(--color-accent)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
@@ -3755,7 +3760,7 @@ function VoiceRecorder({ voiceList, onVoices, onDone }: { voiceList: string[]; o
   const lvlTimer = useRef<number | null>(null);
 
   const start = async () => {
-    const auto = `Голос ${voiceList.length + 1}`; // авто-имя, переименовать можно после
+    const auto = `${t("voice.autoName")} ${voiceList.length + 1}`; // авто-имя, переименовать можно после
     const r = await api.recordStart(auto).catch(() => null);
     if (!r || !r.ok) return;
     setRec(true);
@@ -3853,7 +3858,7 @@ function FilesPanel() {
           <div onPointerDown={fl.onDragStart}
             className={`flex items-center justify-between px-3 py-2 border-b border-[var(--color-border)] ${fl.dragging ? "cursor-grabbing" : "cursor-grab"}`}>
             <span className="flex items-center gap-1.5 mono text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted)]"><Move size={12} />{t("files.title")}</span>
-            <button onClick={fl.dock} title="Вернуть в шапку" className="text-[var(--color-muted)] hover:text-[var(--color-text)]"><Minimize2 size={14} /></button>
+            <button onClick={fl.dock} title={t("dock.toHeader")} className="text-[var(--color-muted)] hover:text-[var(--color-text)]"><Minimize2 size={14} /></button>
           </div>
           <div className="max-h-[52vh] overflow-y-auto p-2 space-y-1.5">
             {exports.map((e) => (
@@ -4004,7 +4009,7 @@ function FirstRun() {
         <div className="mt-4 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] px-3.5 py-3 space-y-2">
           <PresetsSection onApplied={() => { refresh().catch(() => {}); }} />
           <OpenRouterKey onSaved={() => { refresh().catch(() => {}); }} />
-          <div className="text-[11px] text-[var(--color-muted)] leading-snug">Выбрал <span className="text-[var(--color-text)]">Облако</span> и ввёл ключ? Тяжёлые локальные модели ниже можно не качать — перевод и озвучка пойдут через OpenRouter.</div>
+          <div className="text-[11px] text-[var(--color-muted)] leading-snug">{t("cloud.pickedCloudPre")} <span className="text-[var(--color-text)]">{t("cloud.pickedCloudWord")}</span> {t("cloud.pickedCloudPost")}</div>
         </div>
 
         <div className="mt-4 space-y-2">

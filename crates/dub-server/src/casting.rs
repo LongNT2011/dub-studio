@@ -353,7 +353,7 @@ pub fn recluster_segments(paths: &AnalyzePaths, segments: &mut [Segment], progre
     emit(
         progress,
         "asr",
-        &format!("голосовая переразметка: {k} персонажей по голосу (Sortformer нашёл {orig_count})"),
+        &format!("re-labeling by voice: {k} character(s) by voice (Sortformer found {orig_count})"),
     );
     k
 }
@@ -366,7 +366,7 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
         return;
     }
     if proj.segments.is_empty() {
-        emit(progress, "cast_detect", "кастинг пропущен: нет речевых сегментов");
+        emit(progress, "cast_detect", "casting skipped: no speech segments");
         return;
     }
     let anime = content_type.eq_ignore_ascii_case("anime");
@@ -378,11 +378,11 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
     // 1) СПИКЕРЫ по суммарному времени речи (главные персонажи первыми) — первичка кастинга.
     let ranked = speakers_by_talktime(proj);
     if ranked.is_empty() {
-        emit(progress, "cast_detect", "кастинг пропущен: нет спикеров");
+        emit(progress, "cast_detect", "casting skipped: no speakers");
         return;
     }
     let ids: Vec<String> = ranked.iter().map(|(s, _, _)| s.clone()).collect();
-    emit(progress, "cast_detect", &format!("персонажей-спикеров: {} (ранжированы по времени речи)", ranked.len()));
+    emit(progress, "cast_detect", &format!("speaker-character(s): {} (ranked by speaking time)", ranked.len()));
 
     // 2) Пол (F0) + голос (WeSpeaker: 256-d эмбеддинг + образец-фраза) — per-speaker, аудио. F0 считаем и
     // для аниме: после голосовой кластеризации каждый кластер — ОДИН голос, F0 на его чистой реплике
@@ -407,7 +407,7 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
         (Some(d), Some(e)) => faces_to_speakers(paths, proj, &ranked, d, e, anime, &cast_dir, progress),
         _ => std::collections::HashMap::new(),
     };
-    emit(progress, "cast_speaker", &format!("лиц привязано к спикерам: {} из {}", face_map.len(), ranked.len()));
+    emit(progress, "cast_speaker", &format!("faces linked to speakers: {} of {}", face_map.len(), ranked.len()));
 
     // 4) На КАЖДОГО спикера: аватар из его говорящих кадров + face-эмбеддинг + образец голоса -> Character.
     let mut casting = Casting {
@@ -441,14 +441,14 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
             emit(
                 progress,
                 "cast_speaker",
-                &format!("char_{ci}: спикер {spk} — 1 реплика, ни лица ни голоса -> пропуск (не кастуемый бит-парт)"),
+                &format!("char_{ci}: speaker {spk} — 1 line, no face and no voice -> skipping (not a castable bit part)"),
             );
             continue;
         }
         emit(
             progress,
             "cast_speaker",
-            &format!("char_{ci}: спикер {spk}, реплик {lines}, речь {dur:.0}с, лицо: {}", if has_face { "да" } else { "нет" }),
+            &format!("char_{ci}: speaker {spk}, {lines} line(s), speech {dur:.0}s, face: {}", if has_face { "yes" } else { "no" }),
         );
         casting.characters.push(Character {
             id: format!("char_{ci}"),
@@ -471,13 +471,13 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
             emit(
                 progress,
                 "cast_speaker",
-                &format!("профиль другого типа ({prev_type} ≠ {cur_type}) — кросс-матч пропущен"),
+                &format!("profile is a different content type ({prev_type} ≠ {cur_type}) — cross-match skipped"),
             );
         } else {
             let mt = dub_faces::match_cos_threshold();
             casting.characters = dub_faces::match_cross_episode(&casting.characters, &prev, mt);
             let carried = casting.characters.iter().filter(|c| !c.name.is_empty()).count();
-            emit(progress, "cast_speaker", &format!("cross-episode: перенесено имён/голосов: {carried}"));
+            emit(progress, "cast_speaker", &format!("cross-episode: carried over {carried} name(s)/voice(s)"));
         }
     }
 
@@ -504,8 +504,8 @@ pub fn stage(paths: &AnalyzePaths, proj: &Project, casting_ref: &str, content_ty
     // 6) записать casting.json.
     let path = paths.work_dir.join("casting.json");
     match save_casting(&path, &casting) {
-        Ok(()) => emit(progress, "cast_speaker", &format!("casting.json готов: {} персонаж(ей)", casting.characters.len())),
-        Err(e) => emit(progress, "cast_speaker", &format!("не удалось записать casting.json: {e}")),
+        Ok(()) => emit(progress, "cast_speaker", &format!("casting.json ready: {} character(s)", casting.characters.len())),
+        Err(e) => emit(progress, "cast_speaker", &format!("couldn't write casting.json: {e}")),
     }
 }
 
@@ -593,7 +593,7 @@ fn faces_to_speakers(
             face_frame.push(fp.clone());
         }
     }
-    emit(progress, "cast_speaker", &format!("лиц собрано: {} (сэмплов {})", faces.len(), times.len()));
+    emit(progress, "cast_speaker", &format!("faces collected: {} ({} sample(s))", faces.len(), times.len()));
     if faces.len() < 2 {
         let _ = std::fs::remove_dir_all(&tmp);
         return out;
@@ -601,7 +601,7 @@ fn faces_to_speakers(
 
     // 3) кластеризация по ВЕКТОРУ -> лица-персоны (медоид + кадр-аватар).
     let clusters = dub_faces::cluster_faces(&faces, dub_faces::cluster_cos_threshold());
-    emit(progress, "cast_speaker", &format!("лиц-персон (кластеров по вектору): {}", clusters.len()));
+    emit(progress, "cast_speaker", &format!("distinct faces (vector clusters): {}", clusters.len()));
 
     // 4) дискриминативная со-встречаемость с таймлайном реплик -> назначение кластер->спикер.
     let turns: Vec<SpeakerTurn> = proj
@@ -738,26 +738,26 @@ fn load_face_det(models_root: &Path, anime: bool, progress: &Progress) -> Option
     if anime {
         let p = models_root.join("faces").join("anime_face").join("model.onnx");
         if !p.is_file() {
-            emit(progress, "cast_detect", &format!("аниме-детектор не найден ({}) — без аватаров", p.display()));
+            emit(progress, "cast_detect", &format!("anime detector not found ({}) — no avatars", p.display()));
             return None;
         }
         match AnimeFaceDetector::load(&p) {
             Ok(d) => Some(FaceDet::Anime(d)),
             Err(e) => {
-                emit(progress, "cast_detect", &format!("аниме-детектор не загрузился: {e} — без аватаров"));
+                emit(progress, "cast_detect", &format!("anime detector failed to load: {e} — no avatars"));
                 None
             }
         }
     } else {
         let models = FacesModels::resolve(models_root);
         if !models.scrfd.is_file() {
-            emit(progress, "cast_detect", "SCRFD не найден — без аватаров (кастинг по голосу)");
+            emit(progress, "cast_detect", "SCRFD not found — no avatars (casting by voice)");
             return None;
         }
         match Scrfd::load(&models.scrfd) {
             Ok(d) => Some(FaceDet::Real(d)),
             Err(e) => {
-                emit(progress, "cast_detect", &format!("SCRFD не загрузился: {e} — без аватаров"));
+                emit(progress, "cast_detect", &format!("SCRFD failed to load: {e} — no avatars"));
                 None
             }
         }
@@ -768,13 +768,13 @@ fn load_face_emb(models_root: &Path, anime: bool, progress: &Progress) -> Option
     if anime {
         let p = dub_faces::ccip_path(models_root);
         if !p.is_file() {
-            emit(progress, "cast_embed", &format!("CCIP не найден ({}) — аватар без эмбеддинга", p.display()));
+            emit(progress, "cast_embed", &format!("CCIP not found ({}) — avatar without embedding", p.display()));
             return None;
         }
         match CcipEmbedder::load(&p) {
             Ok(e) => Some(FaceEmb::Ccip(e)),
             Err(e) => {
-                emit(progress, "cast_embed", &format!("CCIP не загрузился: {e} — аватар без эмбеддинга"));
+                emit(progress, "cast_embed", &format!("CCIP failed to load: {e} — avatar without embedding"));
                 None
             }
         }
@@ -786,7 +786,7 @@ fn load_face_emb(models_root: &Path, anime: bool, progress: &Progress) -> Option
         match LvFace::load(&models.lvface) {
             Ok(e) => Some(FaceEmb::Lv(e)),
             Err(e) => {
-                emit(progress, "cast_embed", &format!("LVFace не загрузился: {e} — аватар без эмбеддинга"));
+                emit(progress, "cast_embed", &format!("LVFace failed to load: {e} — avatar without embedding"));
                 None
             }
         }
@@ -805,7 +805,7 @@ fn extract_frame(video: &Path, t: f64, out: &Path) -> Result<image::RgbImage, St
         .output()
         .map_err(|e| format!("ffmpeg: {e}"))?;
     if !res.status.success() {
-        return Err("ffmpeg не извлёк кадр".into());
+        return Err("ffmpeg didn't extract a frame".into());
     }
     Ok(image::open(out).map_err(|e| format!("open frame: {e}"))?.to_rgb8())
 }
@@ -906,7 +906,7 @@ fn speaker_voices(
         } else if raw.is_file() {
             raw
         } else {
-            emit(progress, "cast_embed", "голосовой эмбеддинг пропущен: нет чистого вокала");
+            emit(progress, "cast_embed", "voice embedding skipped: no clean vocals");
             return (embs, samples);
         }
     };
@@ -915,13 +915,13 @@ fn speaker_voices(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| dub_faces::wespeaker_path(&paths.models_root));
     if !onnx.is_file() {
-        emit(progress, "cast_embed", &format!("голос пропущен: нет модели WeSpeaker ({})", onnx.display()));
+        emit(progress, "cast_embed", &format!("voice skipped: no WeSpeaker model ({})", onnx.display()));
         return (embs, samples);
     }
     let mut embedder = match dub_faces::VoiceEmbedder::load(&onnx) {
         Ok(e) => e,
         Err(e) => {
-            emit(progress, "cast_embed", &format!("WeSpeaker не загрузился: {e}; голос пропущен"));
+            emit(progress, "cast_embed", &format!("WeSpeaker failed to load: {e}; voice skipped"));
             return (embs, samples);
         }
     };
@@ -943,7 +943,7 @@ fn speaker_voices(
         let wav = cast_dir.join(format!("char-{}_voice.wav", sanitize(spk)));
         let end = seg.end.min(seg.start + VOICE_SAMPLE_MAX_SEC).max(seg.start + 0.05);
         if let Err(e) = crate::media::trim(&vocals, &wav, seg.start, end, 16_000) {
-            emit(progress, "cast_embed", &format!("образец голоса {spk}: обрезка не удалась: {e}"));
+            emit(progress, "cast_embed", &format!("voice sample {spk}: trim failed: {e}"));
             continue;
         }
         match embedder.embed_wav(&wav) {
@@ -952,13 +952,13 @@ fn speaker_voices(
                 samples.insert(spk.clone(), wav);
             }
             Err(e) => {
-                emit(progress, "cast_embed", &format!("голос {spk}: эмбеддинг не удался: {e}"));
+                emit(progress, "cast_embed", &format!("voice {spk}: embedding failed: {e}"));
                 samples.insert(spk.clone(), wav);
             }
         }
     }
     if !embs.is_empty() {
-        emit(progress, "cast_embed", &format!("голосовых эмбеддингов: {}", embs.len()));
+        emit(progress, "cast_embed", &format!("voice embeddings: {}", embs.len()));
     }
     (embs, samples)
 }
@@ -977,11 +977,11 @@ fn load_prev_casting(
         if crate::casting_library::is_safe_slug(slug) {
             let prof = paths.repo_root.join("casting_library").join(slug).join("casting.json");
             if let Some(c) = load_casting(&prof) {
-                emit(progress, "cast_speaker", &format!("применяю профиль библиотеки: {slug}"));
+                emit(progress, "cast_speaker", &format!("applying library profile: {slug}"));
                 return Some(c);
             }
         }
-        emit(progress, "cast_speaker", &format!("профиль библиотеки «{slug}» не найден — без применения"));
+        emit(progress, "cast_speaker", &format!("library profile \"{slug}\" not found — not applied"));
     }
     if let Some(p) = std::env::var_os("DUB_FACES_PREV_CASTING") {
         if let Some(c) = load_casting(Path::new(&p)) {

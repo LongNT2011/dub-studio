@@ -33,7 +33,7 @@ pub enum FrameDisposition {
 /// Запустить ffmpeg-экстракцию кадров (PNG frame_%06d.png @ fps) в out_dir. Возвращает fps сетки.
 /// Отдельно от чтения, чтобы потоковый обход мог декодировать кадры по одному.
 fn extract_frames(video: &Path, out_dir: &Path, fps: f64) -> Result<f64, String> {
-    std::fs::create_dir_all(out_dir).map_err(|e| format!("mkdir кадров: {e}"))?;
+    std::fs::create_dir_all(out_dir).map_err(|e| format!("mkdir frames: {e}"))?;
     let fps = if fps > 0.0 { fps } else { DEFAULT_FPS };
     let pattern = out_dir.join("frame_%06d.png");
     let out = Command::new(FFMPEG)
@@ -43,11 +43,11 @@ fn extract_frames(video: &Path, out_dir: &Path, fps: f64) -> Result<f64, String>
         .args(["-vf", &format!("fps={fps}"), "-vsync", "0"])
         .arg(&pattern)
         .output()
-        .map_err(|e| format!("ffmpeg запуск не удался: {e}"))?;
+        .map_err(|e| format!("ffmpeg launch failed: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         let tail: String = err.chars().rev().take(1200).collect::<String>().chars().rev().collect();
-        return Err(format!("ffmpeg код {:?}:\n{tail}", out.status.code()));
+        return Err(format!("ffmpeg code {:?}:\n{tail}", out.status.code()));
     }
     Ok(fps)
 }
@@ -163,7 +163,7 @@ pub fn crop_sharpness(img: &RgbImage, bbox: (f32, f32, f32, f32)) -> f32 {
 /// сторона лица × (1+2·pad)), центрирован на лице, клэмпится к границам кадра — карточка-аватарка ровная.
 /// Без кропа аватар был бы целым кадром (руки/фон), а не лицом (#115-баг).
 pub fn save_face_crop(frame_path: &Path, bbox: (f32, f32, f32, f32), pad_frac: f32, out: &Path) -> Result<(), String> {
-    let img = image::open(frame_path).map_err(|e| format!("открыть кадр {}: {e}", frame_path.display()))?.to_rgb8();
+    let img = image::open(frame_path).map_err(|e| format!("open frame {}: {e}", frame_path.display()))?.to_rgb8();
     let (iw, ih) = (img.width() as f32, img.height() as f32);
     let (x1, y1, x2, y2) = bbox;
     let (bw, bh) = ((x2 - x1).max(1.0), (y2 - y1).max(1.0));
@@ -176,7 +176,7 @@ pub fn save_face_crop(frame_path: &Path, bbox: (f32, f32, f32, f32), pad_frac: f
     let sw = (side as u32).max(1).min(img.width() - sx);
     let sh = (side as u32).max(1).min(img.height() - sy);
     let crop = image::imageops::crop_imm(&img, sx, sy, sw, sh).to_image();
-    crop.save(out).map_err(|e| format!("сохранить аватарку {}: {e}", out.display()))
+    crop.save(out).map_err(|e| format!("saving avatar {}: {e}", out.display()))
 }
 
 #[cfg(test)]

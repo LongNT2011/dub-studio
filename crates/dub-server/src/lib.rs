@@ -306,9 +306,9 @@ impl AppState {
 fn save_project_atomic(dir: &Path, proj: &Project) -> Result<(), String> {
     let json = proj
         .to_json_pretty()
-        .map_err(|e| format!("сериализация project.json: {e}"))?;
+        .map_err(|e| format!("serializing project.json: {e}"))?;
     let tmp = dir.join("project.json.tmp");
-    std::fs::write(&tmp, json.as_bytes()).map_err(|e| format!("запись tmp: {e}"))?;
+    std::fs::write(&tmp, json.as_bytes()).map_err(|e| format!("write tmp: {e}"))?;
     std::fs::rename(&tmp, dir.join("project.json")).map_err(|e| format!("rename: {e}"))?;
     Ok(())
 }
@@ -459,7 +459,7 @@ async fn setup_download(State(st): State<AppState>, Json(body): Json<Value>) -> 
         .map(|a| a.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect())
         .unwrap_or_default();
     if ids.is_empty() {
-        return (StatusCode::BAD_REQUEST, "ids пуст").into_response();
+        return (StatusCode::BAD_REQUEST, "ids is empty").into_response();
     }
     let root = st.repo_root.clone();
     let cancel_flag = st.setup_cancel.clone();
@@ -531,7 +531,7 @@ fn ensure_job_components(
     if need.is_empty() {
         return Ok(());
     }
-    progress(json!({ "stage": "download", "msg": "Догружаю недостающие модели для этой функции…" }));
+    progress(json!({ "stage": "download", "msg": "Fetching the missing models for this feature…" }));
     let cancel = || false; // догрузка внутри джобы не отменяется отдельно
     setup::download_components(repo_root, &need, &cancel, progress).map(|_| ())
 }
@@ -549,7 +549,7 @@ fn sanitize_voice_name(s: &str) -> String {
         .take(48)
         .collect();
     let n = n.trim().to_string();
-    if n.is_empty() { "Мой голос".to_string() } else { n }
+    if n.is_empty() { "My Voice".to_string() } else { n }
 }
 
 /// Имена голосов в каталоге: стемы .wav/.mp3 (запись с микрофона = .wav; пак = .mp3).
@@ -606,7 +606,7 @@ async fn record_level() -> Json<Value> {
 
 /// POST /record/start {name, device?} — начать запись голоса в voices/<name>.wav.
 async fn record_start(State(st): State<AppState>, Json(body): Json<Value>) -> Json<Value> {
-    let name = sanitize_voice_name(body.get("name").and_then(|v| v.as_str()).unwrap_or("Мой голос"));
+    let name = sanitize_voice_name(body.get("name").and_then(|v| v.as_str()).unwrap_or("My Voice"));
     let device = body.get("device").and_then(|v| v.as_str()).map(|s| s.to_string());
     let path = st.voices_dir.join(format!("{name}.wav"));
     match tokio::task::spawn_blocking(move || record::start(&path, device)).await {
@@ -650,7 +650,7 @@ async fn speaker_voice(
         .filter(|s| s.speaker.as_deref().unwrap_or("0") == want)
         .max_by(|a, b| (a.end - a.start).partial_cmp(&(b.end - b.start)).unwrap_or(std::cmp::Ordering::Equal));
     let Some(cand) = cand else {
-        return (StatusCode::BAD_REQUEST, "у спикера нет реплик").into_response();
+        return (StatusCode::BAD_REQUEST, "speaker has no lines").into_response();
     };
     let (start, end) = (cand.start, cand.end.min(cand.start + 12.0));
     let ref_text = cand.src_text.trim().to_string();   // реф-текст = расшифровка реплики (как Higgs build_speaker_reference)
@@ -725,7 +725,7 @@ async fn voice_slots_assign(
     let available: std::collections::BTreeSet<String> = list_voice_names(&st.voices_dir).into_iter().collect();
     for n in male.iter().chain(female.iter()) {
         if !available.contains(n) {
-            return (StatusCode::BAD_REQUEST, format!("голос {n:?} не найден в voices/")).into_response();
+            return (StatusCode::BAD_REQUEST, format!("voice {n:?} not found in voices/")).into_response();
         }
     }
     // Чистый вокал analyze: vocals16_clean.wav, фолбэк vocals16.wav (сырой 16k). Нет ни того ни другого -> 409.
@@ -737,7 +737,7 @@ async fn voice_slots_assign(
         } else if raw.is_file() {
             raw
         } else {
-            return (StatusCode::CONFLICT, "нет вокала для замера F0 — сначала analyze").into_response();
+            return (StatusCode::CONFLICT, "no vocals to measure F0 — run analyze first").into_response();
         }
     };
 
@@ -1079,7 +1079,7 @@ async fn casting_save(
         for c in &casting.characters {
             let v = c.dub_voice.trim();
             if !v.is_empty() && !v.eq_ignore_ascii_case("clone") && !available.contains(v) {
-                return (StatusCode::BAD_REQUEST, format!("голос {v:?} не найден в voices/")).into_response();
+                return (StatusCode::BAD_REQUEST, format!("voice {v:?} not found in voices/")).into_response();
             }
         }
     }
@@ -1194,7 +1194,7 @@ async fn setup_browse(State(st): State<AppState>, Json(body): Json<Value>) -> Js
     let root = st.repo_root.clone();
     let only = body.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
     let res = tokio::task::spawn_blocking(move || {
-        let title = if only.is_some() { "Файл(ы) модели" } else { "Папка с готовыми моделями" };
+        let title = if only.is_some() { "Model file(s)" } else { "Folder with ready-made models" };
         let dir = rfd::FileDialog::new().set_title(title).pick_folder();
         match dir {
             Some(d) => (true, setup::import_from_dir(&root, &d, only.as_deref())),
@@ -1428,7 +1428,7 @@ async fn delete_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
         Ok(()) => ([("content-type", "application/json")], "{\"ok\":true}").into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("удаление проекта {}: {e}", dir.display()),
+            format!("deleting project {}: {e}", dir.display()),
         )
             .into_response(),
     }
@@ -1465,7 +1465,7 @@ async fn analyze_project(
         .map(|e| dir.join(format!("import_subs.{e}")))
         .find(|p| p.is_file());
     if let Some(p) = &import_subs {
-        eprintln!("[analyze] импорт субтитров: {}", p.display());
+        eprintln!("[analyze] importing subtitles: {}", p.display());
     }
     let args = analyze::AnalyzeArgs {
         tgt_lang: qget("tgt_lang", "en"),
@@ -1527,7 +1527,7 @@ async fn analyze_project(
         if let (Some(b), Some(a)) = (cost_before, openrouter_cli::total_usage_usd(&paths.models_root)) {
             let spent = (a - b).max(0.0);
             if spent > 0.0 {
-                cb(json!({ "stage": "cost", "msg": format!("OpenRouter: потрачено ${spent:.4} за анализ (всего использовано ${a:.2})") }));
+                cb(json!({ "stage": "cost", "msg": format!("OpenRouter: spent ${spent:.4} on this analysis (${a:.2} total used)") }));
             }
         }
         save_project_atomic(&dir_for_save, &proj)?;
@@ -1646,7 +1646,7 @@ async fn render_project(State(st): State<AppState>, AxPath(pid): AxPath<String>)
         if let (Some(b), Some(a)) = (cost_before, openrouter_cli::total_usage_usd(&paths.models_root)) {
             let spent = (a - b).max(0.0);
             if spent > 0.0 {
-                cb(json!({ "stage": "cost", "msg": format!("OpenRouter: потрачено ${spent:.4} за прогон (всего использовано ${a:.2})") }));
+                cb(json!({ "stage": "cost", "msg": format!("OpenRouter: spent ${spent:.4} on this run (${a:.2} total used)") }));
             }
         }
         // Правки запечены в дубляж -> сбросить dirty (перечитать, чтобы не затереть правки во время рендера).
@@ -1762,7 +1762,7 @@ async fn export_lang(
         p.tgt_lang = lang_c.clone();
         let spoken = matches!(p.mode.as_str(), "dub" | "voiceover");
         progress(json!({ "type": "progress", "stage": "translate",
-            "msg": format!("Перевод {} строк → {}", p.segments.len(), lang_c) }));
+            "msg": format!("Translating {} line(s) → {}", p.segments.len(), lang_c) }));
         // LLM-провайдер: облако OpenRouter (если включено) ИЛИ локальный llama-server (плоский MT).
         let prov = crate::llm_provider::open(
             &crate::llm_provider::LlmOpen {
@@ -1773,7 +1773,7 @@ async fn export_lang(
             },
             crate::llm_provider::LlmMode::Text,
         )
-        .map_err(|e| format!("перевод: LLM недоступен — {e}"))?;
+        .map_err(|e| format!("translate: LLM unavailable — {e}"))?;
         let client = prov.client();
         // Сегменты: src_text -> Lx (раскладка/стили/тайминг остаются от пользователя).
         let mut segs: Vec<Seg> = p
@@ -1862,7 +1862,7 @@ async fn retranslate_project(
         p.audio.rewrite = None;
         let spoken = matches!(p.mode.as_str(), "dub" | "voiceover");
         progress(json!({ "type": "progress", "stage": "translate",
-            "msg": format!("Перевод {} строк → {}", p.segments.len(), lang_c) }));
+            "msg": format!("Translating {} line(s) → {}", p.segments.len(), lang_c) }));
         let prov = match crate::llm_provider::open(
             &crate::llm_provider::LlmOpen {
                 llama_bin: &llama_bin,
@@ -1883,7 +1883,7 @@ async fn retranslate_project(
                     }
                 }
                 progress(json!({ "type": "progress", "stage": "translate",
-                    "msg": format!("⚠ LLM недоступен ({e}) — режим изменен на {}, текстом оставлен исходный", mode) }));
+                    "msg": format!("⚠ LLM unavailable ({e}) — mode switched to {}, text left in the original language", mode) }));
                 save_project_atomic(&dir_for_job, &p)?;
                 return Ok(json!({ "project_id": pid_res, "ok": true }));
             }
@@ -2031,7 +2031,7 @@ async fn output(
 /// Для batch-экспорта: юзер выбирает ОДНУ папку назначения, дальше save-output кладёт туда все файлы.
 async fn pick_folder() -> Json<Value> {
     let dir = tokio::task::spawn_blocking(|| {
-        rfd::FileDialog::new().set_title("Куда сохранить результаты").pick_folder()
+        rfd::FileDialog::new().set_title("Where to save the results").pick_folder()
     })
     .await
     .ok()
@@ -2075,7 +2075,7 @@ async fn save_output(State(st): State<AppState>, AxPath(pid): AxPath<String>, Js
             .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("копирование в {}: {e}", dest.display()),
+            format!("copying to {}: {e}", dest.display()),
         )
             .into_response(),
     }

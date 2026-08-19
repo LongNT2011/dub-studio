@@ -220,7 +220,7 @@ pub fn burn(
         // (репро: 342 бокса = 37КБ аргументов), а CreateProcess ограничен 32767 символами —
         // spawn падал с ENAMETOOLONG, и burn умирал мгновенно.
         let graph_file = out.with_extension("filter");
-        std::fs::write(&graph_file, &graph).map_err(|e| format!("filter-скрипт: {e}"))?;
+        std::fs::write(&graph_file, &graph).map_err(|e| format!("filter script: {e}"))?;
         vec![
             filter_script_flag().into(),
             graph_file.to_string_lossy().into_owned(),
@@ -294,7 +294,7 @@ fn output_with_timeout(mut cmd: Command, secs: u64, log_cmd: bool) -> Result<std
         eprintln!("[burn] ffmpeg: {cmd:?}");
     }
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = cmd.spawn().map_err(|e| format!("ffmpeg запуск: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("ffmpeg launch: {e}"))?;
     let mut so = child.stdout.take().expect("piped stdout");
     let mut se = child.stderr.take().expect("piped stderr");
     let th_out = std::thread::spawn(move || { let mut b = Vec::new(); let _ = so.read_to_end(&mut b); b });
@@ -321,7 +321,7 @@ fn output_with_timeout(mut cmd: Command, secs: u64, log_cmd: bool) -> Result<std
                 let _ = child.wait();
                 let tail = stderr_tail(&drain(th_err, 10));
                 drain(th_out, 1);
-                return Err(format!("ffmpeg не завершился за {secs}с — убит (зависание).\n{tail}"));
+                return Err(format!("ffmpeg didn't finish within {secs}s — killed (hang).\n{tail}"));
             }
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(250)),
             Err(e) => return Err(format!("ffmpeg wait: {e}")),
@@ -390,7 +390,7 @@ pub fn burn_frame(
         let graph = blur_graph(&ass_f, boxes, w, h, blur_sigma, &lead, "sel");
         // Граф в файл — тот же 32767-символьный лимит CreateProcess, что и у полного burn.
         let graph_file = out_png.with_extension("filter");
-        std::fs::write(&graph_file, &graph).map_err(|e| format!("filter-скрипт: {e}"))?;
+        std::fs::write(&graph_file, &graph).map_err(|e| format!("filter script: {e}"))?;
         vec![
             filter_script_flag().into(),
             graph_file.to_string_lossy().into_owned(),

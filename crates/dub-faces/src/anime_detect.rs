@@ -61,7 +61,7 @@ impl AnimeFaceDetector {
         let (shape, data) = self.model.run_single(blob)?;
         // shape = [1, d1, d2]. Ось «5» = каналы (cx,cy,w,h,score), другая = N анкеров.
         if shape.len() != 3 {
-            return Err(format!("аниме-детектор: ждём 3-D выход, получили {shape:?}"));
+            return Err(format!("anime detector: expected a 3-D output, got {shape:?}"));
         }
         let (d1, d2) = (shape[1], shape[2]);
         let (n, channels_first) = if d1 == 5 {
@@ -69,7 +69,7 @@ impl AnimeFaceDetector {
         } else if d2 == 5 {
             (d1, false) // [1,N,5]
         } else {
-            return Err(format!("аниме-детектор: ни одна ось не ==5 (bbox4+score): {shape:?}"));
+            return Err(format!("anime detector: no axis == 5 (bbox4+score): {shape:?}"));
         };
         // Доступ к каналу c анкера i с учётом раскладки.
         let at = |c: usize, i: usize| -> f32 {

@@ -8,10 +8,10 @@ use std::path::Path;
 /// Err. `src_lang` — ISO-639-1 ("ru"/"en"/…) или "auto"/"" (авто-детект). Провайдер без сегментов (не
 /// verbose_json) -> один сегмент на весь текст.
 pub fn transcribe(models_root: &Path, wav: &Path, src_lang: &str) -> Result<Vec<(f64, f64, String)>, String> {
-    let key = crate::models::openrouter_key(models_root).ok_or("облачный ASR включён, но ключ OpenRouter не задан")?;
+    let key = crate::models::openrouter_key(models_root).ok_or("cloud ASR is enabled but no OpenRouter key is set")?;
     let model = crate::models::openrouter_model(models_root, "asr");
     if model.is_empty() {
-        return Err("STT-модель OpenRouter не выбрана в настройках".into());
+        return Err("no OpenRouter STT model selected in settings".into());
     }
     let repo = crate::openrouter_cli::repo_from_models(models_root);
     let lang = src_lang.trim();
@@ -38,7 +38,7 @@ pub fn transcribe(models_root: &Path, wav: &Path, src_lang: &str) -> Result<Vec<
         // Не verbose / без сегментов -> один сегмент на весь текст (лучше, чем ничего).
         let text = v.get("text").and_then(|x| x.as_str()).unwrap_or("").trim().to_string();
         if text.is_empty() {
-            return Err("облачный STT вернул пустой транскрипт".into());
+            return Err("cloud STT returned an empty transcript".into());
         }
         let dur = v.get("duration").and_then(|x| x.as_f64()).unwrap_or(0.0);
         out.push((0.0, dur.max(0.1), text));

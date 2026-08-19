@@ -21,10 +21,10 @@ const FFMPEG: &str = "ffmpeg";
 /// как локальный Higgs пишет seg через encode_wav). `voice` пусто -> дефолт из настроек.
 pub fn synth_audio(models_root: &Path, text: &str, voice: &str) -> Result<Vec<u8>, String> {
     let key = crate::models::openrouter_key(models_root)
-        .ok_or("облачный TTS включён, но ключ OpenRouter не задан")?;
+        .ok_or("cloud TTS is enabled but no OpenRouter key is set")?;
     let model = crate::models::openrouter_model(models_root, "tts");
     if model.is_empty() {
-        return Err("TTS-модель не выбрана в настройках (Облачные модели · OpenRouter)".into());
+        return Err("no TTS model selected in settings (Cloud models · OpenRouter)".into());
     }
     let v = if voice.trim().is_empty() {
         crate::models::openrouter_tts_voice(models_root)
@@ -32,7 +32,7 @@ pub fn synth_audio(models_root: &Path, text: &str, voice: &str) -> Result<Vec<u8
         voice.trim().to_string()
     };
     if v.is_empty() {
-        return Err("голос TTS не задан в настройках (у каждой модели свои голоса)".into());
+        return Err("no TTS voice set in settings (each model has its own voices)".into());
     }
 
     let repo = crate::openrouter_cli::repo_from_models(models_root);
@@ -68,11 +68,11 @@ pub fn synth_audio(models_root: &Path, text: &str, voice: &str) -> Result<Vec<u8
         let _ = std::fs::remove_file(&wav_tmp);
         return Err(format!("ffmpeg mp3->wav: {}", String::from_utf8_lossy(&out.stderr).trim()));
     }
-    let bytes = std::fs::read(&wav_tmp).map_err(|e| format!("чтение облачного wav: {e}"));
+    let bytes = std::fs::read(&wav_tmp).map_err(|e| format!("reading cloud wav: {e}"));
     let _ = std::fs::remove_file(&wav_tmp);
     let bytes = bytes?;
     if bytes.len() < 200 {
-        return Err(format!("облачный TTS: слишком короткое аудио ({} байт)", bytes.len()));
+        return Err(format!("cloud TTS: audio too short ({} bytes)", bytes.len()));
     }
     Ok(bytes)
 }

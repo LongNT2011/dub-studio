@@ -112,7 +112,7 @@ pub fn run(
     } else {
         meta.src_codec.clone()
     };
-    emit(progress, "probe", &format!("вход {}x{} dur={:.1}s", vw, vh, total));
+    emit(progress, "probe", &format!("input {}x{} dur={:.1}s", vw, vh, total));
 
     // voiceover (закадровый) = как dub, но оригинал слышно приглушённым ПОД переведённым голосом.
     let is_voiceover = proj.mode == "voiceover";
@@ -126,7 +126,7 @@ pub fn run(
         build_dub(proj, paths, total, keep_music, is_voiceover, regen_dub, progress)?
     } else {
         // nodub/transcribe: оставляем оригинальную дорожку — mux возьмёт её из исходного видео.
-        emit(progress, "mix", "nodub: оригинальная аудиодорожка");
+        emit(progress, "mix", "nodub: original audio track");
         paths.input.clone()
     };
 
@@ -143,7 +143,7 @@ pub fn run(
                 let _ = std::fs::remove_file(&stale);
             }
         }
-        emit(progress, "done", &format!("готово (только аудио) -> {}", out_wav.display()));
+        emit(progress, "done", &format!("done (audio only) -> {}", out_wav.display()));
         return Ok(RenderResult { output: out_wav });
     }
 
@@ -157,10 +157,10 @@ pub fn run(
         || !collect_blur_boxes(proj).is_empty();
     bench.stage("burn");
     let captioned = if proj.subs.burn && has_overlay {
-        emit(progress, "build", "сборка ASS (титры + дублированные субтитры)");
+        emit(progress, "build", "building ASS (titles + dubbed subtitles)");
         let ass_path = wd.join("caps.ass");
         let sub_covers = build_ass(proj, &ass_path, vw, vh, total)?;
-        emit(progress, "burn", "вжигание субтитров + блюр (ffmpeg + libass, NVENC)");
+        emit(progress, "burn", "burning subtitles + blur (ffmpeg + libass, NVENC)");
         let mut blur_boxes = collect_blur_boxes(proj);
         blur_boxes.extend(sub_covers.iter().map(cover_to_blur)); // блюр-подложка ПОД нашим текстом
         let captioned = wd.join("captioned.mp4");
@@ -179,13 +179,13 @@ pub fn run(
         )?;
         captioned
     } else {
-        emit(progress, "burn", "субтитры/титры отключены (subs.burn=off)");
+        emit(progress, "burn", "subtitles/titles disabled (subs.burn=off)");
         paths.input.clone()
     };
 
     // ── MUX ────────────────────────────────────────────────────────────────────
     bench.stage("mux");
-    emit(progress, "mux", "муксирование видео + аудио");
+    emit(progress, "mux", "muxing video + audio");
     // Экспорт с ОРИГИНАЛЬНОЙ дорожкой (#113): дубляж (default, 1-я) + оригинал (2-я). Только dub/voiceover
     // (в nodub/transcribe оригинал уже основной — вторая дорожка ни к чему). Контейнер mp4|mkv из настроек.
     // Выход — output.<container>; при ошибке мультитрек-mux — фолбэк на обычный одинодорожечный mux.
@@ -206,16 +206,16 @@ pub fn run(
             .and_then(|v| v.as_str())
             .unwrap_or("");
         let orig_lang = media::iso639_1_to_2(src_code);
-        let dub_title = format!("{} (дубляж)", lang_display(&proj.tgt_lang));
-        let orig_title = format!("{} (оригинал)", lang_display(src_code));
-        emit(progress, "mux", &format!("две дорожки: {dub_title} + {orig_title} -> {container}"));
+        let dub_title = format!("{} (dub)", lang_display(&proj.tgt_lang));
+        let orig_title = format!("{} (original)", lang_display(src_code));
+        emit(progress, "mux", &format!("two tracks: {dub_title} + {orig_title} -> {container}"));
         match media::mux_multitrack(
             &captioned, &new_audio, &paths.input, &out_path,
             dub_lang, orig_lang, &dub_title, &orig_title,
         ) {
             Ok(()) => muxed = true,
             Err(e) => {
-                emit(progress, "mux", &format!("мультитрек-mux не удался ({e}) -> одна дорожка"));
+                emit(progress, "mux", &format!("multitrack mux failed ({e}) -> single track"));
                 out_path = paths.output.clone();
             }
         }
@@ -241,7 +241,7 @@ pub fn run(
                 // Обязательно удалить (find_output отдаёт mp4 приоритетнее mkv -> иначе плеер получит
                 // битьё/старьё вместо свежего mkv, регресс #116 находки [0][1]). VLC играет mkv напрямую.
                 let _ = std::fs::remove_file(&mp4_companion);
-                emit(progress, "mux", &format!("mp4-компаньон не собран ({e}) — плеер откроет mkv (VLC ок)"));
+                emit(progress, "mux", &format!("mp4 companion not built ({e}) — player will open the mkv (VLC is fine)"));
             }
         }
     } else {
@@ -252,7 +252,7 @@ pub fn run(
         }
     }
 
-    emit(progress, "done", &format!("готово -> {}", out_path.display()));
+    emit(progress, "done", &format!("done -> {}", out_path.display()));
     bench.finish(|m| emit(progress, "bench", m));
     Ok(RenderResult { output: out_path })
 }
@@ -295,7 +295,7 @@ pub fn dub_audio(
     let out = wd.join("dub_audio.m4a");
     // привести к browser-playable aac/m4a (build_dub уже даёт m4a; nodub -> извлечь звук из оригинала).
     media::extract_audio(&src, &out, 44_100, 2)?;
-    emit(progress, "done", "дуб-аудио готово");
+    emit(progress, "done", "dub audio ready");
     Ok(out)
 }
 
@@ -354,9 +354,9 @@ fn voice_clone_guarded(
             engine.cancel(); // сигнал движку остановить текущую генерацию
             // Ждём фактического выхода отменённого вызова из DLL — только тогда движок снова можно трогать.
             match rx.recv_timeout(Duration::from_secs(GUARD_GRACE_SECS)) {
-                Ok(_) => Err(format!("таймаут синтеза >{}с — отменён, движок свободен", timeout.as_secs())),
+                Ok(_) => Err(format!("synthesis timeout >{}s — cancelled, engine is free", timeout.as_secs())),
                 Err(_) => Err(format!(
-                    "{ENGINE_STUCK}: синтез не отменяется >{}с — рендер прерван (движок завис в DLL)",
+                    "{ENGINE_STUCK}: synthesis not cancelling after >{}s — render aborted (engine stuck in DLL)",
                     timeout.as_secs() + GUARD_GRACE_SECS
                 )),
             }
@@ -389,7 +389,7 @@ fn synth_defect(samples: &[f32], sr: i32, tgt_chars: usize) -> Option<&'static s
         return Some("runaway");
     }
     if tgt_chars >= 4 && dur < tgt_chars as f64 * 0.045 {
-        return Some("обрыв");
+        return Some("cutoff");
     }
     let w = srn / 40;
     if w == 0 || samples.len() < w * 4 {
@@ -407,14 +407,14 @@ fn synth_defect(samples: &[f32], sr: i32, tgt_chars: usize) -> Option<&'static s
     }
     let peak = rms.iter().cloned().fold(0.0f64, f64::max);
     if peak < 0.02 {
-        return Some("тишина");
+        return Some("silence");
     }
     let thr = peak * 0.0316;
     let silent = rms.iter().filter(|&&r| r < thr).count() as f64 / frames as f64;
     let trough = rms.iter().cloned().filter(|&r| r > 1e-9).fold(peak, f64::min);
     let range = 20.0 * (peak / trough.max(1e-9)).log10();
     if range < 16.0 && silent < 0.03 {
-        return Some("гул");
+        return Some("hum");
     }
     None
 }
@@ -515,12 +515,12 @@ fn build_dub(
         .filter(|(_, s)| !seg_hidden(s) && (seg_keep(s) || !s.tgt_text.trim().is_empty()))
         .collect();
     if segs.is_empty() {
-        emit(progress, "tts", "нет строк с переводом -> тишина, оригинальная дорожка");
+        emit(progress, "tts", "no lines with a translation -> silence, original track");
         return Ok(paths.input.clone());
     }
 
     // 1) extract 44.1k stereo.
-    emit(progress, "extract_audio", "извлечение аудио (ffmpeg 44.1k stereo)");
+    emit(progress, "extract_audio", "extracting audio (ffmpeg 44.1k stereo)");
     let audio_hq = wd.join("audio_hq.wav");
     media::extract_audio(&paths.input, &audio_hq, 44100, 2)?;
 
@@ -534,15 +534,15 @@ fn build_dub(
         let cached_voc = stems.join("vocals.wav");
         let cached_inst = stems.join("instrumental.wav");
         if cached_voc.is_file() && cached_inst.is_file() {
-            emit(progress, "separate", "сепарация из кэша (stems уже посчитаны)");
+            emit(progress, "separate", "separation from cache (stems already computed)");
             (cached_voc, Some(cached_inst))
         } else if paths.bsroformer_cli.is_file() && paths.bsroformer_model.is_file() {
-            emit(progress, "separate", "сепарация (Mel-Band Roformer voc_fv6-Q8_0)");
+            emit(progress, "separate", "separating (Mel-Band Roformer voc_fv6-Q8_0)");
             let sep = dub_sep::separate(&audio_hq, &stems, &paths.bsroformer_cli, &paths.bsroformer_model)
-                .map_err(|e| format!("сепарация: {e}"))?;
+                .map_err(|e| format!("separation: {e}"))?;
             (sep.vocals, Some(sep.instrumental))
         } else {
-            emit(progress, "separate", "движок сепарации не найден -> без фона (keep_music off)");
+            emit(progress, "separate", "separation engine not found -> no background (keep_music off)");
             (audio_hq.clone(), None)
         }
     } else {
@@ -720,16 +720,16 @@ fn build_dub(
             (regen_dub && s.dirty) || !raw.is_file()
         })
         .count();
-    emit(progress, "tts", &format!("синтез {dirty_count} из {} сегментов", segs.len()));
+    emit(progress, "tts", &format!("synthesizing {dirty_count} of {} segment(s)", segs.len()));
     // Облачный TTS (OpenRouter) вместо локального Higgs: тяжёлую DLL + модель НЕ грузим вовсе — в этом и
     // смысл (снять самую тяжёлую часть). engine=None; синтез идёт по облачной ветке ниже.
     let cloud_tts_on = crate::models::openrouter_stage_on(&paths.models_root, "tts");
     let engine: Option<Arc<AudiocppEngine>> = if cloud_tts_on {
-        emit(progress, "tts", "TTS через облако (OpenRouter) — локальный Higgs не загружаем");
+        emit(progress, "tts", "TTS via cloud (OpenRouter) — not loading local Higgs");
         None
     } else {
         let e = Arc::new(
-            AudiocppEngine::load(&paths.higgs_dll).map_err(|e| format!("загрузка Higgs DLL: {e}"))?,
+            AudiocppEngine::load(&paths.higgs_dll).map_err(|e| format!("loading Higgs DLL: {e}"))?,
         );
         e.load_model(
             &paths.higgs_model_root,
@@ -786,7 +786,7 @@ fn build_dub(
         if !m.is_empty() {
             let mut desc: Vec<String> = m.iter().map(|(k, v)| format!("{k}→{v}")).collect();
             desc.sort();
-            emit(progress, "tts", &format!("облачные голоса по спикерам: {}", desc.join(", ")));
+            emit(progress, "tts", &format!("cloud voices by speaker: {}", desc.join(", ")));
         }
         m
     } else {
@@ -851,9 +851,9 @@ fn build_dub(
             jobs.push((raw, tgt.to_string(), voice));
         }
         if jobs.len() > 1 && conc > 1 {
-            emit(progress, "tts", &format!("облачный TTS: {} сегментов в {} параллельных потоков", jobs.len(), conc));
+            emit(progress, "tts", &format!("cloud TTS: {} segment(s) across {} parallel stream(s)", jobs.len(), conc));
             let ok = crate::cloud_tts::synth_batch(&paths.models_root, jobs, conc);
-            emit(progress, "tts", &format!("облачный TTS: пре-синтез готов ({ok} сегментов)"));
+            emit(progress, "tts", &format!("cloud TTS: pre-synthesis done ({ok} segment(s))"));
         }
     }
     for &(fi, s) in segs.iter() {
@@ -897,10 +897,10 @@ fn build_dub(
                 .unwrap_or("");
             match crate::cloud_tts::synth_audio(&paths.models_root, tgt, cv) {
                 Ok(wav) => {
-                    std::fs::write(&raw, &wav).map_err(|e| format!("запись облачного seg{fi}: {e}"))?;
+                    std::fs::write(&raw, &wav).map_err(|e| format!("writing cloud seg{fi}: {e}"))?;
                 }
                 Err(e) => {
-                    emit(progress, "tts", &format!("⚠ сегмент {fi}: облачный TTS не удался ({e}) — оригинал"));
+                    emit(progress, "tts", &format!("⚠ segment {fi}: cloud TTS failed ({e}) — original"));
                     media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
                     kept_original = true;
                 }
@@ -988,7 +988,7 @@ fn build_dub(
                 // минуты, так что порог чисто разделяет. Ошибка/таймаут -> как дефект (ретрай стохастику
                 // обычно лечит); исчерпали попытки -> ОРИГИНАЛ (сегмент дороже потерять, чем зависший рендер).
                 let vc_to = Duration::from_secs((((s.end - s.start) * 8.0).ceil() as u64).max(45));
-                let eng = engine.as_ref().expect("локальный Higgs (не облако)");
+                let eng = engine.as_ref().expect("local Higgs (not cloud)");
                 let (samples, sr) = match voice_clone_guarded(eng, tgt, &rw.to_string_lossy(), rt, &opts, vc_to) {
                     Ok(v) => v,
                     Err(e) if e.starts_with(ENGINE_STUCK) => return Err(e), // движок завис в DLL — обрыв, не гоняем параллельно
@@ -998,19 +998,19 @@ fn build_dub(
                         if attempt >= MAX_TTS_ATTEMPTS {
                             if let Some((sm, r, rng)) = best_bad.take() {
                                 emit(progress, "tts", &format!(
-                                    "⚠ сегмент {fi}: {MAX_TTS_ATTEMPTS} сбоев синтеза ({e}) — взята сгенерированная озвучка (размах {rng:.0} дБ)"
+                                    "⚠ segment {fi}: {MAX_TTS_ATTEMPTS} synthesis failure(s) ({e}) — using the generated take (range {rng:.0} dB)"
                                 ));
                                 break (sm, r);
                             } else {
                                 media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
                                 kept_original = true;
                                 emit(progress, "tts", &format!(
-                                    "⚠ сегмент {fi}: {MAX_TTS_ATTEMPTS} сбоев/таймаутов синтеза ({e}) — оставлена оригинальная реплика"
+                                    "⚠ segment {fi}: {MAX_TTS_ATTEMPTS} synthesis failure(s)/timeout(s) ({e}) — kept the original line"
                                 ));
                                 break (Vec::new(), 24_000);
                             }
                         }
-                        emit(progress, "tts", &format!("сегмент {fi}: {e} — регенерация ({}/{})", attempt + 1, MAX_TTS_ATTEMPTS));
+                        emit(progress, "tts", &format!("segment {fi}: {e} — regenerating ({}/{})", attempt + 1, MAX_TTS_ATTEMPTS));
                         continue;
                     }
                 };
@@ -1026,35 +1026,35 @@ fn build_dub(
                             // избегая сброса на оригинальный вокал.
                             if let Some((sm, r, rng)) = best_bad.take() {
                                 emit(progress, "tts", &format!(
-                                    "⚠ сегмент {fi}: все {MAX_TTS_ATTEMPTS} попыток с дефектом ({kind}) — взята сгенерированная озвучка (размах {rng:.0} дБ)"
+                                    "⚠ segment {fi}: all {MAX_TTS_ATTEMPTS} attempt(s) had a defect ({kind}) — using the generated take (range {rng:.0} dB)"
                                 ));
                                 break (sm, r);
                             } else {
                                 media::trim(&vocals, &raw, s.start, s.end, 24_000)?;
                                 kept_original = true;
                                 emit(progress, "tts", &format!(
-                                    "⚠ сегмент {fi}: {MAX_TTS_ATTEMPTS} попыток без звука — подставлен оригинал"
+                                    "⚠ segment {fi}: {MAX_TTS_ATTEMPTS} silent attempt(s) — fell back to the original"
                                 ));
                                 break (Vec::new(), sr);
                             }
                         }
                         retried = true;
                         total_retries += 1;
-                        let via = if attempt >= 3 { "альт-реф" } else { "temp-бамп" };
-                        emit(progress, "tts", &format!("сегмент {fi}: дефект синтеза ({kind}), регенерация ({via} {}/{})", attempt + 1, MAX_TTS_ATTEMPTS));
+                        let via = if attempt >= 3 { "alt-ref" } else { "temp-bump" };
+                        emit(progress, "tts", &format!("segment {fi}: synthesis defect ({kind}), regenerating ({via} {}/{})", attempt + 1, MAX_TTS_ATTEMPTS));
                     }
                 }
             };
             if !kept_original {
                 let wav = AudiocppEngine::encode_wav(&samples, sr, 1);
-                std::fs::write(&raw, &wav).map_err(|e| format!("запись seg{fi}: {e}"))?;
+                std::fs::write(&raw, &wav).map_err(|e| format!("writing seg{fi}: {e}"))?;
             }
             // Много ретраев подряд/суммарно = систем. проблема (стенд/VRAM или реф-клипы) → стоп с ошибкой.
             if retried {
                 consec += 1;
                 if consec > CONSECUTIVE_ABORT || total_retries > retry_budget {
                     return Err(format!(
-                        "TTS: слишком много артефактов-гудения (подряд {consec}, всего ретраев {total_retries}) — регенерация не помогает. Вероятно проблема со стендом (модель/VRAM) или с реф-клипами голосов. Остановлено на сегменте {fi}."
+                        "TTS: too many humming artifacts ({consec} in a row, {total_retries} retries total) — regeneration isn't helping. Likely a rig issue (model/VRAM) or bad voice reference clips. Stopped at segment {fi}."
                     ));
                 }
             } else {
@@ -1113,7 +1113,7 @@ fn build_dub(
             // Если лучший дубль — не первый, подменяем raw-файл
             if best_path != raw {
                 let _ = std::fs::copy(&best_path, &raw);
-                emit(progress, "tts", &format!("сегмент {fi}: multi-take — выбран дубль ближе к слоту ({best_score:.2}с отклонение)"));
+                emit(progress, "tts", &format!("segment {fi}: multi-take — picked the take closer to the slot ({best_score:.2}s off)"));
             }
         }
 
@@ -1164,7 +1164,7 @@ fn build_dub(
             if needed > eff_cap {
                 fit_over_cap += 1;
                 emit(progress, "mix", &format!(
-                    "сегмент {fi}: нужно растянуть x{needed:.2} (слот {target_slot:.2}с), кап x{eff_cap:.2} — текст быстрее нормы"
+                    "segment {fi}: needs stretch x{needed:.2} (slot {target_slot:.2}s), cap x{eff_cap:.2} — text is faster than normal"
                 ));
             }
         }
@@ -1191,9 +1191,9 @@ fn build_dub(
     // Итоговая доля «слишком быстрого текста» (#107) + дрейф-эскалации (#116).
     if fit_total > 0 {
         let frac = 100.0 * fit_over_cap as f64 / fit_total as f64;
-        let drift = if drift_escalations > 0 { format!(", догон синка на {drift_escalations}") } else { String::new() };
+        let drift = if drift_escalations > 0 { format!(", sync catch-up on {drift_escalations}") } else { String::new() };
         emit(progress, "mix", &format!(
-            "укладка: {fit_over_cap}/{fit_total} сегментов выше капа ({frac:.0}%){drift}"
+            "fitting: {fit_over_cap}/{fit_total} segment(s) above cap ({frac:.0}%){drift}"
         ));
     }
 
@@ -1204,7 +1204,7 @@ fn build_dub(
         .map(|v| v == "1")
         .unwrap_or(false);
     if run_qc_asr && !qc_list.is_empty() {
-        emit(progress, "tts", &format!("QC: сверка {} фраз транскрипцией", qc_list.len()));
+        emit(progress, "tts", &format!("QC: verifying {} line(s) by transcription", qc_list.len()));
         let mut qc_asr = crate::models::build_engine(&paths.asr);
         let files: Vec<PathBuf> = qc_list.iter().map(|q| q.2.clone()).collect();
         let heard = qc_asr.transcribe_many(&files, &proj.tgt_lang);
@@ -1218,7 +1218,7 @@ fn build_dub(
             }
         }
         if !bad_idx.is_empty() {
-            emit(progress, "tts", &format!("QC: {} фраз не совпали с переводом — пересинтез", bad_idx.len()));
+            emit(progress, "tts", &format!("QC: {} line(s) didn't match the translation — re-synthesizing", bad_idx.len()));
             for &i in &bad_idx {
                 let (fi, pidx, raw, tgtq, spk, room, fitp) = &qc_list[i];
                 let s = &proj.segments[*fi];
@@ -1245,7 +1245,7 @@ fn build_dub(
                 .enumerate()
                 {
                     let vc_to = Duration::from_secs((((s.end - s.start) * 8.0).ceil() as u64).max(45));
-                    let (smp, r) = match voice_clone_guarded(engine.as_ref().expect("локальный Higgs (QC не для облака)"), tgtq, &rw.to_string_lossy(), rt, &opts, vc_to) {
+                    let (smp, r) = match voice_clone_guarded(engine.as_ref().expect("local Higgs (QC not for cloud)"), tgtq, &rw.to_string_lossy(), rt, &opts, vc_to) {
                         Ok(v) => v,
                         Err(e) if e.starts_with(ENGINE_STUCK) => return Err(e), // движок завис — обрыв, не гоняем параллельно
                         Err(_) => continue,
@@ -1262,13 +1262,13 @@ fn build_dub(
                             placed[*pidx].1 = nf;
                             placed[*pidx].2 = nd;
                             fixed = true;
-                            emit(progress, "tts", &format!("QC: сегмент {fi} пересинтезирован (попытка {})", k + 1));
+                            emit(progress, "tts", &format!("QC: segment {fi} re-synthesized (attempt {})", k + 1));
                             break;
                         }
                     }
                 }
                 if !fixed {
-                    emit(progress, "tts", &format!("⚠ QC: сегмент {fi} («{}») не удалось подтвердить — проверь фразу вручную", tgtq.chars().take(40).collect::<String>()));
+                    emit(progress, "tts", &format!("⚠ QC: segment {fi} (\"{}\") couldn't be confirmed — check the line manually", tgtq.chars().take(40).collect::<String>()));
                 }
             }
             // финальная сверка пересинтезированных — честный отчёт в журнал
@@ -1281,17 +1281,17 @@ fn build_dub(
                     // Отключён сброс на оригинальное аудио. Сгенерированный TTS-звук ВСЕГДА остаётся
                     // на таймлайне, даже если QC (сверка через ASR) не подтвердил совпадение текста.
                     still += 1;
-                    emit(progress, "tts", &format!("⚠ QC: сегмент {} не совпадает с текстом перевода — оставлена сгенерированная озвучка", qc_list[i].0));
+                    emit(progress, "tts", &format!("⚠ QC: segment {} doesn't match the translated text — kept the generated take", qc_list[i].0));
                 }
             }
-            emit(progress, "tts", &format!("QC итог: исправлено {}/{}, осталось помеченных {}", bad_idx.len() - still, bad_idx.len(), still));
+            emit(progress, "tts", &format!("QC summary: fixed {}/{}, still flagged {}", bad_idx.len() - still, bad_idx.len(), still));
         } else {
-            emit(progress, "tts", "QC: все фразы подтверждены транскрипцией ✓");
+            emit(progress, "tts", "QC: all lines confirmed by transcription ✓");
         }
     }
 
     // 5) timeline -> dub_vocals.wav. Возвращает фактические спаны укладки.
-    emit(progress, "mix", "укладка дубляжа на таймлайн");
+    emit(progress, "mix", "laying the dub onto the timeline");
     let dub = wd.join("dub_vocals.wav");
     let breath_on = crate::models::load_selection(&paths.models_root)
         .get("breath_on")
@@ -1309,7 +1309,7 @@ fn build_dub(
         let fit = wd.join("dub_fit.wav");
         let sf = dub_dur / total;
         media::time_stretch(&dub, &fit, sf)?;
-        emit(progress, "mix", &format!("tempo-fit всей дорожки x{:.2}", sf));
+        emit(progress, "mix", &format!("tempo-fitting the whole track x{:.2}", sf));
         dub = fit;
         // огибающая дакинга едет вместе с дорожкой: границы блоков делим на тот же фактор.
         for b in &mut speech_blocks {
@@ -1326,12 +1326,12 @@ fn build_dub(
         // дорожку (−12 дБ навсегда, в т.ч. в паузах) — «странная настройка», оригинал не поднимался.
         let duck_db = proj.audio.voiceover_gain_db.clamp(VOICEOVER_DUCK_MIN_DB, 0.0);
         emit(progress, "mix", &format!(
-            "voiceover: оригинал {duck_db:+.1} dB ПОД переводом, полный в паузах (динам. огибающая, {} блоков)",
+            "voiceover: original {duck_db:+.1} dB UNDER the translation, full in pauses (dynamic envelope, {} block(s))",
             speech_blocks.len()));
         let new_audio = wd.join("new_audio.m4a");
         // Динамическая огибающая на ОРИГИНАЛ по таймингам перевода. Фолбэк — старое плоское приглушение.
         if media::mix_env_db(&dub, &audio_hq, &speech_blocks, duck_db, &new_audio).is_err() {
-            emit(progress, "mix", "voiceover: огибающая недоступна -> плоское приглушение");
+            emit(progress, "mix", "voiceover: envelope unavailable -> flat ducking");
             let bed = if duck_db.abs() < 0.05 {
                 audio_hq.clone()
             } else {
@@ -1354,14 +1354,14 @@ fn build_dub(
         // Дакинг фона под дубляжом — ОПЦИЯ (duck_on), ВЫКЛ по умолчанию: не всем нужен, многим фон нужен
         // на полной громкости. Выкл -> прямой mix (фон 1:1). Вкл -> огибающая −3дБ (каскад фолбэков).
         if !crate::models::duck_enabled(&paths.models_root) {
-            emit(progress, "mix", "сведение: инструментал + дубль-вокал (дакинг ВЫКЛ — фон полный)");
+            emit(progress, "mix", "mixing: instrumental + dubbed vocals (ducking OFF — background at full)");
             media::mix(&dub, &inst, &new_audio)?;
         } else {
-            emit(progress, "mix", &format!("сведение: инструментал + дубль-вокал (дакинг ВКЛ, огибающая, {} блоков)", speech_blocks.len()));
+            emit(progress, "mix", &format!("mixing: instrumental + dubbed vocals (ducking ON, envelope, {} block(s))", speech_blocks.len()));
             if media::mix_env(&dub, &inst, &speech_blocks, &new_audio).is_err() {
-                emit(progress, "mix", "огибающая недоступна -> сайдчейн-дакинг");
+                emit(progress, "mix", "envelope unavailable -> sidechain ducking");
                 if media::mix_ducked(&dub, &inst, &new_audio).is_err() {
-                    emit(progress, "mix", "sidechain недоступен -> прямой mix");
+                    emit(progress, "mix", "sidechain unavailable -> direct mix");
                     media::mix(&dub, &inst, &new_audio)?;
                 }
             }
@@ -1374,19 +1374,19 @@ fn build_dub(
     // (best-practice, НЕ питон — приказ 2026-07-12): пофразный normalize_voice выровнял спикеров (и
     // клипнул редкие пики фразы на 0.985), здесь программа приводится к целевой громкости соцсетей
     // (-14 LUFS); финальный true-peak лимитер держит межфразовые суммы и микс с фоном.
-    emit(progress, "mix", "нормализация громкости (EBU R128, true-peak)");
+    emit(progress, "mix", "normalizing loudness (EBU R128, true-peak)");
     let final_audio = wd.join("final_audio.m4a");
     let normalized = match media::loudnorm(&mixed, &final_audio, -14.0, -1.0, 11.0) {
         Ok(()) => final_audio,
         Err(e) => {
-            emit(progress, "mix", &format!("loudnorm пропущен ({e})"));
+            emit(progress, "mix", &format!("loudnorm skipped ({e})"));
             mixed
         }
     };
     // 8) монтажный гейн всей дорожки (если задан) — наша opt-in фича «усилить всё» поверх нормализации.
     let gain_db = proj.audio.gain_db;
     if gain_db.abs() > 0.05 {
-        emit(progress, "mix", &format!("гейн дорожки {gain_db:+.1} dB"));
+        emit(progress, "mix", &format!("track gain {gain_db:+.1} dB"));
         let gained = wd.join("gained_audio.m4a");
         match media::gain(&normalized, &gained, gain_db) {
             Ok(()) => Ok(gained),
@@ -1641,7 +1641,7 @@ fn build_speaker_refs(
                 emit(
                     progress,
                     "tts",
-                    &format!("⚠ спикер {spk}: все реф-кандидаты не прошли сверку (слышно: «{}») — беру лучший по скору", h0.chars().take(60).collect::<String>()),
+                    &format!("⚠ speaker {spk}: no reference candidate passed verification (heard: \"{}\") — using the best-scored one", h0.chars().take(60).collect::<String>()),
                 );
                 (0, verdict[0].1)
             }
@@ -1649,7 +1649,7 @@ fn build_speaker_refs(
         let main_seg = cands[main_i];
         let ref_wav = wd.join(format!("ref_spk{spk}.wav"));
         std::fs::rename(wd.join(format!("ref_cand_spk{spk}_{main_i}.wav")), &ref_wav)
-            .map_err(|e| format!("реф спикера {spk}: {e}"))?;
+            .map_err(|e| format!("speaker {spk} reference: {e}"))?;
         refs.insert(spk.clone(), ref_wav);
         // ref_text: прошёл сверку -> УСЛЫШАННОЕ (точно соответствует звуку клипа); иначе src_text.
         let t = main_heard
@@ -1684,11 +1684,11 @@ fn build_speaker_refs(
             progress,
             "tts",
             &format!(
-                "реф спикера {spk}: «{}» ({:.1}с, {} кандидата, сверка {})",
+                "speaker {spk} reference: \"{}\" ({:.1}s, {} candidate(s), verification {})",
                 texts.get(spk).map(|s| s.chars().take(50).collect::<String>()).unwrap_or_default(),
                 main_seg.end - main_seg.start,
                 cands.len(),
-                if passed.is_empty() { "⚠ не пройдена" } else { "ok" }
+                if passed.is_empty() { "⚠ not passed" } else { "ok" }
             ),
         );
     }

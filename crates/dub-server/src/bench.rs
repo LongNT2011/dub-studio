@@ -140,10 +140,10 @@ impl Bench {
                 }),
             );
             emit_line(&format!(
-                "  ⏱ {name}: {dur:.1}с | GPU ~{gpu_avg:.0}% (пик {gpu_max:.0}%) | CPU ~{cpu_avg:.0}% | VRAM {vram_max:.0}МБ | узко: {bound}"
+                "  ⏱ {name}: {dur:.1}s | GPU ~{gpu_avg:.0}% (peak {gpu_max:.0}%) | CPU ~{cpu_avg:.0}% | VRAM {vram_max:.0}MB | bound: {bound}"
             ));
         }
-        emit_line(&format!("  ⏱ {} ИТОГО: {total:.1}с", self.label));
+        emit_line(&format!("  ⏱ {} TOTAL: {total:.1}s", self.label));
         drop(samples);
         // дописать/смёржить bench.json (analyze и render пишут в один файл)
         let path = self.dir.join("bench.json");

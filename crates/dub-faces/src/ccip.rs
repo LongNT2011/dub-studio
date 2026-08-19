@@ -75,7 +75,7 @@ impl CcipEmbedder {
         let (shape, data) = self.model.run_single(blob)?;
         let n: usize = shape.iter().product();
         if n != CCIP_DIM {
-            return Err(format!("CCIP: ждём {CCIP_DIM}-d, получили {shape:?}"));
+            return Err(format!("CCIP: expected {CCIP_DIM}-d, got {shape:?}"));
         }
         Ok(data) // СЫРОЙ вектор — НЕ нормируем (L2-метрика на сырых)
     }

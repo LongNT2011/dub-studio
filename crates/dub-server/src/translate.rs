@@ -70,7 +70,7 @@ pub fn stage(
     // Импортированы субтитры УЖЕ на языке перевода: tgt заполнен из cues (analyze import-ветка),
     // MT и vision-раскладка не нужны — Даб Студио только озвучивает готовый текст.
     if args.import_translated {
-        emit(progress, "translate", "субтитры уже на языке перевода -> без MT (только озвучка)");
+        emit(progress, "translate", "subtitles already in the target language -> no MT (voicing only)");
         return;
     }
     let rewrite = if args.rewrite.is_empty() { None } else { Some(args.rewrite.as_str()) };
@@ -78,7 +78,7 @@ pub fn stage(
     if !do_translate {
         // transcribe-режим: tgt = исходный текст, БЕЗ MT (parity с pipeline «transcribe» веткой).
         copy_src_to_tgt(proj);
-        emit(progress, "translate", "transcribe: tgt=исходный текст, без перевода");
+        emit(progress, "translate", "transcribe: tgt=source text, no translation");
         return;
     }
 
@@ -90,19 +90,19 @@ pub fn stage(
     let same_lang = !src.is_empty() && src_lc != "auto" && src_lc == proj.tgt_lang.to_lowercase();
     if same_lang && rewrite.is_none() {
         copy_src_to_tgt(proj);
-        emit(progress, "translate", "same-lang -> без MT (tgt=исходник)");
+        emit(progress, "translate", "same-lang -> no MT (tgt=source)");
         return;
     }
 
     // Поднять сайдкар Gemma (+mmproj для vision). Существование бинаря/весов проверяет start().
     if !paths.llama_bin.is_file() {
         emit(progress, "translate", &format!(
-            "перевод пропущен: llama-server не найден ({})", paths.llama_bin.display()));
+            "translation skipped: llama-server not found ({})", paths.llama_bin.display()));
         return;
     }
     if !paths.mt_model.is_file() {
         emit(progress, "translate", &format!(
-            "перевод пропущен: GGUF Gemma не найден ({})", paths.mt_model.display()));
+            "translation skipped: GGUF Gemma not found ({})", paths.mt_model.display()));
         return;
     }
 
@@ -119,14 +119,14 @@ pub fn stage(
     ) {
         Ok(p) => {
             emit(progress, "translate", if p.is_remote() {
-                "перевод/vision через облако (OpenRouter)"
+                "translation/vision via cloud (OpenRouter)"
             } else {
-                "поднимаю llama-server (Gemma + mmproj)"
+                "starting llama-server (Gemma + mmproj)"
             });
             p
         }
         Err(e) => {
-            emit(progress, "translate", &format!("LLM недоступен: {e}; перевод пропущен"));
+            emit(progress, "translate", &format!("LLM unavailable: {e}; translation skipped"));
             return;
         }
     };
@@ -173,7 +173,7 @@ pub fn stage(
         style: proj.audio.translate_style.clone(),
     };
 
-    emit(progress, "vision", "ctx-проход: vision layout/scene + перевод транскрипта");
+    emit(progress, "vision", "ctx pass: vision layout/scene + translating transcript");
     let res = ctx_run(&client, &cfg, &mut segs, rewrite, |m| {
         emit(progress, "vision", m);
     });
@@ -189,7 +189,7 @@ pub fn stage(
     let extra = match res {
         Ok(r) => r.extra,
         Err(e) => {
-            emit(progress, "translate", &format!("ctx-перевод не удался: {e}; tgt оставлен пустым"));
+            emit(progress, "translate", &format!("ctx translation failed: {e}; tgt left empty"));
             return;
         }
     };
@@ -206,7 +206,7 @@ pub fn stage(
 
     let translated = proj.segments.iter().filter(|s| !s.tgt_text.is_empty()).count();
     emit(progress, "translate", &format!(
-        "перевод готов: {}/{} строк, тайтлов={}",
+        "translation ready: {}/{} line(s), titles={}",
         translated, proj.segments.len(), proj.captions.titles.len()));
 }
 
@@ -298,7 +298,7 @@ fn ensure_translation_coverage(
     if bad.is_empty() {
         return;
     }
-    emit(progress, "translate", &format!("покрытие перевода: {} строк без перевода — доперевожу", bad.len()));
+    emit(progress, "translate", &format!("translation coverage: {} line(s) untranslated — filling in", bad.len()));
     for _ in 0..2 {
         let mut sub: Vec<Seg> = bad
             .iter()
@@ -321,7 +321,7 @@ fn ensure_translation_coverage(
             .iter()
             .filter(|&&i| looks_untranslated(&segs[i].text, &segs[i].tgt, tgt_lang))
             .count();
-        emit(progress, "translate", &format!("покрытие перевода: осталось {still} без перевода"));
+        emit(progress, "translate", &format!("translation coverage: {still} still untranslated"));
         if still == 0 {
             break;
         }

@@ -468,7 +468,7 @@ pub fn run(
         progress,
         "ocr_detect",
         &format!(
-            "композит: титров={} (bbox), блюр {} боксов, sub_px={:?}",
+            "composite: titles={} (bbox), blur {} box(es), sub_px={:?}",
             proj.captions.titles.len(),
             proj.captions.blur_boxes.len(),
             sub_px
@@ -843,17 +843,17 @@ fn translate_taglines(
     ) {
         Ok(p) => p,
         Err(e) => {
-            emit(progress, "ocr_detect", &format!("таглайны: MT недоступен ({e}) -> только блюр"));
+            emit(progress, "ocr_detect", &format!("taglines: MT unavailable ({e}) -> blur only"));
             return;
         }
     };
-    emit(progress, "ocr_detect", "таглайны: перевод надписей титр-карты");
+    emit(progress, "ocr_detect", "taglines: translating title-card text");
     let client = prov.client();
     let mut segs: Vec<Seg> = tcard_rows.iter().map(|r| Seg::new(r.text.clone(), 0)).collect();
     let ok = flat_run(client, &mut segs, ctx.src_lang, &proj.tgt_lang, false, &proj.audio.translate_style).is_ok();
     drop(prov);
     if !ok {
-        emit(progress, "ocr_detect", "таглайны: перевод не удался; только блюр");
+        emit(progress, "ocr_detect", "taglines: translation failed; blur only");
         return;
     }
     // стиль заливки = sub_style (как ss в питоне).

@@ -115,13 +115,13 @@ impl LlamaServer {
     pub fn start(opts: &ServerOpts) -> Result<Self, LlmError> {
         if !opts.bin.is_file() {
             return Err(LlmError::Spawn(format!(
-                "llama-server не найден: {}",
+                "llama-server not found: {}",
                 opts.bin.display()
             )));
         }
         if !opts.model.is_file() {
             return Err(LlmError::Spawn(format!(
-                "GGUF-модель не найдена: {}",
+                "GGUF model not found: {}",
                 opts.model.display()
             )));
         }
@@ -213,7 +213,7 @@ impl LlamaServer {
             // Процесс упал -> не ждём таймаут впустую.
             if let Ok(Some(status)) = self.child.try_wait() {
                 return Err(LlmError::Spawn(format!(
-                    "llama-server завершился до готовности ({status}); stderr: {}",
+                    "llama-server exited before it was ready ({status}); stderr: {}",
                     tail_text(&self.log_tail)
                 )));
             }
@@ -232,7 +232,7 @@ impl LlamaServer {
             }
             if Instant::now() >= deadline {
                 return Err(LlmError::Spawn(format!(
-                    "llama-server не поднялся за {timeout_secs}с (порт {}); stderr: {}",
+                    "llama-server didn't come up within {timeout_secs}s (port {}); stderr: {}",
                     self.port,
                     tail_text(&self.log_tail)
                 )));

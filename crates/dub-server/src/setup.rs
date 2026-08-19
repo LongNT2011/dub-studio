@@ -173,7 +173,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "higgs",
             name: "Higgs Audio v3 (Q8_0)",
-            purpose: "Синтез дубляжа и клон голоса (TTS)",
+            purpose: "Dub synthesis and voice cloning (TTS)",
             requirement: Requirement::Required,
             delivery: Delivery::Download,
             size: 5_534_363_733,
@@ -194,8 +194,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "higgs-engine",
-            name: "Higgs движок (audiocpp_engine.dll)",
-            purpose: "Нативный TTS-движок Higgs (C-ABI)",
+            name: "Higgs engine (audiocpp_engine.dll)",
+            purpose: "Native Higgs TTS engine (C-ABI)",
             requirement: Requirement::Required,
             delivery: Delivery::Download,
             size: 71_727_104,
@@ -208,7 +208,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "gemma",
             name: "Gemma-4 12B QAT q4_0 + vision",
-            purpose: "Перевод и vision-оркестратор субтитров/титров",
+            purpose: "Translation and vision orchestrator for subtitles/titles",
             requirement: Requirement::Required,
             delivery: Delivery::Download,
             size: 7_150_992_992,
@@ -226,7 +226,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "gemma-q5_0",
             name: "Gemma-4 12B (Q5_K_M) + vision",
-            purpose: "Перевод и vision — точнее q4_0",
+            purpose: "Translation and vision — more accurate than q4_0",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 8_588_690_400,
@@ -240,7 +240,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "gemma-q6_k",
             name: "Gemma-4 12B (Q6_K) + vision",
-            purpose: "Перевод и vision — ещё точнее",
+            purpose: "Translation and vision — even more accurate",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 9_961_137_120,
@@ -254,7 +254,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "gemma-q8_0",
             name: "Gemma-4 12B (Q8_0) + vision",
-            purpose: "Перевод и vision — максимальная точность",
+            purpose: "Translation and vision — maximum accuracy",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 12_844_762_080,
@@ -268,7 +268,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "parakeet",
             name: "Parakeet-TDT 0.6B v3 (int8)",
-            purpose: "Распознавание речи со словными таймстемпами (ASR)",
+            purpose: "Speech recognition with word timestamps (ASR)",
             requirement: Requirement::Required,
             delivery: Delivery::Download,
             size: 688_819_567,
@@ -290,7 +290,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "higgs-q6_k",
             name: "Higgs Audio v3 (Q6_K)",
-            purpose: "Синтез дубляжа и клон голоса (TTS) — вариант полегче Q8_0",
+            purpose: "Dub synthesis and voice cloning (TTS) — lighter than Q8_0",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 5_035_000_000,
@@ -308,7 +308,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "higgs-q4_k_m",
             name: "Higgs Audio v3 (Q4_K_M)",
-            purpose: "Синтез дубляжа и клон голоса (TTS) — самый лёгкий вариант",
+            purpose: "Dub synthesis and voice cloning (TTS) — lightest variant",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 4_098_000_000,
@@ -327,7 +327,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "parakeet-fp32",
             name: "Parakeet-TDT 0.6B v3 (fp32)",
-            purpose: "Распознавание речи (ASR) — полная точность fp32",
+            purpose: "Speech recognition (ASR) — full fp32 accuracy",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 2_560_000_000,
@@ -347,8 +347,8 @@ pub fn manifest() -> Vec<Component> {
         // движок Parakeet/Whisper + РАЗНЫЕ модели (tiny…large-v3-turbo) + РАЗНЫЕ кванты (compute_type).
         Component {
             id: "whisper-engine",
-            name: "Whisper-Faster (движок ASR)",
-            purpose: "Альтернативный движок распознавания речи (faster-whisper) вместо Parakeet",
+            name: "Whisper-Faster (ASR engine)",
+            purpose: "Alternative speech recognition engine (faster-whisper) instead of Parakeet",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 87_654_143,
@@ -363,8 +363,8 @@ pub fn manifest() -> Vec<Component> {
         // Качается по запросу, когда стартует Whisper-джоба на GPU (см. ensure_job_components).
         Component {
             id: "whisper-cuda",
-            name: "CUDA-ускорение Whisper (cuBLAS + cuDNN)",
-            purpose: "GPU-инференс Whisper (иначе распознавание идёт на CPU, в разы медленнее)",
+            name: "CUDA acceleration for Whisper (cuBLAS + cuDNN)",
+            purpose: "GPU inference for Whisper (otherwise recognition runs on CPU, much slower)",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 1_125_090_089,
@@ -380,8 +380,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "whisper-tiny",
-            name: "Whisper tiny (модель ASR)",
-            purpose: "ASR Whisper — самая лёгкая и быстрая модель",
+            name: "Whisper tiny (ASR model)",
+            purpose: "ASR Whisper — the lightest, fastest model",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 78_203_619,
@@ -396,8 +396,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "whisper-base",
-            name: "Whisper base (модель ASR)",
-            purpose: "ASR Whisper — лёгкая модель, точнее tiny",
+            name: "Whisper base (ASR model)",
+            purpose: "ASR Whisper — light model, more accurate than tiny",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 147_882_941,
@@ -412,8 +412,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "whisper-small",
-            name: "Whisper small (модель ASR)",
-            purpose: "ASR Whisper — сбалансированная модель",
+            name: "Whisper small (ASR model)",
+            purpose: "ASR Whisper — balanced model",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 486_212_372,
@@ -428,8 +428,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "whisper-medium",
-            name: "Whisper medium (модель ASR)",
-            purpose: "ASR Whisper — высокая точность",
+            name: "Whisper medium (ASR model)",
+            purpose: "ASR Whisper — high accuracy",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 1_530_571_735,
@@ -444,8 +444,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "whisper-large-v3",
-            name: "Whisper large-v3 (модель ASR)",
-            purpose: "ASR Whisper — максимальная точность (large-v3)",
+            name: "Whisper large-v3 (ASR model)",
+            purpose: "ASR Whisper — maximum accuracy (large-v3)",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 3_090_835_702,
@@ -461,8 +461,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "whisper-large-v3-turbo",
-            name: "Whisper large-v3-turbo (модель ASR)",
-            purpose: "ASR Whisper — почти large-v3, но заметно быстрее (turbo)",
+            name: "Whisper large-v3-turbo (ASR model)",
+            purpose: "ASR Whisper — almost large-v3, but noticeably faster (turbo)",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 1_621_665_983,
@@ -478,8 +478,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "sortformer",
-            name: "Sortformer v2 (диаризация)",
-            purpose: "Разделение спикеров (кто когда говорит)",
+            name: "Sortformer v2 (diarization)",
+            purpose: "Speaker separation (who spoke when)",
             requirement: Requirement::Recommended,
             delivery: Delivery::Download,
             size: 492_243_002,
@@ -492,7 +492,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "roformer",
             name: "Mel-Band Roformer voc_fv6 (Q8_0)",
-            purpose: "Модель вокал/инструментал сепарации",
+            purpose: "Vocal/instrumental separation model",
             requirement: Requirement::Recommended,
             delivery: Delivery::Download,
             size: 251_707_744,
@@ -506,7 +506,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "roformer-q5",
             name: "Mel-Band Roformer voc_fv6 (Q5_0)",
-            purpose: "Сепарация — вариант полегче Q8_0",
+            purpose: "Separation — lighter than Q8_0",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 167_303_008,
@@ -519,7 +519,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "roformer-q4",
             name: "Mel-Band Roformer voc_fv6 (Q4_0)",
-            purpose: "Сепарация — самый лёгкий вариант",
+            purpose: "Separation — lightest variant",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 139_168_096,
@@ -540,8 +540,8 @@ pub fn manifest() -> Vec<Component> {
         //   • WeSpeaker ResNet34-LM — голосовой эмбеддинг: cross-episode матч голосов (на Xet-CAS).
         Component {
             id: "casting",
-            name: "Модели кастинга персонажей (лица + голос)",
-            purpose: "Детект/эмбеддинг лиц (реальные + аниме) + голосовой эмбеддинг для кастинга #115",
+            name: "Character casting models (faces + voice)",
+            purpose: "Face detection/embedding (real + anime) + voice embedding for casting #115",
             requirement: Requirement::Recommended,
             delivery: Delivery::Download,
             size: 1_331_548_084,
@@ -566,8 +566,8 @@ pub fn manifest() -> Vec<Component> {
         // ── СAЙДКАРЫ / ДВИЖКИ ───────────────────────────────────────────────
         Component {
             id: "bsroformer-engine",
-            name: "BSRoformer.cpp движок (CUDA)",
-            purpose: "Нативный движок сепарации (bs_roformer-cli + ggml-CUDA)",
+            name: "BSRoformer.cpp engine (CUDA)",
+            purpose: "Native separation engine (bs_roformer-cli + ggml-CUDA)",
             requirement: Requirement::Recommended,
             delivery: Delivery::Download,
             size: 164_990_561,
@@ -579,8 +579,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "bsroformer-engine-cpu",
-            name: "BSRoformer.cpp движок (CPU)",
-            purpose: "Сепарация на процессоре — режим без NVIDIA (медленнее, полная функция)",
+            name: "BSRoformer.cpp engine (CPU)",
+            purpose: "CPU separation — no-NVIDIA mode (slower, full functionality)",
             requirement: Requirement::Optional,
             delivery: Delivery::Download,
             size: 671_031,
@@ -592,8 +592,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "llama",
-            name: "llama.cpp сервер (CUDA 13.3)",
-            purpose: "Сайдкар-сервер для Gemma (перевод/vision)",
+            name: "llama.cpp server (CUDA 13.3)",
+            purpose: "Sidecar server for Gemma (translation/vision)",
             requirement: Requirement::Required,
             delivery: Delivery::Download,
             // Размер сжатого zip (для прогресса закачки); распакованный footprint ~683 МБ.
@@ -607,7 +607,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "onnxruntime",
             name: "ONNX Runtime 1.24.2",
-            purpose: "Рантайм ASR/OCR/диаризации (строго 1.24.2)",
+            purpose: "Runtime for ASR/OCR/diarization (exactly 1.24.2)",
             requirement: Requirement::Required,
             delivery: Delivery::Download,
             size: 74_075_355,
@@ -621,7 +621,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "onnxruntime-gpu",
             name: "ONNX Runtime 1.24.2 GPU (CUDA)",
-            purpose: "CUDA-провайдер для диаризации/Parakeet на GPU (режим local_backend=gpu)",
+            purpose: "CUDA provider for diarization/Parakeet on GPU (local_backend=gpu mode)",
             requirement: Requirement::Recommended,
             delivery: Delivery::Download,
             size: 288_348_147,
@@ -634,7 +634,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "ffmpeg",
             name: "FFmpeg (static win64)",
-            purpose: "Декод/энкод видео и аудио (NVENC)",
+            purpose: "Video/audio decode/encode (NVENC)",
             requirement: Requirement::Required,
             delivery: Delivery::Download,
             size: 168_601_393,
@@ -648,7 +648,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "cuda-runtime",
             name: "CUDA 13 runtime (cudart + cuBLAS + cuFFT)",
-            purpose: "Редистрибутивные CUDA-DLL для движков и CUDA-EP onnxruntime (без CUDA Toolkit)",
+            purpose: "Redistributable CUDA DLLs for the engines and onnxruntime's CUDA-EP (no CUDA Toolkit needed)",
             requirement: Requirement::Required,
             delivery: Delivery::Download,
             size: 628_433_797,
@@ -669,7 +669,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "cudnn",
             name: "cuDNN 9 (CUDA 13)",
-            purpose: "Нужен CUDA-провайдеру onnxruntime для диаризации/Parakeet на GPU",
+            purpose: "Needed by onnxruntime's CUDA provider for diarization/Parakeet on GPU",
             requirement: Requirement::Recommended,
             delivery: Delivery::Download,
             size: 408_000_000,
@@ -682,7 +682,7 @@ pub fn manifest() -> Vec<Component> {
         Component {
             id: "vcruntime",
             name: "Visual C++ Runtime (2015–2022)",
-            purpose: "Системные DLL движков (идут в комплекте)",
+            purpose: "System DLLs for the engines (bundled)",
             requirement: Requirement::Required,
             delivery: Delivery::Bundled,
             size: 1_084_896,
@@ -697,8 +697,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "ocr",
-            name: "OCR-модели (PP-OCR ONNX)",
-            purpose: "Детекция вшитого текста → блюр (идут в комплекте)",
+            name: "OCR models (PP-OCR ONNX)",
+            purpose: "Baked-in text detection → blur (bundled)",
             requirement: Requirement::Recommended,
             delivery: Delivery::Bundled,
             size: 31_726_193,
@@ -713,8 +713,8 @@ pub fn manifest() -> Vec<Component> {
         },
         Component {
             id: "nvidia-driver",
-            name: "Драйвер NVIDIA",
-            purpose: "GPU-ускорение (ставится отдельно, не приложением)",
+            name: "NVIDIA driver",
+            purpose: "GPU acceleration (installed separately, not by the app)",
             requirement: Requirement::Required,
             delivery: Delivery::External,
             size: 0,
@@ -1051,7 +1051,7 @@ pub fn download_components(
         .filter(|c| ids.iter().any(|x| x == c.id) && c.delivery == Delivery::Download)
         .collect();
     if selected.is_empty() {
-        return Err("нет скачиваемых компонентов среди выбранных id".to_string());
+        return Err("no downloadable components among the selected ids".to_string());
     }
 
     // Один агент на весь job: если включён прокси — все GET (probe + чанки) идут через него. Клонируется в
@@ -1075,7 +1075,7 @@ pub fn download_components(
         for f in c.files {
             let dest = repo_root.join(f.dest_rel);
             if let Some(parent) = dest.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| format!("создать {}: {e}", parent.display()))?;
+                std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
             }
             if f.extract == Extract::None && f.size != 0 {
                 if let Ok(meta) = std::fs::metadata(&dest) {
@@ -1111,7 +1111,7 @@ pub fn download_components(
         return Ok(json!({ "components": results, "ready": overall.ready }));
     }
 
-    progress(json!({ "msg": "Скачиваю модели…", "stage": "download" }));
+    progress(json!({ "msg": "Downloading models…", "stage": "download" }));
 
     // Чанки всех файлов в ОДНУ очередь; счётчик прогресса — на КАЖДЫЙ компонент (comp_done[ci]).
     enum Task {
@@ -1130,7 +1130,7 @@ pub fn download_components(
     let mut parts: Vec<(PathBuf, PathBuf, u64)> = Vec::new();
     for p in &planned {
         if cancel() {
-            return Err("отменено".to_string());
+            return Err("cancelled".to_string());
         }
         let (total, ranges_ok) = probe_size(&agent, p.url);
         comp_total[p.ci] += total;
@@ -1169,7 +1169,7 @@ pub fn download_components(
                 .write(true)
                 .truncate(!resuming) // резюм -> НЕ обнуляем уже скачанное
                 .open(&dl_target)
-                .map_err(|e| format!("создать {}: {e}", dl_target.display()))?;
+                .map_err(|e| format!("create {}: {e}", dl_target.display()))?;
             if !resuming {
                 file.set_len(total).map_err(|e| format!("set_len: {e}"))?;
             }
@@ -1180,7 +1180,7 @@ pub fn download_components(
                     .create(true)
                     .append(true)
                     .open(&done_path)
-                    .map_err(|e| format!("манифест {}: {e}", done_path.display()))?,
+                    .map_err(|e| format!("manifest {}: {e}", done_path.display()))?,
             ));
             let mut start = 0u64;
             while start < total {
@@ -1235,7 +1235,7 @@ pub fn download_components(
                         }
                     };
                     if let Err(e) = res {
-                        if e != "отменено" {
+                        if e != "cancelled" {
                             abort.store(true, Ordering::Relaxed);
                             let mut slot = error.lock().unwrap();
                             if slot.is_none() {
@@ -1268,7 +1268,7 @@ pub fn download_components(
                 .collect();
             progress(json!({
                 "stage": "download",
-                "msg": "Скачиваю модели…",
+                "msg": "Downloading models…",
                 "downloaded": got,
                 "total": grand_total,
                 "speed_mbps": mbps,
@@ -1308,7 +1308,7 @@ pub fn download_components(
     }
     if cancel() {
         cleanup(false); // отмена -> удалить незавершённое
-        return Err("отменено".to_string());
+        return Err("cancelled".to_string());
     }
 
     // Успех: валидируем каждый .part (размер == probed total; .gguf -> магия GGUF) и АТОМАРНО переименовываем
@@ -1318,7 +1318,7 @@ pub fn download_components(
         let sz = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
         if *total > 0 && sz != *total {
             let _ = std::fs::remove_file(part);
-            return Err(format!("докачка {}: неполный размер {sz}/{total}", target.display()));
+            return Err(format!("resume download {}: incomplete size {sz}/{total}", target.display()));
         }
         if target.extension().and_then(|s| s.to_str()) == Some("gguf") {
             let mut magic = [0u8; 4]; // трейт Read импортирован на уровне модуля
@@ -1328,11 +1328,11 @@ pub fn download_components(
                 .is_ok();
             if !ok || &magic != b"GGUF" {
                 let _ = std::fs::remove_file(part);
-                return Err(format!("докачка {}: не GGUF (magic={magic:02x?}) — файл битый", target.display()));
+                return Err(format!("resume download {}: not GGUF (magic={magic:02x?}) — file is corrupt", target.display()));
             }
         }
         std::fs::rename(part, target)
-            .map_err(|e| format!("переименовать {}: {e}", target.display()))?;
+            .map_err(|e| format!("rename {}: {e}", target.display()))?;
         let _ = std::fs::remove_file(done_manifest_path(part)); // файл целиком собран -> манифест не нужен
     }
 
@@ -1403,7 +1403,7 @@ fn dl_agent(repo_root: &Path) -> ureq::Agent {
     if let Some(url) = crate::models::proxy_url(&repo_root.join("models")) {
         match ureq::Proxy::new(&url) {
             Ok(proxy) => return ureq::Agent::config_builder().proxy(Some(proxy)).build().into(),
-            Err(e) => tracing::warn!("некорректный URL прокси ({e}) — закачка без прокси; проверьте настройки"),
+            Err(e) => tracing::warn!("invalid proxy URL ({e}) — downloading without proxy; check your settings"),
         }
     }
     ureq::Agent::new_with_defaults()
@@ -1460,7 +1460,7 @@ fn download_range(
     let mut last = String::new();
     for attempt in 0..RANGE_RETRIES {
         if abort.load(Ordering::Relaxed) {
-            return Err("отменено".into());
+            return Err("cancelled".into());
         }
         let mut got = 0u64;
         let res = download_range_once(agent, url, file, start, end, downloaded, abort, &mut got);
@@ -1479,15 +1479,15 @@ fn download_range(
                 }
                 return Ok(());
             }
-            Ok(()) => last = format!("неполный range: {got}/{want} байт"),
-            Err(e) if e == "отменено" => return Err(e),
+            Ok(()) => last = format!("incomplete range: {got}/{want} byte(s)"),
+            Err(e) if e == "cancelled" => return Err(e),
             Err(e) => last = e,
         }
         // откат прогресса этой попытки + бэкофф перед повтором (следующая попытка перезапишет диапазон)
         downloaded.fetch_sub(got.min(downloaded.load(Ordering::Relaxed)), Ordering::Relaxed);
         std::thread::sleep(std::time::Duration::from_millis(400 * (attempt as u64 + 1)));
     }
-    Err(format!("range {start}-{end} после {RANGE_RETRIES} попыток: {last}"))
+    Err(format!("range {start}-{end} after {RANGE_RETRIES} attempts: {last}"))
 }
 
 /// Одна попытка скачать диапазон. Пишет got = сколько байт реально записано (для отката прогресса).
@@ -1507,22 +1507,22 @@ fn download_range_once(
         .call()
         .map_err(|e| format!("range {start}-{end}: {e}"))?;
     if resp.status().as_u16() != 206 {
-        return Err(format!("range {start}-{end}: статус {} (ждали 206)", resp.status()));
+        return Err(format!("range {start}-{end}: status {} (expected 206)", resp.status()));
     }
     let mut reader = resp.into_body().into_reader();
     let mut buf = [0u8; 262_144];
     let mut offset = start;
     loop {
         if abort.load(Ordering::Relaxed) {
-            return Err("отменено".into());
+            return Err("cancelled".into());
         }
-        let n = reader.read(&mut buf).map_err(|e| format!("чтение range: {e}"))?;
+        let n = reader.read(&mut buf).map_err(|e| format!("read range: {e}"))?;
         if n == 0 {
             break;
         }
         let mut w = 0;
         while w < n {
-            let k = write_at(file, &buf[w..n], offset + w as u64).map_err(|e| format!("запись: {e}"))?;
+            let k = write_at(file, &buf[w..n], offset + w as u64).map_err(|e| format!("write: {e}"))?;
             if k == 0 {
                 return Err("short write".into());
             }
@@ -1546,17 +1546,17 @@ fn download_whole(
     use std::io::Write;
     let resp = agent.get(url).call().map_err(|e| format!("GET {url}: {e}"))?;
     let mut reader = resp.into_body().into_reader();
-    let mut file = File::create(dest).map_err(|e| format!("создать {}: {e}", dest.display()))?;
+    let mut file = File::create(dest).map_err(|e| format!("create {}: {e}", dest.display()))?;
     let mut buf = [0u8; 262_144];
     loop {
         if abort.load(Ordering::Relaxed) {
-            return Err("отменено".into());
+            return Err("cancelled".into());
         }
-        let n = reader.read(&mut buf).map_err(|e| format!("чтение: {e}"))?;
+        let n = reader.read(&mut buf).map_err(|e| format!("read: {e}"))?;
         if n == 0 {
             break;
         }
-        file.write_all(&buf[..n]).map_err(|e| format!("запись: {e}"))?;
+        file.write_all(&buf[..n]).map_err(|e| format!("write: {e}"))?;
         downloaded.fetch_add(n as u64, Ordering::Relaxed);
     }
     file.flush().map_err(|e| format!("flush: {e}"))?;
@@ -1567,11 +1567,11 @@ fn download_whole(
 
 /// zip: все файлы плоско (только имя) в dir. Для движков-сайдкаров (exe + DLL в одном уровне).
 fn extract_zip_flat(zip_path: &Path, dir: &Path) -> Result<(), String> {
-    let file = std::fs::File::open(zip_path).map_err(|e| format!("открыть {}: {e}", zip_path.display()))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("не zip: {e}"))?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("создать {}: {e}", dir.display()))?;
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("open {}: {e}", zip_path.display()))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("not a zip: {e}"))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i).map_err(|e| format!("запись zip: {e}"))?;
+        let mut entry = archive.by_index(i).map_err(|e| format!("zip entry: {e}"))?;
         if entry.is_dir() {
             continue;
         }
@@ -1588,14 +1588,14 @@ fn extract_zip_flat(zip_path: &Path, dir: &Path) -> Result<(), String> {
 /// zip: отобрать нужные файлы (onnxruntime.dll, ffmpeg.exe/ffprobe.exe) и положить плоско в dir.
 /// onnxruntime-win-x64-1.24.2/lib/onnxruntime.dll -> dir/onnxruntime.dll ; ffmpeg .../bin/*.exe -> dir/*.exe.
 fn extract_zip_pick(zip_path: &Path, dir: &Path) -> Result<(), String> {
-    let file = std::fs::File::open(zip_path).map_err(|e| format!("открыть {}: {e}", zip_path.display()))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("не zip: {e}"))?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("создать {}: {e}", dir.display()))?;
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("open {}: {e}", zip_path.display()))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("not a zip: {e}"))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     // Целевые: onnxruntime.dll (+.pdb не нужен), ffmpeg.exe, ffprobe.exe. Берём по имени листа.
     const WANT: &[&str] = &["onnxruntime.dll", "ffmpeg.exe", "ffprobe.exe"];
     let mut got = 0;
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i).map_err(|e| format!("запись zip: {e}"))?;
+        let mut entry = archive.by_index(i).map_err(|e| format!("zip entry: {e}"))?;
         if entry.is_dir() {
             continue;
         }
@@ -1609,7 +1609,7 @@ fn extract_zip_pick(zip_path: &Path, dir: &Path) -> Result<(), String> {
         }
     }
     if got == 0 {
-        return Err(format!("в архиве {} не найдено нужных файлов", zip_path.display()));
+        return Err(format!("archive {} doesn't contain the needed files", zip_path.display()));
     }
     Ok(())
 }
@@ -1617,11 +1617,11 @@ fn extract_zip_pick(zip_path: &Path, dir: &Path) -> Result<(), String> {
 /// zip: распаковать весь архив с сохранением поддерева в dir (onnxruntime-win-x64-*/lib/…). Защита от
 /// zip-slip: отбрасываем компоненты `..` и абсолютные пути.
 fn extract_zip_tree(zip_path: &Path, dir: &Path) -> Result<(), String> {
-    let file = std::fs::File::open(zip_path).map_err(|e| format!("открыть {}: {e}", zip_path.display()))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("не zip: {e}"))?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("создать {}: {e}", dir.display()))?;
+    let file = std::fs::File::open(zip_path).map_err(|e| format!("open {}: {e}", zip_path.display()))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("not a zip: {e}"))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i).map_err(|e| format!("запись zip: {e}"))?;
+        let mut entry = archive.by_index(i).map_err(|e| format!("zip entry: {e}"))?;
         if entry.is_dir() {
             continue;
         }
@@ -1639,7 +1639,7 @@ fn extract_zip_tree(zip_path: &Path, dir: &Path) -> Result<(), String> {
         }
         let out = dir.join(&rel);
         if let Some(parent) = out.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("создать {}: {e}", parent.display()))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
         }
         write_entry(&mut entry, &out)?;
     }
@@ -1648,12 +1648,12 @@ fn extract_zip_tree(zip_path: &Path, dir: &Path) -> Result<(), String> {
 
 /// wheel (zip): все *.dll плоско в dir (CUDA runtime — cudart/cublas/cublasLt).
 fn extract_wheel_dlls(wheel_path: &Path, dir: &Path) -> Result<(), String> {
-    let file = std::fs::File::open(wheel_path).map_err(|e| format!("открыть {}: {e}", wheel_path.display()))?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("wheel не zip: {e}"))?;
-    std::fs::create_dir_all(dir).map_err(|e| format!("создать {}: {e}", dir.display()))?;
+    let file = std::fs::File::open(wheel_path).map_err(|e| format!("open {}: {e}", wheel_path.display()))?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| format!("wheel is not a zip: {e}"))?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
     let mut written = 0;
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i).map_err(|e| format!("запись wheel: {e}"))?;
+        let mut entry = archive.by_index(i).map_err(|e| format!("wheel entry: {e}"))?;
         if entry.is_dir() {
             continue;
         }
@@ -1666,7 +1666,7 @@ fn extract_wheel_dlls(wheel_path: &Path, dir: &Path) -> Result<(), String> {
         written += 1;
     }
     if written == 0 {
-        return Err(format!("в wheel {} нет DLL", wheel_path.display()));
+        return Err(format!("wheel {} has no DLL", wheel_path.display()));
     }
     Ok(())
 }
@@ -1678,10 +1678,10 @@ fn write_entry(entry: &mut zip::read::ZipFile<impl std::io::Read>, out: &Path) -
         out.extension().and_then(|e| e.to_str()).map(|e| format!("{e}.")).unwrap_or_default()
     ));
     {
-        let mut fout = std::fs::File::create(&tmp).map_err(|e| format!("создать {}: {e}", tmp.display()))?;
-        std::io::copy(entry, &mut fout).map_err(|e| format!("распаковка {}: {e}", out.display()))?;
+        let mut fout = std::fs::File::create(&tmp).map_err(|e| format!("create {}: {e}", tmp.display()))?;
+        std::io::copy(entry, &mut fout).map_err(|e| format!("extract {}: {e}", out.display()))?;
     }
-    std::fs::rename(&tmp, out).map_err(|e| format!("финализация {}: {e}", out.display()))?;
+    std::fs::rename(&tmp, out).map_err(|e| format!("finalize {}: {e}", out.display()))?;
     Ok(())
 }
 

@@ -84,7 +84,7 @@ pub fn run(
             Err(e) => log(&format!("  ctx vision skipped: {e}")),
         }
     } else {
-        log("  ctx vision layout: пропущен (субтитры не вжигаются — раскладка не нужна)");
+        log("  ctx vision layout: skipped (subtitles not burned — no layout needed)");
     }
 
     // ── фаза 2: VISION scene-контекст ──────────────────────────────────────
@@ -235,7 +235,7 @@ fn translate_lines(
             ctx.chars().take(CTX_CHAR_BUDGET).collect::<String>()
         );
         log(&format!(
-            "  ctx translate: блок контекста {} симв. -> обрезан до {} (защита n_ctx)",
+            "  ctx translate: context block {} char(s) -> truncated to {} (n_ctx guard)",
             ctx.chars().count(),
             CTX_CHAR_BUDGET
         ));
@@ -262,7 +262,7 @@ fn translate_lines(
     };
     let gloss_suffix = crate::translate::glossary_suffix(&gloss);
     if bounds.len() > 1 {
-        log(&format!("  ctx translate: {} строк -> {} чанков (глоссарий: {} терм.)", line_texts.len(), bounds.len(), gloss.len()));
+        log(&format!("  ctx translate: {} line(s) -> {} chunk(s) (glossary: {} term(s))", line_texts.len(), bounds.len(), gloss.len()));
     }
 
     // re: 'N. <line>' — держим ПОСЛЕДНЕЕ вхождение номера (питон dict-comprehension).
@@ -374,17 +374,17 @@ numbering, match tone/slang/intent.{budget_rule}{style_c} Use ALL the context be
                     let mid = start + clen / 2;
                     stack.push((mid, end));
                     stack.push((start, mid));
-                    log(&format!("  ctx translate: чанк [{}..{}) не влёз ({e}) -> дроблю пополам", start + 1, end));
+                    log(&format!("  ctx translate: chunk [{}..{}) didn't fit ({e}) -> splitting in half", start + 1, end));
                 } else {
                     // одна строка и всё равно сбой -> оставляем как есть (исходник), НЕ рушим остальные
                     fail_lines += 1;
-                    log(&format!("  ctx translate: строка {} не переведена ({e}) -> оставлена как есть", start + 1));
+                    log(&format!("  ctx translate: line {} not translated ({e}) -> left as-is", start + 1));
                 }
             }
         }
     }
     if line_texts.len() > SHORT_LINES {
-        log(&format!("  ctx translate: готово — {ok_lines} строк переведено, {fail_lines} на исходнике"));
+        log(&format!("  ctx translate: done — {ok_lines} line(s) translated, {fail_lines} left in the source language"));
     }
     Ok(by_n)
 }

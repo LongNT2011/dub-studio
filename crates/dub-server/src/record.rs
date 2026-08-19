@@ -51,7 +51,7 @@ pub fn input_devices() -> Vec<String> {
 pub fn start(path: &std::path::Path, device: Option<String>) -> Result<(), String> {
     let mut guard = recorder().lock().map_err(|_| "recorder poisoned".to_string())?;
     if guard.is_some() {
-        return Err("Уже идёт запись".into());
+        return Err("Recording already in progress".into());
     }
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -73,12 +73,12 @@ pub fn start(path: &std::path::Path, device: Option<String>) -> Result<(), Strin
             None => host.default_input_device(),
         };
         let Some(device) = device else {
-            let _ = ready_tx.send(Err("Микрофон не найден".into()));
+            let _ = ready_tx.send(Err("No microphone found".into()));
             return;
         };
         let supported = match device.default_input_config() {
             Ok(c) => c,
-            Err(e) => { let _ = ready_tx.send(Err(format!("конфиг микрофона: {e}"))); return; }
+            Err(e) => { let _ = ready_tx.send(Err(format!("microphone config: {e}"))); return; }
         };
         let fmt = supported.sample_format();
         let ch = (supported.channels() as usize).max(1);
@@ -87,7 +87,7 @@ pub fn start(path: &std::path::Path, device: Option<String>) -> Result<(), Strin
         let spec = hound::WavSpec { channels: 1, sample_rate: sr, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
         let writer = match hound::WavWriter::create(&thread_path, spec) {
             Ok(w) => Arc::new(Mutex::new(Some(w))),
-            Err(e) => { let _ = ready_tx.send(Err(format!("создать wav: {e}"))); return; }
+            Err(e) => { let _ = ready_tx.send(Err(format!("create wav: {e}"))); return; }
         };
         let emit_every = (sr / 20).max(1) as usize;
 
@@ -120,14 +120,14 @@ pub fn start(path: &std::path::Path, device: Option<String>) -> Result<(), Strin
             cpal::SampleFormat::F32 => device.build_input_stream(&config, cb!(f32, |s: f32| s), err_fn, None),
             cpal::SampleFormat::I16 => device.build_input_stream(&config, cb!(i16, |s: i16| s as f32 / i16::MAX as f32), err_fn, None),
             cpal::SampleFormat::U16 => device.build_input_stream(&config, cb!(u16, |s: u16| (s as f32 - 32768.0) / 32768.0), err_fn, None),
-            other => { let _ = ready_tx.send(Err(format!("формат {other:?} не поддержан"))); return; }
+            other => { let _ = ready_tx.send(Err(format!("format {other:?} not supported"))); return; }
         };
         let stream = match built {
             Ok(s) => s,
-            Err(e) => { let _ = ready_tx.send(Err(format!("открыть микрофон: {e}"))); return; }
+            Err(e) => { let _ = ready_tx.send(Err(format!("open microphone: {e}"))); return; }
         };
         if let Err(e) = stream.play() {
-            let _ = ready_tx.send(Err(format!("старт микрофона: {e}")));
+            let _ = ready_tx.send(Err(format!("start microphone: {e}")));
             return;
         }
         let _ = ready_tx.send(Ok(()));
@@ -147,7 +147,7 @@ pub fn start(path: &std::path::Path, device: Option<String>) -> Result<(), Strin
 /// Остановить запись → путь к готовому WAV.
 pub fn stop() -> Result<std::path::PathBuf, String> {
     let mut guard = recorder().lock().map_err(|_| "recorder poisoned".to_string())?;
-    let st = guard.take().ok_or_else(|| "Запись не идёт".to_string())?;
+    let st = guard.take().ok_or_else(|| "Not recording".to_string())?;
     let _ = st.stop_tx.send(());
     std::thread::sleep(std::time::Duration::from_millis(200));
     peak_cell().store(0, Ordering::Relaxed);
@@ -200,7 +200,7 @@ pub fn catalog() -> serde_json::Value {
 pub fn fetch_voice(dir: &std::path::Path, name: &str) -> Result<(), String> {
     use std::io::Write;
     if name.is_empty() || name.contains("..") || name.contains('/') || name.contains('\\') {
-        return Err("плохое имя".into());
+        return Err("invalid name".into());
     }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let client = hf_client()?;
@@ -210,9 +210,9 @@ pub fn fetch_voice(dir: &std::path::Path, name: &str) -> Result<(), String> {
         let resp = client.get(&url).send().map_err(|e| format!("GET {ext}: {e}"))?;
         if !resp.status().is_success() {
             if ext == "txt" { continue; } // txt может отсутствовать — не критично
-            return Err(format!("HTTP {} для {name}.{ext}", resp.status().as_u16()));
+            return Err(format!("HTTP {} for {name}.{ext}", resp.status().as_u16()));
         }
-        let bytes = resp.bytes().map_err(|e| format!("тело {ext}: {e}"))?;
+        let bytes = resp.bytes().map_err(|e| format!("body {ext}: {e}"))?;
         let mut f = std::fs::File::create(dir.join(format!("{base}.{ext}"))).map_err(|e| e.to_string())?;
         f.write_all(&bytes).map_err(|e| e.to_string())?;
     }
@@ -222,33 +222,33 @@ pub fn fetch_voice(dir: &std::path::Path, name: &str) -> Result<(), String> {
 /// Скачать пак голосов (VibeVoice) и распаковать в `dir` (плоско, .mp3+.txt пары). Прогресс -> cb.
 pub fn download_pack(dir: &std::path::Path, cb: &dyn Fn(serde_json::Value)) -> Result<serde_json::Value, String> {
     use std::io::{Read, Write};
-    std::fs::create_dir_all(dir).map_err(|e| format!("создать {}: {e}", dir.display()))?;
-    cb(serde_json::json!({ "stage": "voicepack", "msg": "скачивание пака голосов", "pct": 0 }));
+    std::fs::create_dir_all(dir).map_err(|e| format!("create {}: {e}", dir.display()))?;
+    cb(serde_json::json!({ "stage": "voicepack", "msg": "downloading voice pack", "pct": 0 }));
     let client = reqwest::blocking::Client::builder()
         .timeout(None)
         .build()
         .map_err(|e| format!("http: {e}"))?;
-    let mut resp = client.get(VOICE_PACK_URL).send().map_err(|e| format!("GET пак: {e}"))?;
+    let mut resp = client.get(VOICE_PACK_URL).send().map_err(|e| format!("GET pack: {e}"))?;
     if !resp.status().is_success() {
-        return Err(format!("HTTP {} для пака", resp.status().as_u16()));
+        return Err(format!("HTTP {} for pack", resp.status().as_u16()));
     }
     let total = resp.content_length().unwrap_or(0);
     let tmp = dir.join("_voice-pack.zip");
-    let mut f = std::fs::File::create(&tmp).map_err(|e| format!("создать zip: {e}"))?;
+    let mut f = std::fs::File::create(&tmp).map_err(|e| format!("create zip: {e}"))?;
     let mut buf = [0u8; 1 << 16];
     let mut got = 0u64;
     loop {
-        let n = resp.read(&mut buf).map_err(|e| format!("чтение: {e}"))?;
+        let n = resp.read(&mut buf).map_err(|e| format!("read: {e}"))?;
         if n == 0 { break; }
-        f.write_all(&buf[..n]).map_err(|e| format!("запись: {e}"))?;
+        f.write_all(&buf[..n]).map_err(|e| format!("write: {e}"))?;
         got += n as u64;
         if total > 0 {
-            cb(serde_json::json!({ "stage": "voicepack", "msg": "скачивание пака голосов", "pct": (got as f64 / total as f64 * 90.0) }));
+            cb(serde_json::json!({ "stage": "voicepack", "msg": "downloading voice pack", "pct": (got as f64 / total as f64 * 90.0) }));
         }
     }
     drop(f);
-    cb(serde_json::json!({ "stage": "voicepack", "msg": "распаковка", "pct": 92 }));
-    let zf = std::fs::File::open(&tmp).map_err(|e| format!("открыть zip: {e}"))?;
+    cb(serde_json::json!({ "stage": "voicepack", "msg": "extracting", "pct": 92 }));
+    let zf = std::fs::File::open(&tmp).map_err(|e| format!("open zip: {e}"))?;
     let mut zip = zip::ZipArchive::new(zf).map_err(|e| format!("zip: {e}"))?;
     let mut count = 0;
     for i in 0..zip.len() {
@@ -260,11 +260,11 @@ pub fn download_pack(dir: &std::path::Path, cb: &dyn Fn(serde_json::Value)) -> R
             .map(|s| s.to_string());
         let Some(name) = name else { continue };
         let out = dir.join(&name);
-        let mut o = std::fs::File::create(&out).map_err(|e| format!("создать {name}: {e}"))?;
-        std::io::copy(&mut file, &mut o).map_err(|e| format!("распаковка {name}: {e}"))?;
+        let mut o = std::fs::File::create(&out).map_err(|e| format!("create {name}: {e}"))?;
+        std::io::copy(&mut file, &mut o).map_err(|e| format!("extract {name}: {e}"))?;
         count += 1;
     }
     let _ = std::fs::remove_file(&tmp);
-    cb(serde_json::json!({ "stage": "voicepack", "msg": format!("готово: {count} файлов"), "pct": 100 }));
+    cb(serde_json::json!({ "stage": "voicepack", "msg": format!("done: {count} file(s)"), "pct": 100 }));
     Ok(serde_json::json!({ "extracted": count }))
 }

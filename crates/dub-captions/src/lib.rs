@@ -363,7 +363,7 @@ pub fn build(width: i64, height: i64, out_ass: &Path, mut args: BuildArgs) -> Re
         }
     }
 
-    std::fs::write(out_ass, lines.join("\n")).map_err(|e| format!("запись ASS: {e}"))?;
+    std::fs::write(out_ass, lines.join("\n")).map_err(|e| format!("writing ASS: {e}"))?;
     Ok(covers)
 }
 

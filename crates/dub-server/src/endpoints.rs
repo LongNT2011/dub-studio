@@ -32,7 +32,7 @@ pub async fn presets() -> Json<Value> {
 pub async fn openrouter_models(State(st): State<AppState>, Query(q): Query<HashMap<String, String>>) -> Response {
     let kind = q.get("kind").cloned().unwrap_or_else(|| "llm".to_string());
     let Some(key) = crate::models::openrouter_key(&st.models_root) else {
-        return (StatusCode::BAD_REQUEST, "ключ OpenRouter не задан").into_response();
+        return (StatusCode::BAD_REQUEST, "no OpenRouter key set").into_response();
     };
     let repo = st.repo_root.clone();
     let payload = match kind.as_str() {
@@ -52,7 +52,7 @@ pub async fn openrouter_models(State(st): State<AppState>, Query(q): Query<HashM
             let data = v.get("data").cloned().unwrap_or(v);
             Json(json!({ "models": data })).into_response()
         }
-        Err(e) => (StatusCode::BAD_GATEWAY, format!("каталог OpenRouter: {e}")).into_response(),
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("OpenRouter catalog: {e}")).into_response(),
     }
 }
 
@@ -62,7 +62,7 @@ pub async fn openrouter_models(State(st): State<AppState>, Query(q): Query<HashM
 pub async fn openrouter_verify(State(st): State<AppState>, Json(body): Json<Value>) -> Response {
     let key = body.get("key").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if key.is_empty() {
-        return (StatusCode::BAD_REQUEST, "пустой ключ").into_response();
+        return (StatusCode::BAD_REQUEST, "empty key").into_response();
     }
     let repo = st.repo_root.clone();
     let res = tokio::task::spawn_blocking(move || {
@@ -86,7 +86,7 @@ pub async fn proxy_test(Json(body): Json<Value>) -> Response {
         let agent: ureq::Agent = if url.is_empty() {
             ureq::Agent::config_builder().http_status_as_error(false).build().into()
         } else {
-            let proxy = ureq::Proxy::new(&url).map_err(|e| format!("некорректный URL прокси: {e}"))?;
+            let proxy = ureq::Proxy::new(&url).map_err(|e| format!("invalid proxy URL: {e}"))?;
             ureq::Agent::config_builder()
                 .proxy(Some(proxy))
                 .http_status_as_error(false)
@@ -305,7 +305,7 @@ pub async fn remix_project(
             return Err("no transcript to remix — analyze first".into());
         }
         progress(json!({ "type": "progress",
-            "msg": format!("ремикс {} строк → {}", p.segments.len(),
+            "msg": format!("remix {} line(s) → {}", p.segments.len(),
                            &instr[..instr.len().min(60)]) }));
 
         // LLM-провайдер: облако OpenRouter (если включено) ИЛИ локальный llama-server (плоский rewrite).
@@ -319,7 +319,7 @@ pub async fn remix_project(
             },
             crate::llm_provider::LlmMode::Text,
         )
-        .map_err(|e| format!("ремикс: LLM недоступен — {e}"))?;
+        .map_err(|e| format!("remix: LLM unavailable — {e}"))?;
         let client = prov.client();
 
         let mut segs: Vec<Seg> = p

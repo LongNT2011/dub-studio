@@ -47,3 +47,10 @@ frontend/public/*.mp4
 
 # тестовые видео — не в репо (>100МБ лимит GitHub)
 test_media/
+
+**/.claude/**
+**/.github/**
+CLAUDE.md
+AGENTS.md
+**/.vscode/**
+*.log

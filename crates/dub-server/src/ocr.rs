@@ -31,10 +31,10 @@ pub fn stage(
 ) {
     let ocr_paths = OcrPaths::under(&paths.models_root);
     if !ocr_paths.all_exist() {
-        emit(progress, "ocr_detect", "модели OCR не найдены -> без блюр-боксов");
+        emit(progress, "ocr_detect", "OCR models not found -> no blur boxes");
         return;
     }
-    emit(progress, "ocr_detect", "детекция вшитого текста (PP-OCR DBNet+CRNN)");
+    emit(progress, "ocr_detect", "detecting baked-in text (PP-OCR DBNet+CRNN)");
 
     // spoken vocab из исходного транскрипта (для отсечения сцен-графики от субтитр-полосы).
     let spoken: HashSet<String> = proj
@@ -63,7 +63,7 @@ pub fn stage(
     ) {
         Ok(r) => r,
         Err(e) => {
-            emit(progress, "ocr_detect", &format!("OCR-детекция не удалась ({e}); без блюра"));
+            emit(progress, "ocr_detect", &format!("OCR detection failed ({e}); no blur"));
             return;
         }
     };
@@ -121,7 +121,7 @@ pub fn stage(
         progress,
         "ocr_detect",
         &format!(
-            "OCR: {} регионов, {} localize, {} band-спанов, sub_y={:?}",
+            "OCR: {} region(s), {} localize, {} band span(s), sub_y={:?}",
             regions.len(),
             localize.len(),
             band_blur.len(),

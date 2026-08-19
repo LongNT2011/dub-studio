@@ -71,7 +71,7 @@ pub fn snapshot() -> HardwareSnapshot {
             Err(e) => snap.message = format!("NVML device: {e}"),
         }
     } else if snap.message.is_empty() {
-        snap.message = "нет NVIDIA GPU".into();
+        snap.message = "no NVIDIA GPU".into();
     }
     drop(ng);
 

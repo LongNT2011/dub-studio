@@ -57,7 +57,7 @@ pub fn open(o: &LlmOpen, mode: LlmMode) -> Result<LlmProvider, String> {
     let stage = if mode == LlmMode::Vision { "vision" } else { "llm" };
     if crate::models::openrouter_stage_on(o.models_root, stage) {
         let key = crate::models::openrouter_key(o.models_root)
-            .ok_or("OpenRouter включён, но ключ не задан")?;
+            .ok_or("OpenRouter is enabled but no key is set")?;
         let model = crate::models::openrouter_model(o.models_root, stage);
         // Модель не выбрана (без хардкода id) — облако невозможно; тихо откатываемся на локаль
         // вместо пустого id в API (fail-safe, как и вся стадия).
@@ -68,10 +68,10 @@ pub fn open(o: &LlmOpen, mode: LlmMode) -> Result<LlmProvider, String> {
     }
 
     if !o.llama_bin.is_file() {
-        return Err(format!("llama-server не найден ({})", o.llama_bin.display()));
+        return Err(format!("llama-server not found ({})", o.llama_bin.display()));
     }
     if !o.mt_model.is_file() {
-        return Err(format!("GGUF Gemma не найден ({})", o.mt_model.display()));
+        return Err(format!("GGUF Gemma not found ({})", o.mt_model.display()));
     }
     let mut opts = ServerOpts::new(o.llama_bin, o.mt_model)
         .with_ubatch(crate::models::sel_num(o.models_root, "llama_ubatch").map(|f| f as u32));
@@ -79,6 +79,6 @@ pub fn open(o: &LlmOpen, mode: LlmMode) -> Result<LlmProvider, String> {
         opts = opts.with_mmproj(o.mmproj);
     }
     let server = LlamaServer::start(&opts).map_err(|e| format!("llama-server: {e}"))?;
-    let client = ChatClient::new(server.base_url()).map_err(|e| format!("клиент чата: {e}"))?;
+    let client = ChatClient::new(server.base_url()).map_err(|e| format!("chat client: {e}"))?;
     Ok(LlmProvider::Local { _server: server, client })
 }

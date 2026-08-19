@@ -54,10 +54,10 @@ pub fn probe(input: &Path) -> Result<MediaMeta, String> {
         ])
         .arg(input)
         .output()
-        .map_err(|e| format!("ffprobe запуск не удался: {e}"))?;
+        .map_err(|e| format!("ffprobe launch failed: {e}"))?;
     if !out.status.success() {
         return Err(format!(
-            "ffprobe вернул код {:?}: {}",
+            "ffprobe returned code {:?}: {}",
             out.status.code(),
             String::from_utf8_lossy(&out.stderr)
         ));
@@ -67,7 +67,7 @@ pub fn probe(input: &Path) -> Result<MediaMeta, String> {
     let streams = v
         .get("streams")
         .and_then(|s| s.as_array())
-        .ok_or("ffprobe: нет streams")?;
+        .ok_or("ffprobe: no streams")?;
     // Видеопоток ОПЦИОНАЛЕН: чистый аудио-вход (WAV/mp3/…) поддерживается в аудио-режиме (без видео).
     // Нет видео -> width/height/fps=0 (сигнал audio-only), кодек берём из аудиопотока.
     let vstream = streams
@@ -77,7 +77,7 @@ pub fn probe(input: &Path) -> Result<MediaMeta, String> {
         .iter()
         .find(|s| s.get("codec_type").and_then(|t| t.as_str()) == Some("audio"));
     if vstream.is_none() && astream.is_none() {
-        return Err("во входе нет ни видео-, ни аудиопотока".to_string());
+        return Err("input has neither a video nor an audio stream".to_string());
     }
     let duration = v
         .get("format")
@@ -91,7 +91,7 @@ pub fn probe(input: &Path) -> Result<MediaMeta, String> {
                 .and_then(|d| d.as_str())
                 .and_then(|d| d.parse::<f64>().ok())
         })
-        .ok_or("не удалось определить длительность")?;
+        .ok_or("couldn't determine duration")?;
     let width = vstream.and_then(|s| s.get("width")).and_then(|w| w.as_i64()).unwrap_or(0);
     let height = vstream.and_then(|s| s.get("height")).and_then(|h| h.as_i64()).unwrap_or(0);
     let fps = vstream
@@ -127,16 +127,16 @@ pub fn extract_wav_16k_mono(input: &Path, out_wav: &Path) -> Result<(), String> 
         ])
         .arg(out_wav)
         .output()
-        .map_err(|e| format!("ffmpeg запуск не удался: {e}"))?;
+        .map_err(|e| format!("ffmpeg launch failed: {e}"))?;
     if !status.status.success() {
         return Err(format!(
-            "ffmpeg extract_audio код {:?}: {}",
+            "ffmpeg extract_audio code {:?}: {}",
             status.status.code(),
             String::from_utf8_lossy(&status.stderr)
         ));
     }
     if !out_wav.is_file() {
-        return Err("ffmpeg не создал wav".into());
+        return Err("ffmpeg didn't create the wav".into());
     }
     Ok(())
 }
@@ -147,11 +147,11 @@ fn run_ff(args: &[&std::ffi::OsStr]) -> Result<(), String> {
     let out = Command::new(FFMPEG)
         .args(args)
         .output()
-        .map_err(|e| format!("ffmpeg запуск: {e}"))?;
+        .map_err(|e| format!("ffmpeg launch: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         let tail: String = err.chars().rev().take(1500).collect::<String>().chars().rev().collect();
-        return Err(format!("ffmpeg код {:?}:\n{tail}", out.status.code()));
+        return Err(format!("ffmpeg code {:?}:\n{tail}", out.status.code()));
     }
     Ok(())
 }
@@ -168,7 +168,7 @@ fn run_ff_timeout(args: &[&std::ffi::OsStr], secs: u64) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("ffmpeg запуск: {e}"))?;
+        .map_err(|e| format!("ffmpeg launch: {e}"))?;
     let mut se = child.stderr.take().expect("piped stderr");
     let th_err = std::thread::spawn(move || {
         let mut b = Vec::new();
@@ -182,7 +182,7 @@ fn run_ff_timeout(args: &[&std::ffi::OsStr], secs: u64) -> Result<(), String> {
             Ok(None) if std::time::Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(format!("ffmpeg не завершился за {secs}с — убит (зависание)"));
+                return Err(format!("ffmpeg didn't finish within {secs}s — killed (hang)"));
             }
             Ok(None) => std::thread::sleep(std::time::Duration::from_millis(250)),
             Err(e) => return Err(format!("ffmpeg wait: {e}")),
@@ -192,7 +192,7 @@ fn run_ff_timeout(args: &[&std::ffi::OsStr], secs: u64) -> Result<(), String> {
         let err = th_err.join().unwrap_or_default();
         let s = String::from_utf8_lossy(&err);
         let tail: String = s.chars().rev().take(1500).collect::<String>().chars().rev().collect();
-        return Err(format!("ffmpeg код {:?}:\n{tail}", status.code()));
+        return Err(format!("ffmpeg code {:?}:\n{tail}", status.code()));
     }
     Ok(())
 }
@@ -225,9 +225,9 @@ pub fn duration(path: &Path) -> Result<f64, String> {
         .args(["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"])
         .arg(path)
         .output()
-        .map_err(|e| format!("ffprobe запуск: {e}"))?;
+        .map_err(|e| format!("ffprobe launch: {e}"))?;
     if !out.status.success() {
-        return Err(format!("ffprobe duration код {:?}", out.status.code()));
+        return Err(format!("ffprobe duration code {:?}", out.status.code()));
     }
     String::from_utf8_lossy(&out.stdout)
         .trim()
@@ -383,7 +383,7 @@ fn mix_env_g(voice: &Path, music: &Path, blocks: &[SpeechBlock], g: f64, out: &P
     );
     // Граф — в файл: выражение огибающей на сотнях блоков раздувает cmdline за лимит CreateProcess.
     let script = out.with_extension("envfilter");
-    std::fs::write(&script, &fc).map_err(|e| format!("env filter-скрипт: {e}"))?;
+    std::fs::write(&script, &fc).map_err(|e| format!("env filter script: {e}"))?;
     // Таймаут пропорционален длине музыки (eval=frame дорог на многочасовом): max(600с, 2×длит.).
     let secs = (duration(music).unwrap_or(0.0) * 2.0).max(600.0) as u64;
     let r = run_ff_timeout(&[

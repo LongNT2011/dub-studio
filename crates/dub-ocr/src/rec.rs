@@ -26,7 +26,7 @@ impl RecDict {
     pub fn from_session_meta(model: &OnnxModel) -> Result<Self, String> {
         let raw = model
             .metadata_character()?
-            .ok_or_else(|| "в модели нет метаданных 'character'".to_string())?;
+            .ok_or_else(|| "model has no 'character' metadata".to_string())?;
         Ok(Self::from_dict_str(&raw))
     }
 

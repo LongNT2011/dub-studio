@@ -156,7 +156,7 @@ pub fn apply_proxy_env(mroot: &Path) {
         for k in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] {
             std::env::set_var(k, &url);
         }
-        tracing::info!("прокси включён: весь трафик через {}", mask_proxy(&url));
+        tracing::info!("proxy enabled: all traffic routed through {}", mask_proxy(&url));
     }
 }
 

@@ -107,6 +107,7 @@
     "italic": "Italic",
     "caps": "UPPERCASE",
     "plate": "Plate",
+    "plateColor": "Plate color",
     "resetAuto": "Reset to auto",
     "resetGlobal": "Reset to global"
   },
@@ -142,7 +143,9 @@
     "origGain": "Original volume",
     "origGainHint": "Voice-over: how loud the original track sits under the translation.",
     "langSearch": "Search language…",
-    "noMatch": "No matches"
+    "noMatch": "No matches",
+    "packNotFound": "(pack not found)",
+    "autoName": "Voice"
   },
   "remix": {
     "title": "Remix",
@@ -191,7 +194,14 @@
   },
   "nav": {
     "new": "New",
-    "newHint": "Start with a new video"
+    "newHint": "Start with a new video",
+    "newManual": "Create project (manual setup)",
+    "manual": "manual setup",
+    "manualCreating": "Creating project in manual mode…",
+    "manualCreated": "Manual project created — ready to work on subtitles",
+    "manualHint": "Create a project without auto-generation, straight to subtitles",
+    "manualMode": "Manual mode",
+    "toSubs": "to subtitles"
   },
   "play": {
     "dub": "Play the dub (video + voiceover)",
@@ -244,7 +254,20 @@
     "show": "Show line",
     "del": "Delete line",
     "refresh": "Refresh",
-    "refreshHint": "Force-refresh the preview / subtitles (if it lags or hangs)"
+    "refreshHint": "Force-refresh the preview / subtitles (if it lags or hangs)",
+    "subsSaved": "Subtitle file saved!",
+    "subsAllSaved": "All subtitle changes saved!",
+    "subsParseError": "Subtitle file is empty or the format couldn't be recognized (.srt/.ass)",
+    "subsImported": "Imported subtitles: {{n}} line(s) from {{name}}",
+    "saveSubsFile": "Save subtitles to file (.srt)",
+    "importSubsFile": "Import a subtitle file (.srt, .ass, .vtt)",
+    "importSubsShort": "Import .srt/.ass",
+    "dragLine": "Drag line (Drag & Drop)",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
+    "loadSubsFile": "Load subtitles from a file (.srt, .ass)",
+    "importSubs": "Import subtitles (.srt, .ass)",
+    "importSubs2": "Import subtitles (.srt / .ass)"
   },
   "settings": {
     "sounds": "Notification sounds",
@@ -276,7 +299,25 @@
     "auto": "Auto",
     "sec": "s",
     "bench": "Stage benchmark",
-    "benchHint": "Measure time/GPU/VRAM per pipeline stage -> bench.json + ⏱ lines in the log. Light background sampling once per second."
+    "benchHint": "Measure time/GPU/VRAM per pipeline stage -> bench.json + ⏱ lines in the log. Light background sampling once per second.",
+    "qcAsrTitle": "ASR text check (QC)",
+    "qcAsrHint": "Auto-verify the voiceover via ASR (turning off speeds up synthesis)",
+    "qcAsrTooltip": "Auto-check the recognized speech via Whisper ASR to catch silence and glitches",
+    "qcDurTitle": "Phrase duration control (Stretch QC)",
+    "qcDurHint": "Adjusts timing and max stretch of the audio",
+    "qcDurTooltip": "Adjust speed and timing control for the audio within the subtitle's time box",
+    "multitakeTitle": "Multi-take selection (3 takes)",
+    "multitakeHint": "3 voiceover variants — picks the best fit by timing (slower but higher quality)",
+    "multitakeTooltip": "Generate 3 voiceover variants per phrase and automatically pick the best fit by timing",
+    "speechRateTitle": "Dynamic speech rate (Speech Rate TTS)",
+    "speechRateHint": "Adapts the model's speaking pace to fit the text length in the time window",
+    "speechRateTooltip": "Dynamically adapt the neural net's generation pace to the text length and available time slot",
+    "emoRefTitle": "Emotional scene reference (Emo-Ref)",
+    "emoRefHint": "Copies the intonation, emotion and delivery of the original scene",
+    "emoRefTooltip": "Carry emotion, intonation and delivery straight from the original scene audio",
+    "breathTitle": "Insert breaths between phrases",
+    "breathHint": "Adds natural soft breaths in pauses to make speech feel alive",
+    "breathTooltip": "Automatically insert quiet natural breaths in the pauses between lines"
   },
   "help": {
     "title": "About Dub Studio",
@@ -332,7 +373,8 @@
     "done": "Done",
     "error": "Error",
     "play": "Play",
-    "pause": "Pause"
+    "pause": "Pause",
+    "gb": "GB"
   },
   "hotkeys": {
     "title": "Keyboard shortcuts",
@@ -409,7 +451,13 @@
     "burn": "On video",
     "burnHint": "Burn subtitles/titles onto the video (off = clean video, e.g. dub without subtitles)",
     "funny": "Funny remix",
-    "voiceHint": "Choose voice: clone / auto-cast / from pack"
+    "voiceHint": "Choose voice: clone / auto-cast / from pack",
+    "duck": "Duck the background under the voice",
+    "duckHint": "Lower the background under the voice in the dub. Off — background at full volume.",
+    "duckTooltip": "Ducking: background quieter under the dub's speech. Off — background stays full.",
+    "subBlur": "Blurred backdrop under subtitles",
+    "subBlurHint": "Blurred backdrop under subtitles for readability. Off — text with no backdrop.",
+    "subBlurTooltip": "Blurred backdrop under subtitles. Off — no backdrop."
   },
   "audio": {
     "onlyTitle": "Audio-only project",
@@ -473,6 +521,7 @@
     "contentAuto": "Auto",
     "contentReal": "Real faces",
     "contentAnime": "Cartoon / anime",
+    "autocastByGender": "— auto-cast by gender —",
     "gender": {
       "male": "Male",
       "female": "Female",
@@ -493,5 +542,66 @@
     "empty": "Library is empty — save a cast from the editor.",
     "delete": "Delete profile",
     "deleteConfirm": "Delete this cast profile?"
+  },
+  "cloud": {
+    "enterKey": "Enter your OpenRouter key below (Cloud settings)",
+    "selectTtsModel": "— select TTS model —",
+    "ttsNoRussian": "⚠ This model doesn't support Russian — pick another one for Russian dubs.",
+    "autocastVoices": "Auto-cast voices",
+    "beta": "beta",
+    "autocastHint": "Voice picked by speaker gender automatically — different speakers get different voices.",
+    "oneVoiceForAll": "— one voice for everyone —",
+    "selectSttModel": "— select STT model —",
+    "transcribeHint": "Cloud transcription — no need to download heavy local ASR models.",
+    "selectTranslateModel": "— select translation model —",
+    "visionToggle": "Vision analysis of frames via cloud",
+    "visionEmpty": "same as translation model",
+    "title": "Cloud settings · OpenRouter",
+    "concurrency": "Parallel streams",
+    "concurrencyHint": "Chunks across N connections — faster cloud ASR/TTS/translation (1 = no multithreading)",
+    "proxyTitle": "Proxy",
+    "proxyWorks": "Working — HF and OpenRouter reachable via proxy",
+    "proxyHfDown": "model downloads (HF)",
+    "proxyUnreachable": "Unreachable via proxy",
+    "proxyServices": "services",
+    "proxyTestFailed": "Couldn't test the proxy",
+    "proxyAll": "Proxy all traffic",
+    "proxyAllHint": "Turn on if direct model downloads or OpenRouter aren't working",
+    "test": "Test",
+    "proxyProtoHint": "Supports HTTP/HTTPS/SOCKS5. Applies immediately to model downloads and cloud.",
+    "keySaved": "Key works — saved",
+    "keyRejected": "Key rejected by OpenRouter",
+    "keyUnavailable": "OpenRouter unavailable",
+    "keyLabel": "OpenRouter key",
+    "keyHint": "for cloud engines (translation / TTS)",
+    "pickedCloudPre": "Picked",
+    "pickedCloudWord": "Cloud",
+    "pickedCloudPost": "and entered a key? You can skip downloading the heavy local models below — translation and voicing will go through OpenRouter."
+  },
+  "hwPreset": {
+    "title": "Hardware preset",
+    "noGpu": "No NVIDIA GPU found",
+    "ram": "RAM"
+  },
+  "timeline": {
+    "title": "Audio & subtitle timeline",
+    "zoomOut": "Zoom out",
+    "zoomIn": "Zoom in",
+    "editStart": "Edit start",
+    "playLine": "Play this line",
+    "editEnd": "Edit end"
+  },
+  "cmdPalette": {
+    "placeholder": "⌘K  —  commands…"
+  },
+  "dock": {
+    "toHeader": "Dock to header"
+  },
+  "resMon": {
+    "pop": "Pop out resource monitor",
+    "resources": "Resources",
+    "power": "Power",
+    "watt": "W",
+    "process": "Process"
   }
 }

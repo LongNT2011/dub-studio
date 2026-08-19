@@ -136,7 +136,7 @@ fn ensure_ort_dylib() {
 pub enum AsrError {
     #[error("parakeet: {0}")]
     Parakeet(String),
-    #[error("не удалось прочитать wav {0}: {1}")]
+    #[error("couldn't read wav {0}: {1}")]
     WavRead(String, String),
     #[error("io: {0}")]
     Io(String),
@@ -358,7 +358,7 @@ impl Asr {
             let _ = h.join();
         }
         if failed.load(std::sync::atomic::Ordering::Relaxed) {
-            return Err(AsrError::Parakeet("параллельный оконный прогон не удался (фолбэк на последовательный)".into()));
+            return Err(AsrError::Parakeet("parallel windowed run failed (falling back to sequential)".into()));
         }
         let slots = std::sync::Arc::try_unwrap(results)
             .map_err(|_| AsrError::Parakeet("results arc".into()))?
@@ -405,7 +405,7 @@ impl Asr {
         wav: impl AsRef<Path>,
         turns: &[Turn],
     ) -> Result<Vec<SpeakerSegment>, AsrError> {
-        eprintln!("[asr] Parakeet transcribe_turns: {} реплик, wav={}", turns.len(), wav.as_ref().display());
+        eprintln!("[asr] Parakeet transcribe_turns: {} line(s), wav={}", turns.len(), wav.as_ref().display());
         let (audio, sr) = load_wav_16k_mono(wav.as_ref())?;
         let min_len = (0.2 * sr as f64) as usize;
         let mut out = Vec::new();

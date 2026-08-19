@@ -181,7 +181,7 @@ impl WhisperAsr {
                     let words = match eng.run_words(&p, &lang, Some(threads_per)) {
                         Ok(w) => w,
                         Err(_) => eng.run_words(&p, &lang, Some(threads_per)).map_err(|e| {
-                            AsrError::Parakeet(format!("whisper окно {i} (offset {off:.0}s): {e}"))
+                            AsrError::Parakeet(format!("whisper window {i} (offset {off:.0}s): {e}"))
                         })?,
                     };
                     Ok(words
@@ -203,7 +203,7 @@ impl WhisperAsr {
                     }
                     Err(_) => {
                         let _ = std::fs::remove_dir_all(&tmp_dir);
-                        return Err(AsrError::Parakeet("whisper: паника окна".into()));
+                        return Err(AsrError::Parakeet("whisper: window panicked".into()));
                     }
                 }
             }
@@ -305,7 +305,7 @@ impl WhisperAsr {
             let mut tail: Vec<&str> = stderr.lines().chain(stdout.lines()).rev().take(10).collect();
             tail.reverse();
             return Err(AsrError::Parakeet(format!(
-                "whisper код {:?}: {}",
+                "whisper code {:?}: {}",
                 out.status.code(),
                 tail.join(" | ")
             )));
@@ -317,7 +317,7 @@ impl WhisperAsr {
             .flatten()
             .map(|e| e.path())
             .find(|p| p.extension().and_then(|s| s.to_str()) == Some("json"))
-            .ok_or_else(|| AsrError::Parakeet("whisper: нет JSON-вывода".into()))?;
+            .ok_or_else(|| AsrError::Parakeet("whisper: no JSON output".into()))?;
         let txt = std::fs::read_to_string(&json_path)
             .map_err(|e| AsrError::WavRead(json_path.display().to_string(), e.to_string()))?;
         let words = parse_whisper_json(&txt);
@@ -413,7 +413,7 @@ impl AsrEngine for WhisperAsr {
     /// репликам (по середине слова во временном окне реплики; слово вне всех окон -> ближайшая реплика),
     /// внутри каждой — обычная сегментация. Времена уже абсолютные.
     fn transcribe_turns(&mut self, wav: &Path, turns: &[Turn], lang: &str) -> Result<Vec<SpeakerSegment>, AsrError> {
-        eprintln!("[asr] Whisper transcribe_turns: {} реплик, wav={}", turns.len(), wav.display());
+        eprintln!("[asr] Whisper transcribe_turns: {} line(s), wav={}", turns.len(), wav.display());
         let words = self.run_words_auto(wav, lang)?;
         if turns.is_empty() {
             // нет реплик -> single-speaker (0), как fallback

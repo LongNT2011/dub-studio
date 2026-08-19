@@ -19,17 +19,17 @@ mod wav;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SepError {
-    #[error("движок сепарации не найден: {0}")]
+    #[error("separation engine not found: {0}")]
     EngineMissing(PathBuf),
-    #[error("модель сепарации не найдена: {0}")]
+    #[error("separation model not found: {0}")]
     ModelMissing(PathBuf),
-    #[error("запуск движка: {0}")]
+    #[error("launching engine: {0}")]
     Spawn(String),
-    #[error("движок завершился с ошибкой: {0}")]
+    #[error("engine exited with an error: {0}")]
     EngineFailed(String),
-    #[error("движок не создал вокал-стем: {0}")]
+    #[error("engine didn't produce a vocal stem: {0}")]
     NoOutput(PathBuf),
-    #[error("аудио I/O: {0}")]
+    #[error("audio I/O: {0}")]
     Wav(String),
 }
 
@@ -259,7 +259,7 @@ fn run_cli(cli: &Path, model: &Path, input: &Path, output: &Path) -> Result<(), 
         let mut tail: Vec<&str> = stderr.lines().chain(stdout.lines()).rev().take(8).collect();
         tail.reverse();
         return Err(SepError::EngineFailed(format!(
-            "код {:?}: {}",
+            "code {:?}: {}",
             out.status.code(),
             tail.join(" | ")
         )));

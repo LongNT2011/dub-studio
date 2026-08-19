@@ -23,57 +23,57 @@ pub struct Preset {
 pub const PRESETS: &[Preset] = &[
     Preset {
         id: "rtx5090",
-        title: "RTX 5090 (32 ГБ)",
-        subtitle: "Максимальное качество — топовые кванты локально",
+        title: "RTX 5090 (32 GB)",
+        subtitle: "Maximum quality — top quants, locally",
         min_vram_gb: 30.0,
         keys: &[("tts", "q8_0"), ("mt", "q8_0"), ("asr_engine", "parakeet"), ("local_backend", "gpu"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
     },
     Preset {
         id: "rtx4090",
-        title: "RTX 4090 (24 ГБ)",
-        subtitle: "Максимальное качество — топовые кванты локально",
+        title: "RTX 4090 (24 GB)",
+        subtitle: "Maximum quality — top quants, locally",
         min_vram_gb: 22.0,
         keys: &[("tts", "q8_0"), ("mt", "q8_0"), ("asr_engine", "parakeet"), ("local_backend", "gpu"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
     },
     Preset {
         id: "gpu16",
-        title: "GPU 16 ГБ",
-        subtitle: "Высокое качество (4080/4070 Ti и подобные)",
+        title: "GPU 16 GB",
+        subtitle: "High quality (4080/4070 Ti and similar)",
         min_vram_gb: 15.0,
         keys: &[("tts", "q8_0"), ("mt", "q6_k"), ("asr_engine", "parakeet"), ("local_backend", "gpu"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
     },
     Preset {
         id: "gpu12",
-        title: "GPU 12 ГБ",
-        subtitle: "Сбалансированно (3060/4070 и подобные)",
+        title: "GPU 12 GB",
+        subtitle: "Balanced (3060/4070 and similar)",
         min_vram_gb: 11.0,
         keys: &[("tts", "q6_k"), ("mt", "q5_0"), ("asr_engine", "parakeet"), ("local_backend", "gpu"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
     },
     Preset {
         id: "gpu8",
-        title: "GPU 8 ГБ",
-        subtitle: "Экономный — лёгкие кванты (3060 Ti/4060)",
+        title: "GPU 8 GB",
+        subtitle: "Economical — light quants (3060 Ti/4060)",
         min_vram_gb: 7.0,
         keys: &[("tts", "q4_k_m"), ("mt", "q4_0"), ("asr_engine", "parakeet"), ("local_backend", "gpu"), ("or_llm_on", "0"), ("or_vision_on", "0"), ("or_tts_on", "0")],
     },
     Preset {
         id: "weak-nvidia-cloud",
-        title: "Слабая NVIDIA + облако",
-        subtitle: "Тяжёлое (перевод/vision/озвучка) в OpenRouter, сепарация и ASR на вашей GPU",
+        title: "Weak NVIDIA + cloud",
+        subtitle: "Heavy stages (translation/vision/voicing) on OpenRouter, separation and ASR on your GPU",
         min_vram_gb: 0.0,
         keys: &[("local_backend", "gpu"), ("or_llm_on", "1"), ("or_vision_on", "1"), ("or_tts_on", "1")],
     },
     Preset {
         id: "cloud",
-        title: "CPU + облако (без NVIDIA)",
-        subtitle: "Тяжёлое в OpenRouter, локальное на процессоре — запускается без видеокарты (нужен ключ)",
+        title: "CPU + cloud (no NVIDIA)",
+        subtitle: "Heavy stages on OpenRouter, local on CPU — runs without a GPU (needs a key)",
         min_vram_gb: 0.0,
         keys: &[("local_backend", "cpu"), ("or_llm_on", "1"), ("or_vision_on", "1"), ("or_tts_on", "1")],
     },
     Preset {
         id: "custom",
-        title: "Пользовательский",
-        subtitle: "Настрою каждый параметр вручную",
+        title: "Custom",
+        subtitle: "Configure every setting by hand",
         min_vram_gb: -1.0,
         keys: &[],
     },
@@ -106,11 +106,11 @@ pub fn recommend() -> HardwareRecommendation {
     let name_lc = hw.gpu_name.to_lowercase();
 
     let (recommended, reason) = if !has_gpu {
-        ("cloud", "NVIDIA GPU не найдена — режим «CPU + облако»: тяжёлое в OpenRouter, локальное на процессоре (медленнее, но работает)".to_string())
+        ("cloud", "No NVIDIA GPU found — \"CPU + cloud\" mode: heavy stages on OpenRouter, local on CPU (slower, but works)".to_string())
     } else if name_lc.contains("5090") {
-        ("rtx5090", format!("Обнаружена {} — максимальные кванты", hw.gpu_name))
+        ("rtx5090", format!("Detected {} — top quants", hw.gpu_name))
     } else if name_lc.contains("4090") {
-        ("rtx4090", format!("Обнаружена {} — максимальные кванты", hw.gpu_name))
+        ("rtx4090", format!("Detected {} — top quants", hw.gpu_name))
     } else {
         // По объёму VRAM: берём первый пресет, чей порог не выше фактического (PRESETS отсортированы по убыванию).
         let pick = PRESETS
@@ -118,8 +118,8 @@ pub fn recommend() -> HardwareRecommendation {
             .filter(|p| p.min_vram_gb >= 0.0 && p.id != "cloud")
             .find(|p| vram_gb >= p.min_vram_gb);
         match pick {
-            Some(p) => (p.id, format!("{} · {:.0} ГБ VRAM — {}", hw.gpu_name, vram_gb, p.title)),
-            None => ("cloud", format!("{} · {:.0} ГБ VRAM маловато для локали — облако надёжнее", hw.gpu_name, vram_gb)),
+            Some(p) => (p.id, format!("{} · {:.0} GB VRAM — {}", hw.gpu_name, vram_gb, p.title)),
+            None => ("cloud", format!("{} · {:.0} GB VRAM is too little for local — cloud is more reliable", hw.gpu_name, vram_gb)),
         }
     };
 
@@ -129,10 +129,10 @@ pub fn recommend() -> HardwareRecommendation {
 /// Применить пресет: записать все его ключи в active.json. «custom» -> ничего (юзер сам). Возвращает
 /// список применённых пар для показа/лога.
 pub fn apply(models_root: &Path, id: &str) -> Result<Vec<(String, String)>, String> {
-    let preset = by_id(id).ok_or_else(|| format!("неизвестный пресет: {id}"))?;
+    let preset = by_id(id).ok_or_else(|| format!("unknown preset: {id}"))?;
     let mut applied = Vec::new();
     for (k, v) in preset.keys {
-        crate::models::set_selection(models_root, k, v).map_err(|e| format!("запись {k}: {e}"))?;
+        crate::models::set_selection(models_root, k, v).map_err(|e| format!("write {k}: {e}"))?;
         applied.push((k.to_string(), v.to_string()));
     }
     Ok(applied)

@@ -86,11 +86,11 @@ mod cache {
         /// вспомогательный; вызывающий может залогировать. Возвращает Result для явности.
         pub fn save(&self, work_dir: &Path) -> Result<(), String> {
             let body = serde_json::to_string_pretty(self)
-                .map_err(|e| format!("сериализация cache.json: {e}"))?;
+                .map_err(|e| format!("serializing cache.json: {e}"))?;
             let final_path = cache_path(work_dir);
             let tmp = final_path.with_extension("json.tmp");
             std::fs::write(&tmp, body.as_bytes())
-                .map_err(|e| format!("запись {}: {e}", tmp.display()))?;
+                .map_err(|e| format!("write {}: {e}", tmp.display()))?;
             std::fs::rename(&tmp, &final_path)
                 .map_err(|e| format!("rename {} -> {}: {e}", tmp.display(), final_path.display()))?;
             Ok(())
@@ -555,7 +555,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
             progress,
             "window_plan",
             &format!(
-                "длинная дорожка {:.0}с: план {} окон (первое ~{:.0}с) — оконный ASR ещё не активен, обработка монолитная",
+                "long track {:.0}s: planned {} window(s) (first ~{:.0}s) — windowed ASR not active yet, processing as one block",
                 meta.duration, plan.n_windows, first
             ),
         );
@@ -571,11 +571,11 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         // resumed:true — SSE-маркер «возобновлено из чекпоинта» (#80); фронт без поля его игнорирует.
         progress(json!({
             "stage": "extract_audio",
-            "msg": "аудио из кэша (источник не менялся) — пропуск ffmpeg",
+            "msg": "audio from cache (source unchanged) — skipping ffmpeg",
             "resumed": true
         }));
     } else {
-        emit(progress, "extract_audio", "извлечение аудио (ffmpeg -> 16k mono)");
+        emit(progress, "extract_audio", "extracting audio (ffmpeg -> 16k mono)");
         media::extract_wav_16k_mono(&paths.input, &vocals16)?;
         cache.write_stage(&paths.work_dir, "extract", &extract_key, &[&vocals16]);
         let _ = cache.save(&paths.work_dir);
@@ -604,14 +604,14 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
             if !cached_voc.is_file() {
                 let audio_hq = paths.work_dir.join("audio_hq.wav");
                 if !audio_hq.is_file() {
-                    emit(progress, "separate", "извлечение аудио 44.1k для сепарации");
+                    emit(progress, "separate", "extracting audio at 44.1k for separation");
                     media::extract_audio(&paths.input, &audio_hq, 44100, 2)?;
                 }
-                emit(progress, "separate", "сепарация вокала (BSRoformer) — чистый голос для диаризации/ASR");
+                emit(progress, "separate", "separating vocals (BSRoformer) — clean voice for diarization/ASR");
                 dub_sep::separate(&audio_hq, &stems, &paths.bsroformer_cli, &paths.bsroformer_model)
                     .map_err(|e| e.to_string())?;
             } else {
-                emit(progress, "separate", "сепарация из кэша (stems уже посчитаны)");
+                emit(progress, "separate", "separation from cache (stems already computed)");
             }
             media::to_16k_mono(&cached_voc, &clean16)?;
             Ok(clean16.clone())
@@ -619,20 +619,20 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         match sep_result {
             Ok(p) => p,
             Err(e) => {
-                emit(progress, "separate", &format!("сепарация не удалась ({e}) — диаризация/ASR по сырому аудио"));
+                emit(progress, "separate", &format!("separation failed ({e}) — diarization/ASR on raw audio"));
                 vocals16.clone()
             }
         }
     } else {
         if want_diar {
-            emit(progress, "separate", "BSRoformer не найден — диаризация/ASR по сырому аудио");
+            emit(progress, "separate", "BSRoformer not found — diarization/ASR on raw audio");
         }
         vocals16.clone()
     };
     bench.stage("diarize");
     // Backend диаризации (onnx CUDA-EP / CPU) — exec_config читает DUB_ASR_BACKEND при создании сессии.
     std::env::set_var("DUB_ASR_BACKEND", crate::models::stage_backend(&paths.models_root, "diar_backend"));
-    emit(progress, "diarize", "диаризация (Sortformer)");
+    emit(progress, "diarize", "diarizing (Sortformer)");
     let diar = if want_diar && paths.sortformer_onnx.is_file() {
         match dub_asr::turns(&asr_wav, &paths.sortformer_onnx, 0.8, 2.5) {
             Ok(d) => Some(d),
@@ -640,7 +640,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
                 emit(
                     progress,
                     "diarize",
-                    &format!("диаризация не удалась ({e}); single-speaker путь"),
+                    &format!("diarization failed ({e}); falling back to single-speaker"),
                 );
                 None
             }
@@ -649,7 +649,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         emit(
             progress,
             "diarize",
-            if !want_diar { "субтитры: без диаризации (whole-clip, как питон)" } else { "sortformer-модель не найдена; single-speaker путь" },
+            if !want_diar { "subtitles: no diarization (whole-clip, matching the Python engine)" } else { "sortformer model not found; falling back to single-speaker" },
         );
         None
     };
@@ -663,11 +663,11 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     //    Импорт: спикеров всё равно раздаём — по максимальному перекрытию реплики с диаризацией.
     let (mut segments, n_spk): (Vec<Segment>, usize) = if let Some(subs_path) = &paths.import_subs {
         let content = std::fs::read_to_string(subs_path)
-            .map_err(|e| format!("чтение субтитров {}: {e}", subs_path.display()))?;
+            .map_err(|e| format!("reading subtitles {}: {e}", subs_path.display()))?;
         let ext = subs_path.extension().and_then(|s| s.to_str()).unwrap_or("srt");
         let cues = crate::subimport::parse(&content, ext);
         if cues.is_empty() {
-            return Err(format!("субтитры не распознаны/пусты: {}", subs_path.display()));
+            return Err(format!("subtitles not recognized / empty: {}", subs_path.display()));
         }
         let turns: &[dub_asr::Turn] = diar.as_ref().map(|d| d.turns.as_slice()).unwrap_or(&[]);
         let segs: Vec<Segment> = cues
@@ -696,15 +696,15 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
             })
             .collect();
         let n = diar.as_ref().map(|d| d.n_speakers).unwrap_or(1).max(1);
-        emit(progress, "asr", &format!("субтитры импортированы: {} реплик, {} спикер(ов)", segs.len(), n));
+        emit(progress, "asr", &format!("subtitles imported: {} line(s), {} speaker(s)", segs.len(), n));
         (segs, n)
     } else if crate::models::openrouter_asr_on(&paths.models_root) {
         // Облачная транскрипция (OpenRouter STT): сегменты из облака, спикеров раздаём диаризацией (как
         // локальный ASR). Тяжёлые Parakeet/Whisper не нужны — облачный пресет для слабых ПК.
         bench.stage("asr");
-        emit(progress, "asr", "транскрипция через облако (OpenRouter STT)");
+        emit(progress, "asr", "transcribing via cloud (OpenRouter STT)");
         let raw = crate::cloud_asr::transcribe(&paths.models_root, &asr_wav, &args.src_lang)
-            .map_err(|e| format!("облачный STT: {e}"))?;
+            .map_err(|e| format!("cloud STT: {e}"))?;
         let turns: &[dub_asr::Turn] = diar.as_ref().map(|d| d.turns.as_slice()).unwrap_or(&[]);
         let nsp = diar.as_ref().map(|d| d.n_speakers).unwrap_or(1).max(1);
         let segs: Vec<Segment> = raw
@@ -723,7 +723,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
                 extra: Default::default(),
             })
             .collect();
-        emit(progress, "asr", &format!("облако: {} реплик, {} спикер(ов)", segs.len(), nsp));
+        emit(progress, "asr", &format!("cloud: {} line(s), {} speaker(s)", segs.len(), nsp));
         (segs, nsp)
     } else {
         // Движок выбран настройкой (Parakeet/Whisper) — analyze не знает деталей (build_engine).
@@ -736,7 +736,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         emit(
             progress,
             "asr",
-            &format!("транскрипция единым прогоном на GPU ({} спикер(ов))", nsp),
+            &format!("transcribing in one GPU pass ({} speaker(s))", nsp),
         );
         let ts = asr
             .transcribe(&asr_wav, &args.src_lang)
@@ -781,7 +781,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         let before = segments.len();
         merge_short_turns(&mut segments);
         if segments.len() != before {
-            emit(progress, "asr", &format!("слияние огрызков: {before} -> {} сегментов", segments.len()));
+            emit(progress, "asr", &format!("merging short fragments: {before} -> {} segment(s)", segments.len()));
         }
     }
 
@@ -793,14 +793,14 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
     if args.casting && paths.import_subs.is_none() {
         let k = crate::casting::recluster_segments(paths, &mut segments, progress);
         if k > 0 {
-            emit(progress, "asr", &format!("персонажей по голосу: {k}"));
+            emit(progress, "asr", &format!("characters split by voice: {k}"));
         }
     }
 
     emit(
         progress,
         "asr",
-        &format!("{} сегментов, {} спикер(ов)", segments.len(), n_spk),
+        &format!("{} segment(s), {} speaker(s)", segments.len(), n_spk),
     );
 
     // Param-хэш ASR в cache.json. Вход = отпечаток источника + движок ASR + src_lang + режим импорта
@@ -833,9 +833,9 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
             progress,
             "asr",
             if segments.is_empty() {
-                "нет речевых сегментов; оставляю оригинальную дорожку (nodub)"
+                "no speech segments; keeping the original track (nodub)"
             } else {
-                "auto: нет дубляж-годной речи -> NODUB (оригинал + локализация экранного текста)"
+                "auto: no dub-worthy speech -> NODUB (original + on-screen text localization)"
             },
         );
     }
@@ -862,7 +862,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
                 proj.audio.translate_style =
                     crate::casting::merge_speech_notes_style(&proj.audio.translate_style, &notes);
                 emit(progress, "translate", &format!(
-                    "описания персонажей из профиля кастинга -> стиль перевода ({} симв.)",
+                    "character descriptions from casting profile -> translation style ({} chars)",
                     proj.audio.translate_style.len()));
             }
         }
@@ -924,9 +924,9 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         ]);
         cache.write_stage(&paths.work_dir, "ocr", &ocr_key, &[]);
     } else if meta.width == 0 || meta.height == 0 {
-        emit(progress, "ocr_detect", "аудио-режим: без видео, детекция экранного текста не нужна");
+        emit(progress, "ocr_detect", "audio mode: no video, no need to detect on-screen text");
     } else {
-        emit(progress, "ocr_detect", "детекция вшитого текста отключена (галочка)");
+        emit(progress, "ocr_detect", "baked-in text detection is off (checkbox)");
     }
 
     // 7b) КАСТИНГ ПЕРСОНАЖЕЙ (#115). ГЕЙТ: только при галочке casting И наличии видео. При выкл — НИ
@@ -943,7 +943,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
             let mut d = proj.audio.content_type.clone();
             if d.is_empty() {
                 if let Some(ct) = crate::translate::classify_content_type_standalone(paths, meta.duration, progress) {
-                    emit(progress, "casting", &format!("тип контента (авто): {ct}"));
+                    emit(progress, "casting", &format!("content type (auto): {ct}"));
                     d = ct;
                 }
             }
@@ -979,7 +979,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
                     missing.sort();
                     missing.dedup();
                     emit(progress, "casting", &format!(
-                        "голоса профиля не найдены в voices/ -> клон: {}", missing.join(", ")));
+                        "profile voices not found in voices/ -> clone: {}", missing.join(", ")));
                 }
                 if vmap.values().any(|v| v.is_some()) {
                     let mut spk_ids: Vec<String> = proj
@@ -997,12 +997,12 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
                     // Считаем по ОТФИЛЬТРОВАННОМУ vmap (не по casting.characters) — иначе персонажи с
                     // отсутствующим в voices/ голосом (сброшены в клон выше) попадают в счётчик.
                     let n = vmap.values().filter(|v| v.is_some()).count();
-                    emit(progress, "casting", &format!("перенесённые голоса профиля применены к дубляжу ({n} персонаж(ей))"));
+                    emit(progress, "casting", &format!("carried-over profile voices applied to the dub ({n} character(s))"));
                 }
             }
         }
     } else if args.casting {
-        emit(progress, "casting", "аудио-режим: без видео, кастинг персонажей не нужен");
+        emit(progress, "casting", "audio mode: no video, no need for character casting");
     }
 
     // 8) финализация кэша: зеркалим param-ключи крупных стадий в project.stage_ckpts (resume работает
@@ -1011,7 +1011,7 @@ pub fn run(args: &AnalyzeArgs, paths: &AnalyzePaths, progress: &Progress) -> Res
         proj.stage_ckpts.insert(stage.clone(), Value::String(entry.param_hash.clone()));
     }
     if let Err(e) = cache.save(&paths.work_dir) {
-        emit(progress, "cache", &format!("не удалось сохранить cache.json: {e} (не критично)"));
+        emit(progress, "cache", &format!("couldn't save cache.json: {e} (not critical)"));
     }
     bench.finish(|m| emit(progress, "bench", m));
 

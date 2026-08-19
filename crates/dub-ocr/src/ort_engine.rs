@@ -104,7 +104,7 @@ impl OnnxModel {
         let (_, out) = outputs
             .iter()
             .next()
-            .ok_or_else(|| "нет выходов".to_string())?;
+            .ok_or_else(|| "no outputs".to_string())?;
         let (shape, data) = out
             .try_extract_tensor::<f32>()
             .map_err(|e| format!("extract: {e}"))?;

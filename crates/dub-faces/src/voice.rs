@@ -70,7 +70,7 @@ impl VoiceEmbedder {
     pub fn embed_wav(&mut self, wav: &Path) -> Result<Vec<f32>, String> {
         let (samples, sr) = read_wav_mono_f32(wav)?;
         if sr != SAMPLE_RATE {
-            return Err(format!("voice: ждём {SAMPLE_RATE}Гц, получено {sr}"));
+            return Err(format!("voice: expected {SAMPLE_RATE}Hz, got {sr}"));
         }
         self.embed_samples(&samples)
     }
@@ -81,7 +81,7 @@ impl VoiceEmbedder {
         let feats = self.mel.fbank(samples); // [T][80], уже с CMN
         let t = feats.len();
         if t == 0 {
-            return Err("voice: клип короче одного кадра fbank".into());
+            return Err("voice: clip shorter than one fbank frame".into());
         }
         // Вход графа WeSpeaker — ровно 3-D [1,T,80] (b,t,mel). Строим row-major flat и отдаём run_3d.
         let mut flat = Vec::with_capacity(t * NUM_MEL_BINS);

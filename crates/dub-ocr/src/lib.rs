@@ -102,7 +102,7 @@ fn extract_frames(video: &Path, out_dir: &Path, fps: i32) -> Result<Vec<PathBuf>
         .map_err(|e| format!("ffmpeg frames: {e}"))?;
     if !out.status.success() {
         return Err(format!(
-            "ffmpeg frames код {:?}: {}",
+            "ffmpeg frames code {:?}: {}",
             out.status.code(),
             String::from_utf8_lossy(&out.stderr).chars().rev().take(400).collect::<String>()
         ));

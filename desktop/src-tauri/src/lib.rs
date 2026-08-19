@@ -115,13 +115,13 @@ fn spawn_update_check(app: tauri::AppHandle, portable: bool) {
             let open = app
                 .dialog()
                 .message(format!(
-                    "Доступна новая версия {ver}. Открыть страницу загрузки?"
+                    "Version {ver} is available. Open the download page?"
                 ))
-                .title("Обновление Dub Studio")
+                .title("Dub Studio update")
                 .kind(MessageDialogKind::Info)
                 .buttons(MessageDialogButtons::OkCancelCustom(
-                    "Открыть".into(),
-                    "Позже".into(),
+                    "Open".into(),
+                    "Later".into(),
                 ))
                 .blocking_show();
             if open {
@@ -133,13 +133,13 @@ fn spawn_update_check(app: tauri::AppHandle, portable: bool) {
         let yes = app
             .dialog()
             .message(format!(
-                "Доступна новая версия {ver}. Обновить сейчас? Приложение перезапустится."
+                "Version {ver} is available. Update now? The app will restart."
             ))
-            .title("Обновление Dub Studio")
+            .title("Dub Studio update")
             .kind(MessageDialogKind::Info)
             .buttons(MessageDialogButtons::OkCancelCustom(
-                "Обновить".into(),
-                "Позже".into(),
+                "Update".into(),
+                "Later".into(),
             ))
             .blocking_show();
         if !yes {
@@ -151,8 +151,8 @@ fn spawn_update_check(app: tauri::AppHandle, portable: bool) {
             }
             Err(e) => {
                 app.dialog()
-                    .message(format!("Не удалось обновить: {e}"))
-                    .title("Обновление Dub Studio")
+                    .message(format!("Update failed: {e}"))
+                    .title("Dub Studio update")
                     .kind(MessageDialogKind::Error)
                     .blocking_show();
             }

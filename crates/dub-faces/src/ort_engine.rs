@@ -78,7 +78,7 @@ impl OnnxModel {
     pub fn run_single(&mut self, input: Array4<f32>) -> Result<(Vec<usize>, Vec<f32>), String> {
         let mut outs = self.run(input)?;
         if outs.is_empty() {
-            return Err("нет выходов".to_string());
+            return Err("no outputs".to_string());
         }
         Ok(outs.swap_remove(0))
     }
@@ -97,7 +97,7 @@ impl OnnxModel {
             .session
             .run(ort::inputs![tensor])
             .map_err(|e| format!("run: {e}"))?;
-        let (_name, v) = outputs.iter().next().ok_or_else(|| "нет выходов".to_string())?;
+        let (_name, v) = outputs.iter().next().ok_or_else(|| "no outputs".to_string())?;
         let (oshape, odata) = v
             .try_extract_tensor::<f32>()
             .map_err(|e| format!("extract: {e}"))?;

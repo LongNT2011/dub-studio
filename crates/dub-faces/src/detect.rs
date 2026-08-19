@@ -96,7 +96,7 @@ impl Scrfd {
 
         let outs = self.model.run(blob)?;
         if outs.len() < 9 {
-            return Err(format!("SCRFD: ждём 9 выходов, получили {}", outs.len()));
+            return Err(format!("SCRFD: expected 9 outputs, got {}", outs.len()));
         }
 
         // Сгруппировать выходы по последней размерности (1=score, 4=bbox, 10=kps) — устойчиво к

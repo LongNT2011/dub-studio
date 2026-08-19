@@ -138,7 +138,7 @@ pub fn save_profile(
 ) -> Result<usize, String> {
     let src_casting = proj_dir.join("casting.json");
     let casting = dub_faces::load_casting(&src_casting)
-        .ok_or_else(|| "в проекте нет casting.json (кастинг не запускался)".to_string())?;
+        .ok_or_else(|| "project has no casting.json (casting was never run)".to_string())?;
     let dir = profile_dir(repo_root, slug);
     let avatars = dir.join("avatars");
     let voices = dir.join("voices");
@@ -190,7 +190,7 @@ pub fn delete_profile(repo_root: &Path, slug: &str) -> Result<(), String> {
     if !dir.exists() {
         return Ok(());
     }
-    std::fs::remove_dir_all(&dir).map_err(|e| format!("удалить профиль {slug}: {e}"))
+    std::fs::remove_dir_all(&dir).map_err(|e| format!("delete profile {slug}: {e}"))
 }
 
 /// Валидный slug для ФС-доступа (защита от traversal): непусто, только [a-z0-9-].

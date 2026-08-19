@@ -136,7 +136,7 @@ impl LvFace {
     /// Эмбеддинг для УЖЕ выровненного 112x112 RGB. Нормализация (px/255-0.5)/0.5. L2-норм на выходе.
     pub fn embed_aligned(&mut self, aligned: &RgbImage) -> Result<Vec<f32>, String> {
         if aligned.width() != ALIGN as u32 || aligned.height() != ALIGN as u32 {
-            return Err("embed: ждём 112x112".into());
+            return Err("embed: expected 112x112".into());
         }
         let mut blob = Array4::<f32>::zeros((1, 3, ALIGN, ALIGN));
         for y in 0..ALIGN {

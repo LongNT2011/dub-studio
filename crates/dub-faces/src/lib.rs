@@ -62,7 +62,7 @@ pub fn match_cos_threshold() -> f32 {
 /// Ошибки кастинг-пайплайна.
 #[derive(thiserror::Error, Debug)]
 pub enum FacesError {
-    #[error("модель не найдена: {0}")]
+    #[error("model not found: {0}")]
     ModelMissing(String),
     #[error("ffmpeg: {0}")]
     Ffmpeg(String),

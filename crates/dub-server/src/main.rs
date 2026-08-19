@@ -38,7 +38,7 @@ async fn main() -> anyhow::Result<()> {
     let app = build_router(state);
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!("слушаю http://{addr}");
+    tracing::info!("listening on http://{addr}");
     axum::serve(listener, app).await?;
     Ok(())
 }
